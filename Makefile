@@ -66,6 +66,8 @@ test: $(TARGET_LINUX)
 	./$(TARGET_LINUX) --selftest
 	@echo "=== Running decompression and integrity test on reference corpus ==="
 	python3 tests/test_all.py ./$(TARGET_LINUX)
+	@echo "=== Running round-trip compression test suite ==="
+	python3 tests/test_roundtrip.py ./$(TARGET_LINUX)
 	@echo "All tests passed successfully."
 
 deb:
