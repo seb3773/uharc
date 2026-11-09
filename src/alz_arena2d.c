@@ -1,0 +1,229 @@
+/*
+ * alz_arena2d.c - layer (2) of the scorer delta-2D ALZ : arena adaptative of frequencies.
+ * faithful port UHARC 0.6b. Specification and validation : UHARC_RE_REPORT.md 13.82..90.
+ * rule cold/warm + counter secondaire + rescale, validated pos-has-pos 80/80 contre the
+ * ground-truth legacy (research/gt_scorer/image_raw_ctx_80.log + image_raw_symbolcost_200.log).
+ * NO-WIRED : no effect on l'encoding standard (gated, self-teste).
+ */
+#include "alz_arena2d.h"
+#include "alz_score.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void alz_arena2d_init(alz_arena2d_t *a, uint16_t default_inc)
+{
+    uint32_t i;
+    memset(a->freq, 0, sizeof(a->freq));
+    for (i = 0; i < ALZ_ARENA2D_MAX_ROW; i++) {
+        a->total[i]   = (uint16_t)ALZ_ARENA2D_INIT_VAL;
+        a->counter[i] = (uint16_t)ALZ_ARENA2D_INIT_VAL;
+        a->promo[i]   = default_inc;
+        a->aging[i]   = 256u;   /* C6-ter(c) cold init aging = 0x100 */
+        a->mtot[i]    = 0u;
+    }
+    a->aging_on = 0;   /* default-OFF : master_learn keeps son behavior threshold single */
+}
+
+void alz_arena2d_set_inc(alz_arena2d_t *a, uint32_t relrow, uint16_t inc)
+{
+    if (relrow < ALZ_ARENA2D_MAX_ROW)
+        a->promo[relrow] = inc;
+}
+
+/*
+ * Rescale of has line (0x414590, 13.84). Triggers when total[row] >= 0x4000.
+ *   - each freq of the line : arrondi towards PAIR then halving  (v = (v & ~1) >> 1) ;
+ *   - sum some freq halvees accumulee ;
+ *   - counter[row] = (counter[row] >> 2) + 1   (counter secondaire decroit /4) ;
+ *   - total[row]   = somme_freqs_halvees + counter[row].
+ */
+void alz_arena2d_rescale(alz_arena2d_t *a, uint32_t relrow)
+{
+    uint32_t base, j;
+    uint32_t sum = 0;
+    if (relrow >= ALZ_ARENA2D_MAX_ROW)
+        return;
+    base = relrow << 8;
+    for (j = 0; j < 256u; j++) {
+        uint32_t v = a->freq[base + j];
+        v &= ~1u;          /* rendre pair (FLOOR, 13.84/90 GT 80/80 ; != 0x40fe90 budget) */
+        v >>= 1;           /* halving */
+        a->freq[base + j] = (uint16_t)v;
+        sum += v;
+    }
+    a->counter[relrow] = (uint16_t)((a->counter[relrow] >> 2) + 1u);
+    a->total[relrow]   = (uint16_t)(sum + a->counter[relrow]);
+}
+
+/*
+ * Rescale MASTER (0x40ffa0 + branch >16 en 0x4100b1, 13.727). Triggers when
+ * total[row] >= 0x4000 during l'learning d'emission sure the master.
+ *   - each freq of the line : f>16 -> f>>=1 ; otherwise f=0   (0x40ffd0 ja>0x10 -> 0x4100b1 shr,1 ;
+ *     0x40ffd6 <=16 -> mov WORD,eax,di(=0)) ;
+ *   - total[row] = Sigma f some columns residuelles (no +counter, contrairement au working).
+ * The rebuild of l'tree Fenwick [0x4373c8] (0x40ffe0.. rep movs) is out portee of the score.
+ */
+void alz_arena2d_rescale_master(alz_arena2d_t *a, uint32_t relrow)
+{
+    uint32_t base, j;
+    uint32_t sum = 0;
+    if (relrow >= ALZ_ARENA2D_MAX_ROW)
+        return;
+    base = relrow << 8;
+    for (j = 0; j < 256u; j++) {
+        uint32_t v = a->freq[base + j];
+        v = (v > 16u) ? (v >> 1) : 0u;    /* >16 -> halving ; <=16 -> zero (0x40ffd6) */
+        a->freq[base + j] = (uint16_t)v;
+        sum += v;                          /* edx accumule the new total (0x4100bc) */
+    }
+    a->total[relrow] = (uint16_t)sum;      /* total = Sigma f, without counter */
+}
+
+/*
+ * Learn d'emission master (coeur of 0x4111a0, 13.727). rule cold/warm identical has
+ * alz_arena2d_score (for ISOLER leffet of the law of rescale) but rescale MASTER.
+ * Uses by emiprod (gated) for reconstruire master@bloc1.
+ */
+uint32_t alz_arena2d_master_learn(alz_arena2d_t *a, uint32_t relrow, uint32_t delta)
+{
+    uint32_t ctx, T, f, inc;
+    if (relrow >= ALZ_ARENA2D_MAX_ROW) relrow = ALZ_ARENA2D_MAX_ROW - 1u;
+    delta &= 0xffu;
+    ctx   = (relrow << 8) | delta;
+    inc   = a->promo[relrow];              /* weight by row = WORD[row*2+0x45e4c0] */
+    T     = a->total[relrow];
+    f     = a->freq[ctx];
+    /* [GATED aging_on, C6-ter] decrement of the budget master before update : aging -= (master_total + freq_AVANT) */
+    if (a->aging_on)
+        a->aging[relrow] -= (a->mtot[relrow] + f);
+    if (f == 0u) {                         /* COLD */
+        a->freq[ctx]      = (uint16_t)(f + inc);
+        a->counter[relrow]= (uint16_t)(a->counter[relrow] + inc);
+        a->total[relrow]  = (uint16_t)(T + 2u * inc);
+        if (a->aging_on) a->mtot[relrow] += inc;   /* master_total += bx (branch cold 0x412169) */
+    } else {                               /* WARM */
+        a->freq[ctx]     = (uint16_t)(f + inc);
+        a->total[relrow] = (uint16_t)(T + inc);
+    }
+    if (a->aging_on) {
+        /* double porte C6-ter : root(=Sigmafreq line) + master_total >= 0x4000  NOW  aging<0 */
+        uint32_t rb = relrow << 8, s = 0u, j;
+        int32_t  ags;
+        for (j = 0; j < 256u; j++) s += a->freq[rb + j];    /* root = Sigmafreq (tree slot[0]) */
+        ags = (int32_t)a->aging[relrow];
+        if (s + a->mtot[relrow] >= ALZ_ARENA2D_RESCALE || ags < 0) {
+            uint32_t sn = 0u;
+            for (j = 0; j < 256u; j++) {                     /* 0x40ffa0 : f>16 -> >>1 otherwise 0 */
+                uint32_t v = a->freq[rb + j];
+                v = (v > 16u) ? (v >> 1) : 0u;
+                a->freq[rb + j] = (uint16_t)v; sn += v;
+            }
+            a->total[relrow] = (uint16_t)sn;                 /* root = Sigmafreq_new */
+            a->mtot[relrow]  = (a->mtot[relrow] + 1u) >> 1;  /* master_total=(mt+1)>>1 (C5-bis/0x41007b-80) */
+            a->aging[relrow] = (a->mtot[relrow] + sn) << 8;  /* re-arm (mt+root)<<8 (0x410094/0x4100c3, line>=0x300) */
+        }
+    } else
+    if (a->total[relrow] >= ALZ_ARENA2D_RESCALE)
+        alz_arena2d_rescale_master(a, relrow);
+    return 0;
+}
+
+uint32_t alz_arena2d_score(alz_arena2d_t *a, uint32_t relrow, uint32_t delta, uint32_t *p_total)
+{
+    uint32_t ctx, T, f, num, proba, inc;
+    if (relrow >= ALZ_ARENA2D_MAX_ROW) relrow = ALZ_ARENA2D_MAX_ROW - 1u;
+    delta &= 0xffu;
+    ctx   = (relrow << 8) | delta;
+    inc   = a->promo[relrow];
+    T     = a->total[relrow];        /* total BEFORE update (denominateur of legacy) */
+    f     = a->freq[ctx];
+
+    if (f == 0u) {                   /* --- COLD : this ctx apparait for there 1re fois --- */
+        num = a->counter[relrow];    /* the legacy engine loads eax = counter[row] (0x41552b) */
+        a->freq[ctx]      = (uint16_t)(f + inc);            /* = inc */
+        a->counter[relrow]= (uint16_t)(a->counter[relrow] + inc);
+        a->total[relrow]  = (uint16_t)(T + 2u * inc);       /* freq new + counter */
+    } else {                         /* --- WARM --- */
+        num = f;
+        a->freq[ctx]     = (uint16_t)(f + inc);
+        a->total[relrow] = (uint16_t)(T + inc);
+    }
+
+    if (p_total)
+        *p_total = T;
+
+    proba = (T != 0u) ? ((num << 14) / T) : (ALZ_SCORE_CUM_N - 1u);
+    if (proba >= ALZ_SCORE_CUM_N)
+        proba = ALZ_SCORE_CUM_N - 1u;
+
+    if (a->total[relrow] >= ALZ_ARENA2D_RESCALE)
+        alz_arena2d_rescale(a, relrow);
+
+    return proba;
+}
+
+uint32_t alz_arena2d_cost(alz_arena2d_t *a, uint32_t relrow, uint32_t delta)
+{
+    uint32_t proba = alz_arena2d_score(a, relrow, delta, NULL);
+    return alz_score_proba_to_cost(proba);
+}
+
+/* Accesseur PUR (read-only, no effect of bord, not touche not there rule of score
+ * nor the self-test ARENA 80/80) : frequency current of has ctx (relrow,delta). Enables
+ * at the appelant of detecter has symbole COLD (freq==0, never vu) without the muter. */
+uint32_t alz_arena2d_freq(const alz_arena2d_t *a, uint32_t relrow, uint32_t delta)
+{
+    if (relrow >= ALZ_ARENA2D_MAX_ROW) relrow = ALZ_ARENA2D_MAX_ROW - 1u;
+    return (uint32_t) a->freq[(relrow << 8) | (delta & 0xffu)];
+}
+
+/* ---- Self-test : replays the ground-truth legacy (image.raw, 80 positions). ---- */
+struct alz_arena2d_tv { uint32_t relrow, delta, proba, total; };
+/* Vecteurs d'evolution of the total (2000 positions, couvrant the declenchements of rescale). */
+struct alz_arena2d_tvt { uint32_t relrow, delta, total; };
+
+int alz_arena2d_selftest(void)
+{
+    static const struct alz_arena2d_tv tv[] = {
+#include "alz_arena2d_vecs.inc"
+    };
+    static const struct alz_arena2d_tvt tvt[] = {
+#include "alz_arena2d_total_vecs.inc"
+    };
+    const int n = (int)(sizeof(tv) / sizeof(tv[0]));
+    const int nt = (int)(sizeof(tvt) / sizeof(tvt[0]));
+    alz_arena2d_t a;
+    int fails = 0, i;
+
+    alz_arena2d_init(&a, 32u);   /* promo[row] = 32 (GT 13.90) */
+    for (i = 0; i < n; i++) {
+        uint32_t tot = 0;
+        uint32_t proba = alz_arena2d_score(&a, tv[i].relrow, tv[i].delta, &tot);
+        if (proba != tv[i].proba || tot != tv[i].total) {
+            printf("[ARENA-TEST] FAIL pos%d (rel%u,d%u): got proba=%u total=%u ; exp %u/%u\n",
+                   i, tv[i].relrow, tv[i].delta, proba, tot, tv[i].proba, tv[i].total);
+            fails++;
+            if (fails >= 10) break;
+        }
+    }
+
+    /* Phase 2 : evolution complete of the total sure 2000 positions (re-init, validates the rescale). */
+    alz_arena2d_init(&a, 32u);
+    for (i = 0; i < nt; i++) {
+        uint32_t tot = 0;
+        (void)alz_arena2d_score(&a, tvt[i].relrow, tvt[i].delta, &tot);
+        if (tot != tvt[i].total) {
+            printf("[ARENA-TEST] FAIL total pos%d (rel%u,d%u): got total=%u exp %u\n",
+                   i, tvt[i].relrow, tvt[i].delta, tot, tvt[i].total);
+            fails++;
+            if (fails >= 20) break;
+        }
+    }
+    if (fails == 0)
+        printf("[ARENA-TEST] arena2d OK (proba+total %d/%d ; total %d/%d positions, rescale couvert)\n",
+               n, n, nt, nt);
+    else
+        printf("[ARENA-TEST] %d divergence(s)\n", fails);
+    return fails ? 1 : 0;
+}

@@ -1,0 +1,32 @@
+# Build artifacts & packages
+build/
+dist/
+bin/
+*.o
+*.a
+*.so
+*.deb
+*.tar.gz
+*.zip
+.tmp_*
+/uharc
+/uharc.exe
+/uha_c
+/uha_x
+/uha_ls
+
+# Temporary archives
+*.uha
+!corpus/archives/*.uha
+
+# Local work & reverse-engineering scratch directory
+_work/
+.backup/
+
+# Python cache & temporary files
+__pycache__/
+*.py[cod]
+*$py.class
+*.swp
+*~
+
