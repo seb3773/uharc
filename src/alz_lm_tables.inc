@@ -1,6 +1,6 @@
-/* alz_lm_tables.inc - Tables STATIC of the decider flush legacy 0x412c30 (UHARC 0.6b).
- * DUMPEES AU RUNTIME (winedbg gdb-python) since DGROUP ; voir UHARC_RE_REPORT.md SS13.237-240.
- *   0x437464 mapcls : byte -> class (256 u8) ; loop differee 0x412ded.
+/* alz_lm_tables.inc — Tables STATIQUES du décideur flush legacy 0x412c30 (UHARC 0.6b).
+ * DUMPÉES AU RUNTIME (winedbg gdb-python) depuis DGROUP ; voir UHARC_RE_REPORT.md SS13.237-240.
+ *   0x437464 mapcls : byte -> classe (256 u8) ; boucle differee 0x412ded.
  *   0x439714 t9714  : facteurs normalisation densite (64 u32) ; 0x412f09.
  *   0x439910 t9910  : bonus distance S8c>>19 (8 u32) ; 0x412d20.
  * Sources : _scratch/a5t8cap/tbl_437464.bin, tbl_439714.bin, tbl_439910.bin */

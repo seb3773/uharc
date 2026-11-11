@@ -1065,9 +1065,11 @@ static int encode_literal_cascade_core(ppm_model *m, uint8_t *outp, int *outlen,
           if (u) { int idx = (m->win_pos - m->br18) & m->win_mask; fprintf(stderr, "[CCTX] E pb_gate=%d winpos=%u br18=%u mask=%u idx=%u wval=%u ctx=%d\n", pb_gate, m->win_pos, m->br18, m->win_mask, idx, m->window[idx], c550_ctx); } }
         if (!ppm_c550_encode(m, c550_ctx, 0x301, target, &res))
             return 0;
-        if (getenv("UHA_PPMTRACE") && getenv("UHA_PPMTRACE")[0]=='2')
-            fprintf(stderr, "[TR2 c550enc] tgt=%u ctx=%d c550ctx=%d wpf=%d win=%u\n",
-                    (unsigned)target, ctx, c550_ctx, wp_fired, (unsigned)m->win_pos);
+        { static int pt2 = -1;
+          if (pt2 < 0) { const char *e = getenv("UHA_PPMTRACE"); pt2 = (e && e[0] == '2') ? 1 : 0; }
+          if (pt2)
+              fprintf(stderr, "[TR2 c550enc] tgt=%u ctx=%d c550ctx=%d wpf=%d win=%u\n",
+                      (unsigned)target, ctx, c550_ctx, wp_fired, (unsigned)m->win_pos); }
     }
     if (wp_fired) {
         if (wp_mirror)

@@ -1,38 +1,38 @@
 /*
- * alz_score.h - coeur of the scorer of cost of the model delta-2D ALZ (faithful port UHARC 0.6b).
+ * alz_score.h — coeur du scoreur de coût du modèle delta-2D ALZ (portage fidèle UHARC 0.6b).
  *
- * This module isole there primitve CENTRALE of the scoring by symbole of legacy, localisee en RE :
- *   - scorer delta-2D  @ VA 0x415444 (index 2D = (row<<8)|delta), and son entry by-class
- *     0x414630 (file 0x13a30) - voir UHARC_RE_REPORT.md 13.65/13.66/13.67.
- *   - normalisation of proba 14 bits :  proba = (freq << 14) / total   (`div` unsigned, troncature).
- *   - cost (unites 16-bit) via there table CUMULATIVE extracted :  cost = alz_score_cum[proba].
- *     (table @ DGROUP VA 0x43f154, 16384 words u16, extractible byte-for-byte, 13.66).
+ * Ce module isole la primitve CENTRALE du scoring par symbole du legacy, localisée en RE :
+ *   - scoreur delta-2D  @ VA 0x415444 (index 2D = (row<<8)|delta), et son entry par-classe
+ *     0x414630 (file 0x13a30) — voir UHARC_RE_REPORT.md §13.65/§13.66/§13.67.
+ *   - normalisation de proba 14 bits :  proba = (freq << 14) / total   (`div` unsigned, troncature).
+ *   - coût (unités 16-bit) via la table CUMULATIVE extraite :  coût = alz_score_cum[proba].
+ *     (table @ DGROUP VA 0x43f154, 16384 mots u16, extractible octet-pour-octet, §13.66).
  *
- * STATUT : primitives arithmetiques SPECIFIEES and TESTEES, NO-WIRED (no effect on l'encoding
- * standard). There update d'arena (freq += 0x20) and the rescale (total >= 0x4000 -> halving) are
- * volontairement laisses outside of this socle as long as leur semantique exact n'is not RE (voir
- * 13.67) - for not not encoder d'hypothese no verified.
+ * STATUT : primitives arithmétiques SPÉCIFIÉES et TESTÉES, NON-WIRED (aucun effet sur l'encodage
+ * standard). La mise à jour d'arène (freq += 0x20) et le rescale (total >= 0x4000 → halving) sont
+ * volontairement laissés hors de ce socle tant que leur sémantique exacte n'est pas RE (voir
+ * §13.67) — pour ne pas encoder d'hypothèse non vérifiée.
  */
 #ifndef ALZ_SCORE_H
 #define ALZ_SCORE_H
 
 #include <stdint.h>
 
-/* Nombre d'inputs of the table cumulative (bounds of proba 14 bits, 0..16384 inclus).
- * L'index 16384 is ATTEIGNABLE (freq == total -> proba = (freq<<14)/total = 16384,
- * symbole " certain ", cost = cum[16384] = 1). the legacy engine indexe 0x43f154[proba] without
- * clamp towards the low : there table doit couvrir [0..16384] (13.88, off-by-one fixes). */
+/* Nombre d'entrées de la table cumulative (bornes de proba 14 bits, 0..16384 inclus).
+ * L'index 16384 est ATTEIGNABLE (freq == total -> proba = (freq<<14)/total = 16384,
+ * symbole « certain », coût = cum[16384] = 1). Le legacy indexe 0x43f154[proba] sans
+ * clamp vers le bas : la table doit couvrir [0..16384] (§13.88, off-by-one corrige). */
 #define ALZ_SCORE_CUM_N 16385u
 
-/* Shift of normalisation of proba (14 bits), conforme to legacy (`shl $0xe`). */
+/* Décalage de normalisation de proba (14 bits), conforme au legacy (`shl $0xe`). */
 #define ALZ_SCORE_PROB_SHIFT 14
 
 /*
- * Normalisation of proba 14 bits of legacy : proba = (freq << 14) / total.
- * Division entiere NO signee (troncature), as l'instruction `div` observee.
- * Keeps : total == 0 -> returns ALZ_SCORE_CUM_N - 1 (probe defensive ; not doit not advenir
- * in has state sain now total = sum some frequencies > 0). freq <= total always, therefore
- * proba in [0, 16384] = [0, ALZ_SCORE_CUM_N-1] ; the clamp high not sert qu'at the keeps.
+ * Normalisation de proba 14 bits du legacy : proba = (freq << 14) / total.
+ * Division entière NON signée (troncature), comme l'instruction `div` observée.
+ * Garde : total == 0 → renvoie ALZ_SCORE_CUM_N - 1 (sonde défensive ; ne doit pas advenir
+ * dans un état sain où total = somme des fréquences > 0). freq <= total toujours, donc
+ * proba in [0, 16384] = [0, ALZ_SCORE_CUM_N-1] ; le clamp haut ne sert qu'à la garde.
  */
 static inline uint32_t alz_score_proba(uint32_t freq, uint32_t total)
 {
@@ -46,39 +46,24 @@ static inline uint32_t alz_score_proba(uint32_t freq, uint32_t total)
 }
 
 /*
- * cost 16-bit of has symbole of frequency `freq` in has line of total `total`,
- * via lookup in there table cumulative extracted (alz_score_cum, 13.66).
- * C'is l'operation centrale of the scorer legacy : `mov 0x43f154(,%proba,2),%ax`.
+ * Coût 16-bit d'un symbole de fréquence `freq` dans une ligne de total `total`,
+ * via lookup dans la table cumulative extraite (alz_score_cum, §13.66).
+ * C'est l'opération centrale du scoreur legacy : `mov 0x43f154(,%proba,2),%ax`.
  */
 uint32_t alz_score_cost(uint32_t freq, uint32_t total);
 
 /*
- * cost 16-bit directement has partir of has proba 14 bits already computed (index LUT bounded).
- * Uses by l'arena delta-2D (alz_arena2d) which computes sa clean proba (path cold/warm)
- * and not veut NOT re-diviser. Equivalent strict of `mov 0x43f154(,%proba,2),%ax`.
+ * Coût 16-bit directement à partir d'une proba 14 bits déjà calculée (index LUT borné).
+ * Utilisé par l'arène delta-2D (alz_arena2d) qui calcule sa propre proba (chemin cold/warm)
+ * et ne veut PAS re-diviser. Équivalent strict de `mov 0x43f154(,%proba,2),%ax`.
  */
 uint32_t alz_score_proba_to_cost(uint32_t proba);
 
 /*
- * Self-test deterministe and autonome (gated by env UHA_SCORETEST in uha_c).
- * Verified l'integrite of the table extracted + l'arithmetique proba->cost.
- * returns 0 if OK, no-zero otherwise.
+ * Self-test déterministe et autonome (gated par env UHA_SCORETEST dans uha_c).
+ * Vérifie l'intégrité de la table extraite + l'arithmétique proba→coût.
+ * Renvoie 0 si OK, non-zero sinon.
  */
 int alz_score_selftest(void);
-
-/*
- * [GATED UHA_ALZ_RATIODBG, default-OFF - PROBE K1, NO EMISSIVE] Observation of the ratio
- * which fabrique l'index of the table of cost. `alz_score_proba_to_cost` is the not of
- * passage unique of all term `(counter  14) / sous_compteur` consumes by there table
- * `alz_score_cum` (mirror of `[0x43f154]`) : there probe y memorise, for the single calls
- * accomplis DURING son armement, the number of terms, l'index maximal vu and has histogramme
- * by decades of puissance two.  No threshold of corpus nor of table n'is code here : the
- * bounds which decident (first index now there table rend son maximum, first trou `0x0000`)
- * are DERIVEES of the table by the judge, not recopiees in the port. Out armement : no
- * effet, no write, output muette - the path of cost is strictement unchanged.
- */
-void alz_score_ratio_reset(void);
-void alz_score_ratio_arm(int on);
-void alz_score_ratio_report(const char *file, uint32_t cls, uint32_t n);
 
 #endif /* ALZ_SCORE_H */

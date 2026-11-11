@@ -353,10 +353,12 @@ uint32_t alz_bm_literal_cost_mix(alz_dec *d, int ctx, int ctx2, int sym)
  * There geometrie of context (ctx/ctx2, last/prev, escape) is the mirror strict
  * d'alz_encode_literal. No appele by the path d'emission (b1 = validation
  * isolee) ; branchement prevu en b3. */
-static uint16_t s_warm_freq[ALZ_BM_NCTX][256];
-static uint16_t s_warm_tree[ALZ_BM_NCTX][256];
-static uint16_t s_warm_ew[ALZ_BM_NCTX];
-static uint32_t s_warm_counter[ALZ_BM_NCTX];
+static struct {
+    uint16_t freq[ALZ_BM_NCTX][256];
+    uint16_t tree[ALZ_BM_NCTX][256];
+    uint16_t ew[ALZ_BM_NCTX];
+    uint32_t counter[ALZ_BM_NCTX];
+} *s_warm = NULL;
 
 uint32_t alz_bm_literal_cost_warm(alz_dec *d, const uint8_t *plain,
                                   uint32_t usize, uint32_t pos, uint32_t len)
@@ -370,11 +372,16 @@ uint32_t alz_bm_literal_cost_warm(alz_dec *d, const uint8_t *plain,
         end = usize;
     if (pos >= end)
         return 0;
+    if (!s_warm) {
+        s_warm = malloc(sizeof *s_warm);
+        if (!s_warm)
+            return 0;
+    }
 
-    memcpy(s_warm_freq,   d->bm_freq,   sizeof s_warm_freq);
-    memcpy(s_warm_tree,   d->bm_tree,   sizeof s_warm_tree);
-    memcpy(s_warm_ew,     d->bm_ew,     sizeof s_warm_ew);
-    memcpy(s_warm_counter, d->bm_counter, sizeof s_warm_counter);
+    memcpy(s_warm->freq,    d->bm_freq,    sizeof s_warm->freq);
+    memcpy(s_warm->tree,    d->bm_tree,    sizeof s_warm->tree);
+    memcpy(s_warm->ew,      d->bm_ew,      sizeof s_warm->ew);
+    memcpy(s_warm->counter, d->bm_counter, sizeof s_warm->counter);
 
     d->bm_flag = 0;
     for (p = pos; p < end; p++) {
@@ -397,10 +404,10 @@ uint32_t alz_bm_literal_cost_warm(alz_dec *d, const uint8_t *plain,
         last = sym;
     }
 
-    memcpy(d->bm_freq,    s_warm_freq,   sizeof s_warm_freq);
-    memcpy(d->bm_tree,    s_warm_tree,   sizeof s_warm_tree);
-    memcpy(d->bm_ew,      s_warm_ew,     sizeof s_warm_ew);
-    memcpy(d->bm_counter, s_warm_counter, sizeof s_warm_counter);
+    memcpy(d->bm_freq,    s_warm->freq,    sizeof s_warm->freq);
+    memcpy(d->bm_tree,    s_warm->tree,    sizeof s_warm->tree);
+    memcpy(d->bm_ew,      s_warm->ew,      sizeof s_warm->ew);
+    memcpy(d->bm_counter, s_warm->counter, sizeof s_warm->counter);
     d->bm_flag = (uint8_t)saved_flag;
     d->bm_esc_ctx = saved_esc;
     return cost;

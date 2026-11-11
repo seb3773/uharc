@@ -57,7 +57,7 @@ int ppm_bc1_predecode(ppm_model *m, uint32_t r0, uint32_t r1)
 {
     uint32_t b0, b1, b2, b3, c3, depth, byte_a, byte_b, flag;
     int level;
-    uint32_t rb, c0, c1, c3f, score, best, bh;
+    uint32_t c0, c1, c3f, score, best, bh;
 
     b0 = r0 & 0xFF;
     b1 = (r0 >> 8) & 0xFF;
@@ -98,9 +98,10 @@ int ppm_bc1_predecode(ppm_model *m, uint32_t r0, uint32_t r1)
         flag = (((r0 >> 16) & 0xFFFF) == 0xF6FF) ? 0x100 : 0;
     }
     ppm_bc1_st.ctx[7] = (flag + ((byte_a - byte_b) & 0xFF)) & 0xFFFF;
+    uint8_t *const lvl = ppm_bc1_st.lvl;
     ppm_bc1_f154_pending = 0;
-    if (ppm_bc1_st.lvl)
-        ppm_bc1_st.lvl[rec_base(7, ppm_bc1_st.ctx[7]) + 2] = (uint8_t)((2 * byte_a - byte_b) & 0xFF);
+    if (lvl)
+        lvl[rec_base(7, ppm_bc1_st.ctx[7]) + 2] = (uint8_t)((2 * byte_a - byte_b) & 0xFF);
 
     if (b0 == 0xFF) {
         ppm_bc1_st.ctx[1] += 0x10000;
@@ -112,19 +113,19 @@ int ppm_bc1_predecode(ppm_model *m, uint32_t r0, uint32_t r1)
     ppm_bc1_st.fired393c = 0;
     best = 0;
     bh = 8;
-    if (!ppm_bc1_st.lvl) {
+    if (!lvl) {
         ppm_bc1_st.ring_flag = 1;
         return 0;
     }
     for (level = 0; level <= 7; level++) {
-        rb = rec_base(level, ppm_bc1_st.ctx[level]);
-        c0 = ppm_bc1_st.lvl[rb];
-        c1 = ppm_bc1_st.lvl[rb + 1];
-        c3f = ppm_bc1_st.lvl[rb + 3];
+        const uint8_t *p = lvl + rec_base(level, ppm_bc1_st.ctx[level]);
+        c0 = p[0];
         if (c0 == 0)
             continue;
+        c3f = p[3];
         if (c3f >= 0x80)
             continue;
+        c1 = p[1];
         score = ((c1 << 8) * c3f) / c0;
         if (score > best) {
             best = score;
@@ -138,11 +139,13 @@ int ppm_bc1_predecode(ppm_model *m, uint32_t r0, uint32_t r1)
         return 0;
     }
 
-    rb = rec_base((int)bh, ppm_bc1_st.ctx[bh]);
-    ppm_bc1_st.best_pred = ppm_bc1_st.lvl[rb + 2];
-    ppm_bc1_st.best_flags = ppm_bc1_st.lvl[rb + 3];
-    c0 = ppm_bc1_st.lvl[rb];
-    c1 = ppm_bc1_st.lvl[rb + 1];
+    {
+        const uint8_t *p = lvl + rec_base((int)bh, ppm_bc1_st.ctx[bh]);
+        c0 = p[0];
+        c1 = p[1];
+        ppm_bc1_st.best_pred = p[2];
+        ppm_bc1_st.best_flags = p[3];
+    }
     ppm_bc1_st.best_c0 = (uint8_t)(c0 & 0xFF);
     ppm_bc1_st.best_c1 = (uint8_t)(c1 & 0xFF);
 
@@ -236,24 +239,25 @@ int ppm_bc1_ring_encode(ppm_model *m, uint32_t m0, uint32_t m1, int hit)
 void ppm_bc1_post_update(ppm_model *m, uint8_t sym)
 {
     int level;
-    uint32_t rb, rp, hit;
+    uint32_t rp, hit;
     uint8_t c0, c1, c2, c3;
+    uint8_t *const lvl = ppm_bc1_st.lvl;
 
-    if (!ppm_bc1_st.lvl)
+    if (!lvl)
         return;
     for (level = 0; level <= 7; level++) {
-        rb = rec_base(level, ppm_bc1_st.ctx[level]);
-        c0 = ppm_bc1_st.lvl[rb];
+        uint8_t *const p = lvl + rec_base(level, ppm_bc1_st.ctx[level]);
+        c0 = p[0];
         if (c0 == 0) {
-            ppm_bc1_st.lvl[rb] = 2;
-            ppm_bc1_st.lvl[rb + 1] = 2;
-            ppm_bc1_st.lvl[rb + 2] = sym;
-            ppm_bc1_st.lvl[rb + 3] = 0;
+            p[0] = 2;
+            p[1] = 2;
+            p[2] = sym;
+            p[3] = 0;
             continue;
         }
+        c1 = p[1];
+        c2 = p[2];
         if (level == ppm_bc1_st.last_best) {
-            c1 = ppm_bc1_st.lvl[rb + 1];
-            c2 = ppm_bc1_st.lvl[rb + 2];
             if (ppm_bc1_ring_ran && ((uint32_t)c0 + (uint32_t)c1) != 0) {
                 if (sym == c2) {
                     m->flag3943 = 0;
@@ -274,34 +278,31 @@ void ppm_bc1_post_update(ppm_model *m, uint8_t sym)
                 }
             }
         }
-        c3 = ppm_bc1_st.lvl[rb + 3] & 0x7F;
-        c2 = ppm_bc1_st.lvl[rb + 2];
-        ppm_bc1_st.lvl[rb + 3] = c3;
-        c0 = ppm_bc1_st.lvl[rb];
-        c1 = ppm_bc1_st.lvl[rb + 1];
+        c3 = p[3] & 0x7F;
+        p[3] = c3;
         if (sym == c2) {
             if (c1 >= 0xFE) {
                 c0 = (uint8_t)((c0 + 1) >> 1);
                 c1 = (uint8_t)((c1 + 1) >> 1);
             }
             c1++;
-            ppm_bc1_st.lvl[rb] = c0;
-            ppm_bc1_st.lvl[rb + 1] = c1;
+            p[0] = c0;
+            p[1] = c1;
             if (c3 < 0x7F)
-                ppm_bc1_st.lvl[rb + 3] = (uint8_t)(c3 + 1);
+                p[3] = (uint8_t)(c3 + 1);
         } else {
             if (c0 >= 0xFE) {
                 c0 = (uint8_t)((c0 + 1) >> 1);
                 c1 = (uint8_t)((c1 + 1) >> 1);
             }
             c0++;
-            ppm_bc1_st.lvl[rb] = c0;
-            ppm_bc1_st.lvl[rb + 1] = c1;
+            p[0] = c0;
+            p[1] = c1;
             if (c3 < 2) {
-                ppm_bc1_st.lvl[rb + 2] = sym;
-                ppm_bc1_st.lvl[rb + 3] = 0x80;
+                p[2] = sym;
+                p[3] = 0x80;
             } else
-                ppm_bc1_st.lvl[rb + 3] = (uint8_t)((c3 >> 1) + 0x80);
+                p[3] = (uint8_t)((c3 >> 1) + 0x80);
         }
     }
 }

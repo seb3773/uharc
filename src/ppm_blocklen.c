@@ -174,6 +174,14 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
      * (0x422cce `inc ebp` / 0x422cdb `cmp ebp,edx` / `jb`), therefore the scan couvre
      * pos = 0x800 .. len-1 (there version M169 allait up to len inclus : has iteration
      * of too, visible sure the t5 d'image.raw). */
+    {
+        static int ia = -1, ib = -1, fb = -1, gb = -1;
+        if (ia < 0) { const char *e = getenv("UHA_PBL_IA"); ia = (e && e[0] == '1') ? 1 : 0; }
+        if (ib < 0) { const char *e = getenv("UHA_PBL_IB"); ib = (e && e[0] == '0') ? 0 : 1; }
+        if (fb < 0) { const char *e = getenv("UHA_PBL_FB"); fb = (e && e[0] == '0') ? 0 : 1; }
+        if (gb < 0) { const char *e = getenv("UHA_PBL_GB"); gb = (e && e[0] == '0') ? 0 : 1; }
+        const int use_fb = fb;
+        const int use_gb = gb;
     for (pos = 0x800u; pbl_v1 ? (pos <= len) : (pos < len); pos++) {
         uint8_t w0 = window[pos];
 #ifdef PBL_TRACE
@@ -182,28 +190,14 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
                     pos, c->t[0], c->t[1], c->t[2], c->t[3], c->t[4],
                     c->t5[0], c->t5[1], c->t5[2], c->t5[3], c->t5[4]);
 #endif
+        i = pos & (PBL_RING - 1u);
+        ia_ = (uint32_t)(ia ? ((i + 0x400u) & (PBL_RING - 1u)) : i);
+        ib_ = (uint32_t)(ib ? ((i + 0x400u) & (PBL_RING - 1u)) : i);
 
         for (cls = 0; cls < PBL_NCLS; cls++) {
             uint32_t *fc = c->f[cls];
             uint32_t *gc = c->g[cls];
             uint8_t *dc = c->d[cls];
-
-            i = pos & (PBL_RING - 1u);
-            /* [M274c, GATED UHA_PBL_IA / UHA_PBL_IB, default = behavior historique]
-             * PHASES SOME TWO ANNEAUX. L'ASM keeps TWO counters independants, masks has 0x7ff :
-             * `[esp+0x2c]` init **0x800** (0x422aa5) -> `&0x7ff = 0` for the RETRAIT of `f`,
-             * `[esp+0xc]` init **0xC00** (0x422abf) -> `&0x7ff = 0x400` for l'INSERTION of `f`
-             * and the RETRAIT of `g`. The port drifts the two of has single `i = pos & 0x7ff` with has
-             * shift fixe of 0x400 : there phase of the retrait of `f` is therefore false (0x400 au lieu
-             * of 0). `UHA_PBL_IA=0` -> dc[i] (phase ASM), `=1` -> dc[(i+0x400)&0x7ff] (historique).
-             * `UHA_PBL_IB` idem for l'ring d'insertion/retrait of `g`. */
-            { static int ia = -1, ib = -1;
-              /* [M278] IA promu has 0 (phase ASM) ; UHA_PBL_IA=1 restores l'historique. */
-              if (ia < 0) { const char *e = getenv("UHA_PBL_IA"); ia = (e && e[0] == '1') ? 1 : 0; }
-              if (ib < 0) { const char *e = getenv("UHA_PBL_IB"); ib = (e && e[0] == '0') ? 0 : 1; }
-              ia_ = (uint32_t)(ia ? ((i + 0x400u) & (PBL_RING - 1u)) : i);
-              ib_ = (uint32_t)(ib ? ((i + 0x400u) & (PBL_RING - 1u)) : i);
-            }
 
             /* [M170c] HYPOTHESE MESUREE : the retrait of `f` porte sure the SAME slot that the one of
              * `g` (S1 : (i+0x400)&0x7ff), of sorte that t and t5 suivent there SAME window and
@@ -217,31 +211,12 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
             newv = w0;
             if (cls)
                 newv = (uint8_t)(w0 - window[pos - (uint32_t)cls]);
-            /* [M274f, GATED UHA_PBL_FB, default-OFF] THIS THAT L'ON ADDS Has `f`. ASM (M275, order
-             * exact) : `t[cls] += (f(d[ringB]) + f(d[ringB])+1)` - on adds l'byte of the slot of
-             * l'other ring (`ringB`), NOT there value current. The port ajoutait `newv` (= cur),
-             * c'is-has-dire retirait AND ajoutait au same slot : `f` restait l'histogramme some same
-             * 1024 slots au lieu of suivre has window glissante. Measures : l'init gives
-             * `Sigma f^2 = 5122` (GT 5056) but the scan drifts has **6662** (+30 %) ; `t5`, lui, is
-             * juste (4978 vs 5034). `=1` adds `dc[ib_]` (slot B) as l'ASM. */
-            {
-                static int fb = -1;
-                if (fb < 0) { const char *e = getenv("UHA_PBL_FB"); fb = (e && e[0] == '0') ? 0 : 1; }
-                addv = newv;
-                if (fb)
-                    addv = dc[ib_];
-            }
+            addv = use_fb ? dc[ib_] : newv;
             fn = fc[addv];
             c->t[cls] += (2u * fn + 1u);
             fc[addv] = fn + 1u;
 
-            /* [M274f, GATED UHA_PBL_GB, default = 1 (slot B, conforme ASM)] slot whose on removes
-             * l'byte of `t5` : B (0x422b66, M275 " same index b that g ") now Has. */
-            {
-                static int gb = -1;
-                if (gb < 0) { const char *e = getenv("UHA_PBL_GB"); gb = (e && e[0] == '0') ? 0 : 1; }
-                v = gb ? dc[ib_] : dc[ia_];
-            }
+            v = use_gb ? dc[ib_] : dc[ia_];
             gv = gc[v];
             c->t5[cls] -= (2u * gv - 1u);
             gc[v] = gv - 1u;
@@ -294,6 +269,7 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
         }
         cur = (uint8_t)bestA;
         c->cur = cur;
+    }
     }
 
     return len;

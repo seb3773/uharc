@@ -6,12 +6,12 @@
 /* [GATED UHA_T268B2, defautOFF, M207] counter d'updates by row, restreint au block 2
  * (45 337 <= out_count < 305 696) for to compare the 5 rows " empty " (0x202..0x207) at the GT
  * (master : ~12..21 updates chacune). No emissif by default. */
-static uint32_t s_t268b2[1024];
+static uint32_t *s_t268b2 = NULL;
 static int s_t268b2_on = -1;
 static void s_t268b2_dump(void)
 {
     int i;
-    if (s_t268b2_on <= 0)
+    if (s_t268b2_on <= 0 || !s_t268b2)
         return;
     fprintf(stderr, "[T268B2]");
     for (i = 0; i < 1024; i++)
@@ -165,8 +165,13 @@ void ppm_apply_t268(ppm_model *m, int sym, int ctx_idx)
     if (s_t268b2_on < 0) {
         const char *e = getenv("UHA_T268B2");
         s_t268b2_on = (e && e[0] != '0') ? 1 : 0;
-        if (s_t268b2_on)
-            atexit(s_t268b2_dump);
+        if (s_t268b2_on) {
+            s_t268b2 = (uint32_t *)calloc(1024u, sizeof(uint32_t));
+            if (!s_t268b2)
+                s_t268b2_on = 0;
+            else
+                atexit(s_t268b2_dump);
+        }
     }
     if (s_t268b2_on > 0 && m->out_count >= 45337u && m->out_count < 305696u)
         s_t268b2[ctx_idx & 1023]++;

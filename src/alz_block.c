@@ -1,32 +1,32 @@
 /*
- * alz_block.c - layer (has) BLOCK multi-categories of the scorer ALZ (portage 13.119/13.120).
- * Gated, NO-WIRED : no call since the path d'encoding standard. Voir alz_block.h.
+ * alz_block.c — couche (a) BLOCK multi-catégories du scoreur ALZ (portage §13.119/§13.120).
+ * Gated, NON-WIRED : aucun appel depuis le chemin d'encodage standard. Voir alz_block.h.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "alz_block.h"
 
-/* --- Geometrie of category STATIC (extracted of the binary UHARC.EXE, off=VA-0x402000) */
-/* [0x437884] base d'arena by category idx 0..9 (idx0=0x000 -> fallback category 0). */
+/* --- Géométrie de catégorie STATIQUE (extraite du binaire UHARC.EXE, off=VA-0x402000) */
+/* [0x437884] base d'arène par catégorie idx 0..9 (idx0=0x000 → fallback catégorie 0). */
 const uint16_t alz_block_arena[ALZ_BLOCK_NCAT] = {
     0x000u, 0x301u, 0x321u, 0x341u, 0x3a1u, 0x3e1u, 0x3e5u, 0x3e9u, 0x3f1u, 0x3f4u
 };
-/* [0x4378ac] tableA (param of line/size) idx 0..9. */
+/* [0x4378ac] tableA (param de ligne/taille) idx 0..9. */
 const uint16_t alz_block_tblA[ALZ_BLOCK_NCAT] = {
     0x000u, 0x020u, 0x020u, 0x060u, 0x040u, 0x004u, 0x004u, 0x008u, 0x003u, 0x005u
 };
-/* [0x43785c] tableC (counts/lines relatif) idx 0..9. */
+/* [0x43785c] tableC (compte/lignes relatif) idx 0..9. */
 const uint8_t alz_block_tblC[ALZ_BLOCK_NCAT] = {
     1u, 1u, 2u, 3u, 4u, 1u, 1u, 2u, 2u, 4u
 };
-/* [0x4378d4] byte escape by class (idx 0..19). */
+/* [0x4378d4] octet escape par classe (idx 0..19). */
 const uint8_t alz_block_escape[20] = {
     0u, 0u, 8u, 16u, 24u, 0u, 0u, 0u, 0u, 0u,
     0u, 1u, 2u, 3u, 4u, 1u, 1u, 2u, 2u, 4u
 };
 
-/* --- Cycle of vie --------------------------------------------------------------- */
+/* --- Cycle de vie --------------------------------------------------------------- */
 
 alz_block_t *alz_block_create(uint16_t default_inc)
 {
@@ -44,8 +44,8 @@ alz_block_t *alz_block_create(uint16_t default_inc)
         alz_arena2d_init(&b->model[i],    default_inc);
         alz_arena2d_init(&b->snapshot[i], default_inc);
     }
-    b->active_cat = 0u;   /* category 0 = arena of repli (13.120 item 1) */
-    b->flag_snap  = 0u;   /* [0x45ecc8]=0 out commit of match long        */
+    b->active_cat = 0u;   /* catégorie 0 = arène de repli (§13.120 item 1) */
+    b->flag_snap  = 0u;   /* [0x45ecc8]=0 hors commit de match long        */
     return b;
 }
 
@@ -58,7 +58,7 @@ void alz_block_destroy(alz_block_t *b)
     free(b);
 }
 
-/* --- Transaction load/score/restore (reason 13.120 item 5) ---------------------- */
+/* --- Transaction load/score/restore (motif §13.120 item 5) ---------------------- */
 
 void alz_block_save(alz_block_t *b, uint32_t cat)
 {
@@ -78,11 +78,11 @@ void alz_block_commit_cat(alz_block_t *b, uint32_t cat, uint8_t snap_flag)
     b->flag_snap  = snap_flag;                          /* [0x45ecc8] */
 }
 
-/* --- PROBE of cost cumule by category (STUB no emissif) ---------------------- */
+/* --- SONDE de coût cumulé par catégorie (STUB non émissif) ---------------------- */
 /*
- * index delta-2D = (relrow<<8 | delta). Here relrow = byte previous bounded (placeholder
- * of the " line of context "), delta = gap current-previous (0..255). There correspondance
- * EXACT with there recurrence legacy 0x415444 and the table 0x45cb60[] = increment next.
+ * index delta-2D = (relrow<<8 | delta). Ici relrow = octet précédent borné (placeholder
+ * de la « ligne de contexte »), delta = écart courant-précédent (0..255). La correspondance
+ * EXACTE avec la récurrence legacy 0x415444 et le tableau 0x45cb60[] = incrément suivant.
  */
 uint64_t alz_block_score_class_stub(alz_block_t *b, uint32_t cat,
                                     const uint8_t *win, uint32_t len,
@@ -101,14 +101,14 @@ uint64_t alz_block_score_class_stub(alz_block_t *b, uint32_t cat,
     for (i = 0; i < len; i++) {
         uint32_t relrow = (uint32_t)prev & (ALZ_ARENA2D_MAX_ROW - 1u);
         uint32_t delta  = (uint32_t)((int32_t)win[i] - (int32_t)prev) & 0xFFu;
-        cost += alz_arena2d_cost(m, relrow, delta);   /* auto-entraine m in place */
+        cost += alz_arena2d_cost(m, relrow, delta);   /* auto-entraîne m en place */
         prev  = win[i];
     }
     if (out_cost) *out_cost = cost;
     return cost;
 }
 
-/* --- Argmin of cost cumule sure the classes (13.119 item 2) --------------------- */
+/* --- Argmin de coût cumulé sur les classes (§13.119 item 2) --------------------- */
 int alz_block_argmin(alz_block_t *b, const uint8_t *win, uint32_t len,
                      uint32_t nclass, uint64_t *costs)
 {
@@ -123,24 +123,24 @@ int alz_block_argmin(alz_block_t *b, const uint8_t *win, uint32_t len,
 
     for (c = 0u; c < nclass; c++) {
         uint64_t cost;
-        alz_block_restore(b, c);                    /* each category repart of the snapshot */
+        alz_block_restore(b, c);                    /* chaque catégorie repart du snapshot */
         cost = alz_block_score_class_stub(b, c, win, len, NULL);
         if (costs)
             costs[c] = cost;
-        if (best < 0 || cost < bestcost) {          /* argmin STRICT (as 0x413fde jae keep) */
+        if (best < 0 || cost < bestcost) {          /* argmin STRICT (comme 0x413fde jae keep) */
             bestcost = cost;
             best = (int)c;
         }
     }
-    /* The vainqueur preserves son entrainement (costs positionnels commit 0x45cb60->0x45cb7c) :
-     * on replays son score without restore, then on the sets category active. */
-    alz_block_save(b, (uint32_t)best);              /* snapshot pre-block of the winner        */
+    /* Le vainqueur conserve son entraînement (coûts positionnels commit 0x45cb60→0x45cb7c) :
+     * on rejoue son score sans restore, puis on le pose catégorie active. */
+    alz_block_save(b, (uint32_t)best);              /* snapshot pré-bloc du gagnant        */
     (void)alz_block_score_class_stub(b, (uint32_t)best, win, len, NULL);
     alz_block_commit_cat(b, (uint32_t)best, 0u);
     return best;
 }
 
-/* --- Self-test (structurel ; geometrie = values extracted of the binary) ----------- */
+/* --- Self-test (structurel ; géométrie = valeurs extraites du binaire) ----------- */
 int alz_block_selftest(void)
 {
     int fail = 0;
@@ -150,7 +150,7 @@ int alz_block_selftest(void)
     int winner;
     uint32_t i;
 
-    /* (1) geometrie : coherence internal + bounds (the constantes viennent of the dump). */
+    /* (1) géométrie : cohérence interne + bornes (les constantes viennent du dump). */
     if (alz_block_arena[0] != 0x000u || alz_block_arena[9] != 0x3f4u ||
         alz_block_arena[7] != 0x3e9u || alz_block_arena[8] != 0x3f1u)
         fail++;
@@ -168,21 +168,21 @@ int alz_block_selftest(void)
         return 1;
     }
 
-    /* (2) save/restore idempotent : muter model[0], to restore since snapshot[0]. */
+    /* (2) save/restore idempotent : muter model[0], restaurer depuis snapshot[0]. */
     for (i = 0; i < 16; i++) win[i] = (uint8_t)(200u + i);
-    alz_block_save(b, 0u);                                   /* snapshot[0] <- model[0] cold */
-    (void)alz_block_score_class_stub(b, 0u, win, 16u, NULL);  /* model[0] entraine            */
+    alz_block_save(b, 0u);                                   /* snapshot[0] <- model[0] froid */
+    (void)alz_block_score_class_stub(b, 0u, win, 16u, NULL);  /* model[0] entraîné            */
     if (memcmp(&b->model[0], &b->snapshot[0], sizeof(alz_arena2d_t)) == 0)
-        fail++;                                              /* l'entrainement has well mute   */
+        fail++;                                              /* l'entraînement a bien muté   */
     alz_block_restore(b, 0u);                                /* model[0] <- snapshot[0]       */
     if (memcmp(&b->model[0], &b->snapshot[0], sizeof(alz_arena2d_t)) != 0)
         fail++;                                              /* restore exact                 */
 
-    /* (3) argmin : CONTRACT structurel = to return l'index of the cost minimal of costs[]
-     *     and the committer as categorie active. Independant of the semantique of the
-     *     table of cost (there recurrence exact = increment next). */
+    /* (3) argmin : CONTRACT structurel = retourner l'index du cout minimal de costs[]
+     *     et le committer comme categorie active. Independant de la sémantique de la
+     *     table de cout (la recurrence exacte = incrément suivant). */
     for (i = 0; i < 16; i++) win[i] = (uint8_t)(10u + i * 3u);
-    /* differencier the snapshots for to avoid has tie degenere : entrainer there categorie 1 */
+    /* differencier les snapshots pour eviter un tie degenere : entrainer la categorie 1 */
     {
         uint32_t k;
         for (k = 0u; k < 8u; k++)
@@ -197,7 +197,7 @@ int alz_block_selftest(void)
         for (i = 0u; i < ALZ_BLOCK_NCLASS; i++)
             if (costs[i] < mn)
                 mn = costs[i];
-        if (costs[winner] != mn)      /* l'argmin has well choisi the minimum     */
+        if (costs[winner] != mn)      /* l'argmin a bien choisi le minimum     */
             fail++;
         if (b->active_cat != (uint32_t)winner)  /* commit categorie active     */
             fail++;

@@ -199,21 +199,131 @@ static int slot_find_path(const uint8_t *trans, int state, int slot, int target,
     return 0;
 }
 
+typedef struct {
+    uint8_t ok;
+    uint8_t nbits;
+    uint8_t bits[50];
+} alz_path_lut;
+
+static alz_path_lut s_short_slot_lut[16];
+static int s_short_slot_lut_ready;
+static int s_full_dist_reach[64];
+static alz_path_lut s_full_slot_lut[64];
+static int s_full_dist_reach_ready;
+
+static void short_slot_lut_init(void)
+{
+    int t, i, nbits;
+    int bits[50];
+    if (s_short_slot_lut_ready)
+        return;
+    for (t = 1; t < ALZ_MAX_RECENT; t++) {
+        nbits = 0;
+        if (slot_find_path(AlzShortDistanceNext, 1, 0xB, t, bits, &nbits)) {
+            s_short_slot_lut[t].ok = 1;
+            s_short_slot_lut[t].nbits = (uint8_t)nbits;
+            for (i = 0; i < nbits; i++)
+                s_short_slot_lut[t].bits[i] = (uint8_t)bits[i];
+        }
+    }
+    s_short_slot_lut_ready = 1;
+}
+
+/* [a5c2f perf, BIT-EXACT] `m_class1_dist_ok` / `slot_encode` / `mc_slot_cost` :
+ * Precalcul une seule fois les slots atteignables dans AlzFullDistanceNext (BFS
+ * borne <=64*64) ainsi que les chemins DFS exacts s_full_slot_lut[0..63]. */
+static void full_dist_reach_init(void)
+{
+    unsigned char vis[64][64];
+    int st_stack[4096], sl_stack[4096];
+    int bits[50];
+    int top = 0, i, st, sl, ns, nslot, br, t, nbits;
+
+    for (i = 0; i < 64 * 64; i++)
+        ((unsigned char *)vis)[i] = 0;
+    /* amorce (state=0x10, slot=0x2C), comme slot_find_path. */
+    vis[0x10][0x2C] = 1;
+    st_stack[top] = 0x10;
+    sl_stack[top] = 0x2C;
+    top++;
+    while (top > 0) {
+        top--;
+        st = st_stack[top];
+        sl = sl_stack[top];
+        if (st == 0) {
+            s_full_dist_reach[sl] = 1;
+            continue;
+        }
+        /* branche 0 : bit=0 -> nslot=state, ns=trans[2*state]. */
+        ns = AlzFullDistanceNext[2 * st];
+        nslot = st;
+        if (ns < 64 && nslot < 64 && !vis[ns][nslot]) {
+            vis[ns][nslot] = 1;
+            st_stack[top] = ns;
+            sl_stack[top] = nslot;
+            top++;
+        }
+        /* branche 1 : bit=1 -> nslot=slot, ns=trans[2*state+(slot>state)]. */
+        br = (sl > st) ? 1 : 0;
+        ns = AlzFullDistanceNext[2 * st + br];
+        nslot = sl;
+        if (ns < 64 && nslot < 64 && !vis[ns][nslot]) {
+            vis[ns][nslot] = 1;
+            st_stack[top] = ns;
+            sl_stack[top] = nslot;
+            top++;
+        }
+    }
+    for (t = 0; t < 64; t++) {
+        if (!s_full_dist_reach[t])
+            continue;
+        nbits = 0;
+        if (slot_find_path(AlzFullDistanceNext, 0x10, 0x2C, t, bits, &nbits)) {
+            s_full_slot_lut[t].ok = 1;
+            s_full_slot_lut[t].nbits = (uint8_t)nbits;
+            for (i = 0; i < nbits; i++)
+                s_full_slot_lut[t].bits[i] = (uint8_t)bits[i];
+        }
+    }
+    s_full_dist_reach_ready = 1;
+}
+
 static int slot_encode(alz_dec *d, uint16_t *prob, const uint8_t *trans,
                        int init_state, int fallback, int target)
 {
     int bits[50];
+    const alz_path_lut *pl = NULL;
+    const uint8_t *lut_bits = NULL;
     int nbits = 0;
     int state, slot, branch, i;
 
-    if (!slot_find_path(trans, init_state, fallback, target, bits, &nbits))
-        return -1;
+    if (trans == AlzShortDistanceNext && init_state == 1 && fallback == 0xB &&
+        target >= 0 && target < 16) {
+        if (!s_short_slot_lut_ready)
+            short_slot_lut_init();
+        pl = &s_short_slot_lut[target];
+    } else if (trans == AlzFullDistanceNext && init_state == 0x10 && fallback == 0x2C &&
+               target >= 0 && target < 64) {
+        if (!s_full_dist_reach_ready)
+            full_dist_reach_init();
+        pl = &s_full_slot_lut[target];
+    }
+    if (pl) {
+        if (!pl->ok)
+            return -1;
+        nbits = (int)pl->nbits;
+        lut_bits = pl->bits;
+    } else {
+        if (!slot_find_path(trans, init_state, fallback, target, bits, &nbits))
+            return -1;
+    }
     state = init_state;
     slot = fallback;
     for (i = 0; i < nbits; i++) {
-        if (m_bit12(d, &prob[state], 6, bits[i]) != 0)
+        int bit = lut_bits ? (int)lut_bits[i] : bits[i];
+        if (m_bit12(d, &prob[state], 6, bit) != 0)
             return -1;
-        if (bits[i] == 0)
+        if (bit == 0)
             slot = state;
         branch = (slot > state) ? 1 : 0;
         state = trans[2 * state + branch];
@@ -273,69 +383,6 @@ static int dist_to_bucket(uint32_t dist, uint32_t limit, int *k_out,
         }
     }
     return -1;
-}
-
-/* [a5c2f perf, BIT-EXACT] `m_class1_dist_ok` n'uses that the BoOLEEN
- * " the slot target is atteignable in l'tree of distance FIXE
- * (trans=AlzFullDistanceNext, init=0x10, fallback=0x2C) ". This booleen not
- * depend THAT of the target `slot` (there distance not sert qu'has mapper k via
- * dist_to_bucket), NOR of `d`. L'call direct has `slot_find_path` (DFS has
- * backtracking without ensemble-visite) explore has nombre EXPONENTIEL of
- * paths for has target profonde/inatteignable (cut only has 48 bits)
- * : c'is this which gelait the finder legacy (each candidate of string cher-
- * chait has slot profond). On replaces by has parcours en WIDTH sure the
- * paires (state,slot) (<=64*64, bornee by has ensemble-visite), which
- * recoit EXACTEMENT the same ensemble of slots atteignables (semantique of
- * transition identical has slot_find_path : branche0 -> (trans[2*st], st),
- * branche1 -> (trans[2*st+(slot>st)], slot), leaf = state==0). There table
- * is calculee once (memo static) : cost amortic O(1)/test. L'ENCODE
- * bit-has-bit (`slot_encode`/`m_encode_class1_dist`) remainder INTACT (paths
- * reels courts, never atteint by this explosion). */
-static int s_full_dist_reach[64];
-static int s_full_dist_reach_ready;
-
-static void full_dist_reach_init(void)
-{
-    unsigned char vis[64][64];
-    int st_stack[4096], sl_stack[4096];
-    int top = 0, i, st, sl, ns, nslot, br;
-
-    for (i = 0; i < 64 * 64; i++)
-        ((unsigned char *)vis)[i] = 0;
-    /* amorce (state=0x10, slot=0x2C), as slot_find_path. */
-    vis[0x10][0x2C] = 1;
-    st_stack[top] = 0x10;
-    sl_stack[top] = 0x2C;
-    top++;
-    while (top > 0) {
-        top--;
-        st = st_stack[top];
-        sl = sl_stack[top];
-        if (st == 0) {
-            s_full_dist_reach[sl] = 1;
-            continue;
-        }
-        /* branch 0 : bit=0 -> nslot=state, ns=trans[2*state]. */
-        ns = AlzFullDistanceNext[2 * st];
-        nslot = st;
-        if (ns < 64 && nslot < 64 && !vis[ns][nslot]) {
-            vis[ns][nslot] = 1;
-            st_stack[top] = ns;
-            sl_stack[top] = nslot;
-            top++;
-        }
-        /* branch 1 : bit=1 -> nslot=slot, ns=trans[2*state+(slot>state)]. */
-        br = (sl > st) ? 1 : 0;
-        ns = AlzFullDistanceNext[2 * st + br];
-        nslot = sl;
-        if (ns < 64 && nslot < 64 && !vis[ns][nslot]) {
-            vis[ns][nslot] = 1;
-            st_stack[top] = ns;
-            sl_stack[top] = nslot;
-            top++;
-        }
-    }
-    s_full_dist_reach_ready = 1;
 }
 
 static int m_class1_dist_ok(alz_dec *d, uint32_t dist)
@@ -474,30 +521,69 @@ static int len_find_path(int esi, int edi_state, int target, int *bits, int *nbi
     return len_find_path(ns, edi_state, target, bits, nbits);
 }
 
+static alz_path_lut s_len_lut[8][256];
+static int s_len_lut_ready;
+
+static void len_lut_init(void)
+{
+    int edi, cnt, i, nbits;
+    int bits[50];
+    if (s_len_lut_ready)
+        return;
+    for (edi = 2; edi <= 7; edi++) {
+        for (cnt = 1; cnt <= 255; cnt++) {
+            nbits = 0;
+            if (len_find_path(10, edi, cnt, bits, &nbits)) {
+                s_len_lut[edi][cnt].ok = 1;
+                s_len_lut[edi][cnt].nbits = (uint8_t)nbits;
+                for (i = 0; i < nbits; i++)
+                    s_len_lut[edi][cnt].bits[i] = (uint8_t)bits[i];
+            }
+        }
+    }
+    s_len_lut_ready = 1;
+}
+
 static int m_length_ok(alz_dec *d, int cls, uint32_t dist, uint32_t count)
 {
-    int eax, edi_state, has_pred, pred_byte, sec, nbits;
-    uint32_t pred_ptr;
-    int bits[50];
+    int edi_state;
 
+    (void)d;
     if (count == 0 || count > 255)
         return 0;
-    m_len_setup(d, cls, dist, &eax, &edi_state, &has_pred, &pred_ptr,
-                &pred_byte, &sec);
-    nbits = 0;
-    return len_find_path(10, edi_state, (int)count, bits, &nbits);
+    if (cls == 1) {
+        if (dist < 0x100)
+            edi_state = 3;
+        else if (dist < 0x1000)
+            edi_state = 4;
+        else if (dist < 0x10000)
+            edi_state = 5;
+        else if (dist < 0x100000)
+            edi_state = 6;
+        else
+            edi_state = 7;
+    } else {
+        edi_state = 2;
+    }
+    if (!s_len_lut_ready)
+        len_lut_init();
+    return s_len_lut[edi_state][count].ok;
 }
 
 static int m_encode_length(alz_dec *d, int cls, uint32_t dist, uint32_t count)
 {
-    int eax, edi_state, has_pred, pred_byte, sec, nbits, esi, last, b, i, bit;
+    int eax, edi_state, has_pred, pred_byte, sec, esi, last, b, i, bit;
     uint32_t pred_ptr, addr;
-    int bits[50];
+    const alz_path_lut *pl;
 
+    if (count == 0 || count > 255)
+        return -1;
     m_len_setup(d, cls, dist, &eax, &edi_state, &has_pred, &pred_ptr,
                 &pred_byte, &sec);
-    nbits = 0;
-    if (!len_find_path(10, edi_state, (int)count, bits, &nbits))
+    if (!s_len_lut_ready)
+        len_lut_init();
+    pl = &s_len_lut[edi_state][count];
+    if (!pl->ok)
         return -1;
     if (has_pred)
         d->m_len_pred[pred_ptr + 0x20000] = (uint8_t)pred_byte;
@@ -506,7 +592,7 @@ static int m_encode_length(alz_dec *d, int cls, uint32_t dist, uint32_t count)
     for (;;) {
         last = esi + 1;
         if (edi_state < esi + 1) {
-            bit = bits[i++];
+            bit = (int)pl->bits[i++];
             addr = (uint32_t)eax * 1024;
             if (esi >= pred_byte)
                 addr += 256;
@@ -530,17 +616,17 @@ static int m_encode_length(alz_dec *d, int cls, uint32_t dist, uint32_t count)
 
 static int m_short_slot_for(alz_dec *d, uint32_t dist)
 {
-    int i, nbits;
-    int bits[50];
+    int i;
 
+    if (!s_short_slot_lut_ready)
+        short_slot_lut_init();
     for (i = 1; i < ALZ_MAX_RECENT; i++) {
         uint32_t r = d->st.recent_distance[i];
-        /* t15d : more of normalisation 0->1 - has slot has 0 (never tourne,
-         * semantique UHARC init 0) n'is never has distance emettable. */
+        /* t15d : plus de normalisation 0->1 — un slot a 0 (jamais tourne,
+         * semantique UHARC init 0) n'est jamais une distance emettable. */
         if (r == 0 || r != dist)
             continue;
-        nbits = 0;
-        if (slot_find_path(AlzShortDistanceNext, 1, 0xB, i, bits, &nbits))
+        if (s_short_slot_lut[i].ok)
             return i;
     }
     return -1;
@@ -608,23 +694,23 @@ int alz_m_encode_match(alz_dec *d, int token, uint32_t dist, uint32_t count)
 }
 
 /* =====================================================================
- * [RE b3a] Estimator of cost-match FAITHFUL, reading-single.
+ * [RE b3a] Estimateur de cout-match FIDELE, lecture-seule.
  *
- * Objectif : to replace alz_match_cost (crude, under-estimante, source of the
- * sure-selection of matches courts, cf UHARC_RE_REPORT 13.34) by has sum
- * some costs-model reels of each under-field of the token, in the SAME
- * unites that the literal alz_bm_predict_cost, has savoir :
- *     idx = (width << 14) / total ;  cost = AlzSseMap[idx]  (~ 4680*(-log2 p))
- * C'is exactement this that depense the codeur : each call reel
- * uha_rcw_encode(low, low+width, total) now uha_rcw_encode_fixed12(w, lo, hi)
- * equivaut has has symbole of width `width` sure has total `total`.
+ * Objectif : remplacer alz_match_cost (crude, sous-estimante, source de la
+ * sur-selection de matches courts, cf UHARC_RE_REPORT 13.34) par une somme
+ * des couts-modele reels de chaque sous-champ du token, dans les MEMES
+ * unites que le littéral alz_bm_predict_cost, a savoir :
+ *     idx = (width << 14) / total ;  cout = AlzSseMap[idx]  (~ 4680*(-log2 p))
+ * C'est exactement ce que depense le codeur : chaque appel reel
+ * uha_rcw_encode(low, low+width, total) ou uha_rcw_encode_fixed12(w, lo, hi)
+ * equivaut a un symbole de largeur `width` sur un total `total`.
  *
- * On not MUTE NOTHING : on reads the frequencies courantes (cost marginal pre-token,
- * coherent with the side literal cold of l'arbitre). returns ~0u if the
- * token n'is not codable (keeps d'call identical has alz_m_encode_match).
+ * On ne MUTE RIEN : on lit les frequences courantes (cout marginal pre-token,
+ * coherent avec le cote litteral froid de l'arbitre). Retourne ~0u si le
+ * token n'est pas codable (garde d'appel identique a alz_m_encode_match).
  * ===================================================================== */
 
-/* Cost model of has symbole of width `width` sure alphabet `total`. */
+/* Cout modele d'un symbole de largeur `width` sur alphabet `total`. */
 static uint32_t mc_rc_cost(uint32_t width, uint32_t total)
 {
     uint32_t idx;
@@ -638,32 +724,53 @@ static uint32_t mc_rc_cost(uint32_t width, uint32_t total)
     return AlzSseMap[idx];
 }
 
-/* Cost of has decision binary adaptative fixed12 (mirror of m_bit12) : total
- * fige has 4096, width = prob if bit==0 otherwise 4096-prob. `prob` lu, no mutate. */
+/* Cout d'une decision binaire adaptative fixed12 (miroir de m_bit12) : total
+ * fige a 4096, largeur = prob si bit==0 sinon 4096-prob. `prob` lu, non mutate. */
 static uint32_t mc_bit12_cost(uint16_t prob, int bit)
 {
     uint32_t width = bit ? (4096u - (uint32_t)prob) : (uint32_t)prob;
     return mc_rc_cost(width, 4096u);
 }
 
-/* Cost of has path d'tree of slots (mirror of slot_encode) : on retrouve the
- * bits via slot_find_path then on cumule mc_bit12_cost sure prob[state]. */
+/* Cout d'un chemin d'arbre de slots (miroir de slot_encode) : on retrouve les
+ * bits via LUT/slot_find_path puis on cumule mc_bit12_cost sur prob[state]. */
 static uint32_t mc_slot_cost(alz_dec *d, uint16_t *prob, const uint8_t *trans,
                              int init_state, int fallback, int target)
 {
     int bits[50];
+    const alz_path_lut *pl = NULL;
+    const uint8_t *lut_bits = NULL;
     int nbits = 0;
     int state, slot, branch, i;
     uint32_t cost = 0;
 
     (void)d;
-    if (!slot_find_path(trans, init_state, fallback, target, bits, &nbits))
-        return ~(uint32_t)0;
+    if (trans == AlzShortDistanceNext && init_state == 1 && fallback == 0xB &&
+        target >= 0 && target < 16) {
+        if (!s_short_slot_lut_ready)
+            short_slot_lut_init();
+        pl = &s_short_slot_lut[target];
+    } else if (trans == AlzFullDistanceNext && init_state == 0x10 && fallback == 0x2C &&
+               target >= 0 && target < 64) {
+        if (!s_full_dist_reach_ready)
+            full_dist_reach_init();
+        pl = &s_full_slot_lut[target];
+    }
+    if (pl) {
+        if (!pl->ok)
+            return ~(uint32_t)0;
+        nbits = (int)pl->nbits;
+        lut_bits = pl->bits;
+    } else {
+        if (!slot_find_path(trans, init_state, fallback, target, bits, &nbits))
+            return ~(uint32_t)0;
+    }
     state = init_state;
     slot = fallback;
     for (i = 0; i < nbits; i++) {
-        cost += mc_bit12_cost(prob[state], bits[i]);
-        if (bits[i] == 0)
+        int bit = lut_bits ? (int)lut_bits[i] : bits[i];
+        cost += mc_bit12_cost(prob[state], bit);
+        if (bit == 0)
             slot = state;
         branch = (slot > state) ? 1 : 0;
         state = trans[2 * state + branch];
@@ -671,7 +778,7 @@ static uint32_t mc_slot_cost(alz_dec *d, uint16_t *prob, const uint8_t *trans,
     return cost;
 }
 
-/* Cost of the field distance of has token 1 (mirror of m_encode_class1_dist). */
+/* Cout du champ distance d'un token 1 (miroir de m_encode_class1_dist). */
 static uint32_t mc_class1_dist_cost(alz_dec *d, uint32_t dist)
 {
     int k;
@@ -704,24 +811,28 @@ static uint32_t mc_class1_dist_cost(alz_dec *d, uint32_t dist)
     return cost;
 }
 
-/* Cost of the field length, all token (mirror of m_encode_length). */
+/* Cout du champ longueur, tout token (miroir de m_encode_length). */
 static uint32_t mc_length_cost(alz_dec *d, int cls, uint32_t dist, uint32_t count)
 {
-    int eax, edi_state, has_pred, pred_byte, sec, nbits, esi, last, b, i, bit;
+    int eax, edi_state, has_pred, pred_byte, sec, esi, last, b, i, bit;
     uint32_t pred_ptr, addr, cost = 0;
-    int bits[50];
+    const alz_path_lut *pl;
 
+    if (count == 0 || count > 255)
+        return ~(uint32_t)0;
     m_len_setup(d, cls, dist, &eax, &edi_state, &has_pred, &pred_ptr,
                 &pred_byte, &sec);
-    nbits = 0;
-    if (!len_find_path(10, edi_state, (int)count, bits, &nbits))
+    if (!s_len_lut_ready)
+        len_lut_init();
+    pl = &s_len_lut[edi_state][count];
+    if (!pl->ok)
         return ~(uint32_t)0;
     esi = 10;
     i = 0;
     for (;;) {
         last = esi + 1;
         if (edi_state < esi + 1) {
-            bit = bits[i++];
+            bit = (int)pl->bits[i++];
             addr = (uint32_t)eax * 1024;
             if (esi >= pred_byte)
                 addr += 256;
@@ -751,7 +862,7 @@ uint32_t alz_match_model_cost(alz_dec *d, int token, uint32_t dist,
     if (token < 1 || token > 3)
         return ~(uint32_t)0;
 
-    /* (1) class of token */
+    /* (1) classe de token */
     ci = alz_token_class_index_ro(d);
     total = d->token_class[ci][5];
     if (total == 0)
@@ -761,7 +872,7 @@ uint32_t alz_match_model_cost(alz_dec *d, int token, uint32_t dist,
                         : d->token_class[ci][token + 1];
     c = mc_rc_cost(high - low, total);
 
-    /* (2) distance : token1 explicite, token2 recent[0] (0 bit), token3 slot short */
+    /* (2) distance : token1 explicite, token2 recent[0] (0 bit), token3 slot court */
     if (token == 1) {
         dc = mc_class1_dist_cost(d, dist);
         if (dc == ~(uint32_t)0)
@@ -777,7 +888,7 @@ uint32_t alz_match_model_cost(alz_dec *d, int token, uint32_t dist,
         c += dc;
     }
 
-    /* (3) length */
+    /* (3) longueur */
     lc = mc_length_cost(d, token, dist, count);
     if (lc == ~(uint32_t)0)
         return ~(uint32_t)0;

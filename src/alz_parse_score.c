@@ -1,54 +1,99 @@
 /*
- * alz_parse_score.c - scorer of PARSE ALZ (driver of block 0x413f7f/0x413ea0 + category
- * 0x414630). Reproduction bit-exact of the pipeline validated from-scratch 13.132/13.137..13.141.
- * GATED, NO-WIRED. Voir alz_parse_score.h for there specification.
+ * alz_parse_score.c — scoreur de PARSE ALZ (conducteur de bloc 0x413f7f/0x413ea0 + catégorie
+ * 0x414630). Reproduction bit-exact du pipeline validé from-scratch §13.132/§13.137..§13.141.
+ * GATED, NON-WIRED. Voir alz_parse_score.h pour la spécification.
  */
 #include "alz_parse_score.h"
 #include "alz_score.h"
-#include "alz_cm.h"   /* [GATED UHA_CM_WIRE] engine CM dense (alz_arb/alz_arena/alz_cm) for there law sym->row (13.796) */
+#include "alz_cm.h"   /* [GATED UHA_CM_WIRE] engine CM dense (alz_arb/alz_arena/alz_cm) pour la loi sym→row (§13.796) */
+#include "alz_est414630.h"   /* [GATED UHA_A3_CLASS0] estimateur densité fidèle 0x414630 (2D + escape) */
+#include "alz_esc_line.h"    /* [GATED UHA_A3_CLASS0] lignes d'échappement 0x402+cl (learn 0x4100e0 / rescale 0x40fe90) */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
-/* Tables static of the machine ctx (generees, 13.132). */
+/* Tables statiques de la machine ctx (générées, §13.132). */
 #include "alz_parse_score_tables.inc"
 
-/* [GATED UHA_AADUMP, probe read-only 13.722(4)/13.724] Pointer of dump
- * (row,freq,total) pos-has-pos of the pass cls3, ouvert ONLY by
- * alz_ps_emiprod_percost when UHA_AADUMP=path. NULL otherwise => no effect. */
+/* [GATED UHA_AADUMP, sonde LECTURE SEULE §13.722(4)/§13.724] Pointeur de dump
+ * (row,freq,total) pos-à-pos de la passe cls3, ouvert UNIQUEMENT par
+ * alz_ps_emiprod_percost quand UHA_AADUMP=chemin. NULL sinon ⟹ aucun effet. */
 static FILE *g_adump = NULL;
-/* [GATED UHA_WLEARNLIT, default-OFF, 14.126] mask of learn by position global
- * (index base+i). NULL => learn PARTOUT (behavior actuel, no regressif).
- * when sets : there pass not MUT l'arena (freq/total/rescale) that there now mask!=0
- * (ex. literals emis), all en SCORANT each position (percost intact).
- * Teste l'hypothese " the legacy engine n'learns that sure the stream d'emission ". */
+/* [GATED UHA_WLEARNLIT, défaut-OFF, §14.126] masque de learn par position globale
+ * (index base+i). NULL => learn PARTOUT (comportement actuel, non régressif).
+ * Quand posé : la passe ne MUT l'arène (freq/total/rescale) que là où mask!=0
+ * (ex. littéraux émis), tout en SCORANT chaque position (percost intact).
+ * Teste l'hypothèse « le legacy n'apprend que sur le flux d'émission ». */
 static const uint8_t *g_ps_learn_mask = NULL;
-/* [GATED UHA_LIVEWALK_BOUNDRESCALE] if !=0, ps_learn NOT rescale NOT inline ; the rescale
- * is applies at the FRONTIER of block (cadence commit legacy `0x414590`, loop columns
- * `0x414806-0x414871`), not as soon as total>=0x4000 during l'learning. */
+/* [GATED UHA_LIVEWALK_BOUNDRESCALE] si ≠0, ps_learn NE rescale PAS inline ; le rescale
+ * est appliqué à la FRONTIÈRE de bloc (cadence commit legacy `0x414590`, boucle colonnes
+ * `0x414806–0x414871`), pas dès que total≥0x4000 pendant l'apprentissage. */
 static int g_ps_no_inline_rescale = 0;
-/* [GATED UHA_PHASEFIX, default-OFF, 13.739] Phase cls3 corrigee = (abs+2)%3
- * (measured 29943/29944 = 100 % vs stream learn reel 0x411bb8) au lieu of the counter
- * ebp threade by block. Affecte ONLY cls3, and only when there porte is ON. */
+/* [GATED UHA_PHASEFIX, défaut-OFF, §13.739] Phase cls3 corrigée = (abs+2)%3
+ * (mesurée 29943/29944 = 100 % vs flux learn réel 0x411bb8) au lieu du compteur
+ * ebp threadé par bloc. Affecte UNIQUEMENT cls3, et seulement quand la porte est ON. */
 static int g_ps_phasefix = 0;
 
-/* [GATED UHA_PFILE, default-OFF, ISOLAT, M33->razor -m3] Pre-substrat `P[pos]` of the
- * cm-engine (laws M33 closes by #2, psim.py 159/159, produces since image.raw SINGLE),
- * loads en has pass since the file (1 byte/prediction). when sets, gen_ctxs(cls==3)
- * uses `ctx = P[i]` (there TRUE prediction) au lieu of `ctx=(rolling>>esc)&0xff`
- * (approx lag3), therefore the `delta = zigzag(value  P)` devient faithful => intra16
- * peuple (M31 : base 0x351) and there PAIRE (row,sym) is coherente EN write AND EN READING
- * (all the consommateurs read `ctxc[3]`), contrairement to the gates refutees
- * FEEDSELF_LAG3/PHASE2 which ecrivaient horsctxc. DefautOFF = behavior strictement
- * unchanged (banque 16685). */
-/*  measured NEGATIF (20261021, main) for THIS integration en prepasse : FEEDSELF+AGING
- * (razor ref 18432) + UHA_PFILE -> **firstdiv 18432 -> 12679** (regresse). Cause double :
- * (has) the scorer 0x412c30/0x414630, ALREADY clos/faithful, CONSUMES ctxc[3] with the ctx lag3 ;
- *     substituer P partout the perturbe -> nearties renversees more tot ; (b) the ROW law M31
- *     (base 0x351 / ctx_roulant=[0x45cbc8]) is no clos -> there paire (row,sym) remainder incoherente.
- *  => P faithful is NECESSARY but NO SUFFISANT en prepasse ; the levier reel = SINGLEPASS
- *  (TASK16) now score+learn+row partagent has same ctx en order d'emission REEL. Gate laissee
- *  defautOFF (brique P reutilisable for TASK16), no cablee au default. */
+int a3_promo_on(const char *name);   /* [PROMO_ALZ-1] défini dans alz.c — pas de .h touché */
+
+/* [GATED UHA_A3_ESCBRANCH=1, défaut-OFF, lane ALZ -m3, 2026-10-28, single-pass]
+ * Port fidèle de la branche d'échappement de la CLASSE 3 (capture n°2 : machine d'état
+ * exacte 65 536/65 536, prédicat f6[v]>8 && cap<5, ligne 16+32·phase, cellule = delta
+ * d'entrée de l'appel — cf. OUT/A3_predicat_escape.md). Dans alz_ps_gen_ctxs(cls==3)
+ * uniquement. Défaut-OFF = comportement strictement inchangé (banque 16685
+ * reproductible au mot près). */
+static int g_ps_escbranch = -1;
+static inline int ps_escbranch_on(void)
+{
+    if (g_ps_escbranch < 0) g_ps_escbranch = a3_promo_on("UHA_A3_ESCBRANCH");
+    return g_ps_escbranch;
+}
+
+/* [GATED UHA_A3_ESCBRANCH] CANAL D'ÉCRITURE du maître (défaut NULL = pas de split) :
+ * quand un consommateur le demande, gen_ctxs(3) y dépose la paire (ligne, cellule) que
+ * le MAÎTRE écrit au journal `m18` — ligne d'ESCAPE (`16+32·phase`) et sa cellule propre —
+ * tandis que `out[]` garde la paire ORDINAIRE pré-escape que lit le SCAN/dens (registre `m9`,
+ * 12 544/12 544 en bloc 1). Mesure 2026-10-28 : confondre les deux canaux casse le candidat
+ * aux 167 slots famille du bloc 1 (row 80 au lieu de 69). */
+uint32_t *alz_ps_escwr = NULL;
+/* [GATED UHA_A3_ESCWR_CLS, PROMUE tour 138 — DÉFAUT‑ON, échappatoire `=0`, lane ALZ -m3, tour 120]
+ * canal d'ÉCRITURE pour les classes ≠ 3. Mesure (tour 118) : gen_ctxs ne remplissait le canal que
+ * dans sa branche cls 3 ; pour cls 0/1/2/4 le consommateur lisait un `calloc` vierge (13 crédits
+ * dérivés contre 13 300 legacy sur `records`, 16 contre 116 sur `biased`). Loi uniforme : dans la
+ * voie ordre‑2 (cls 0) et la boucle générique (cls ≥ 4), la paire écrite par le maître EST la
+ * paire publiée (`row`,`b`) / (`ebx`,`delta`) — contrairement à cls 3 où l'escape sépare ligne
+ * d'écriture et ligne ordinaire. On recopie donc `out[]`, sans jamais le modifier.
+ * `UHA_A3_ESCWR_CLS=0` : canal intact, aucun effet (chemin d'avant la promotion). */
+static int g_ps_escwr_cls = -1;
+static inline int ps_escwr_cls_on(void)
+{
+    if (g_ps_escwr_cls < 0) g_ps_escwr_cls = a3_promo_on("UHA_A3_ESCWR_CLS");
+    return g_ps_escwr_cls;
+}
+
+/* [GATED UHA_A3_CTXCLASS_AUTO, défaut-OFF, lane ALZ -m3, tour 120] gagnante par bloc
+ * exportée par `alz_ps_snapshot_percost` (voir header). Écriture systématique (pas de
+ * getenv dans la boucle) ; le consommateur décide. `_n` remis à 0 à chaque appel. */
+int alz_ps_snapwin_blk[ALZ_PS_SNAPWIN_MAX];
+int alz_ps_snapwin_n = 0;
+
+/* [GATED UHA_PFILE, défaut-OFF, ISOLAT, M33→razor -m3] Pré-substrat `P[pos]` du
+ * cm-engine (lois M33 closes par #2, psim.py 159/159, produit depuis image.raw SEUL),
+ * chargé en une passe depuis le fichier (1 octet/prédiction). Quand posé, gen_ctxs(cls==3)
+ * utilise `ctx = P[i]` (la VRAIE prédiction) au lieu de `ctx=(rolling>>esc)&0xff`
+ * (approx lag‑3), donc le `delta = zigzag(value − P)` devient fidèle ⟹ intra16
+ * peuplé (M31 : base 0x351) et la PAIRE (row,sym) est cohérente EN ÉCRITURE ET EN LECTURE
+ * (tous les consommateurs lisent `ctxc[3]`), contrairement aux gates réfutées
+ * FEEDSELF_LAG3/PHASE2 qui écrivaient hors‑ctxc. Défaut‑OFF = comportement strictement
+ * inchangé (banque 16685). */
+/* ✖ MESURÉ NÉGATIF (2026‑10‑21, main) pour CETTE intégration en pré‑passe : FEEDSELF+AGING
+ * (razor ref 18432) + UHA_PFILE → **firstdiv 18432 → 12679** (régresse). Cause double :
+ * (a) le scoreur 0x412c30/0x414630, DÉJÀ clos/fidèle, CONSOMME ctxc[3] avec le ctx lag‑3 ;
+ *     substituer P partout le perturbe → near‑ties renversées plus tôt ; (b) le ROW law M31
+ *     (base 0x351 / ctx_roulant=[0x45cbc8]) est non clos → la paire (row,sym) reste incohérente.
+ *  ⟹ P fidèle est NÉCESSAIRE mais NON SUFFISANT en pré‑passe ; le levier réel = SINGLE‑PASS
+ *  (TASK16) où score+learn+row partagent un même ctx en ordre d'émission RÉEL. Gate laissée
+ *  défaut‑OFF (brique P réutilisable pour TASK16), non câblée au défaut. */
 static uint8_t *g_pfile = NULL;
 static uint32_t g_pfile_n = 0;
 static int g_pfile_tried = 0;
@@ -65,19 +110,19 @@ static const uint8_t *alz_ps_pfile_try(uint32_t n)
                 else free(b);
                 fclose(f);
                 if (g_pfile)
-                    fprintf(stderr, "[UHA_PFILE] cm-engine P charge: %u positions\n", (unsigned)n);
+                    fprintf(stderr, "[UHA_PFILE] cm-engine P chargé: %u positions\n", (unsigned)n);
             }
         }
     }
     return (g_pfile && n == g_pfile_n) ? g_pfile : NULL;
 }
 
-/* [GATED UHA_CM_WIRE, default-OFF, 13.787/789] tables of there machine-registre d'affinite
- * image (extracted of the binary UHARC.EXE, off = VA-0x402000) :
+/* [GATED UHA_CM_WIRE, défaut-OFF, §13.787/789] Tables de la machine-registre d'affinite
+ * image (extraite du binaire UHARC.EXE, off = VA-0x402000) :
  *   f74 = (f74<<8) + T1[sym]   (T1 @ 0x438310)
  *   f78 = (f78<<8) + T2[sym]   (T2 @ 0x438b10)
- * Same categorie of provenance that alz_ps_t1/t3 and alz_block_arena (tables STATIC
- * of the mecanisme, NOT some captures runtime). Utilisees ONLY when UHA_CM_WIRE is ON. */
+ * Meme categorie de provenance que alz_ps_t1/t3 et alz_block_arena (tables STATIQUES
+ * du mecanisme, PAS des captures runtime). Utilisees UNIQUEMENT quand UHA_CM_WIRE est ON. */
 static const uint32_t ALZ_REG_T1[256]={0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7,8,8,8,8,9,9,9,9,10,10,10,10,11,11,11,11,12,12,12,12,13,13,13,13,14,14,14,14,15,15,15,15,16,16,16,16,17,17,17,17,18,18,18,18,19,19,19,19,20,20,20,20,21,21,21,21,22,22,22,22,23,23,23,23,24,24,24,24,25,25,25,25,26,26,26,26,27,27,27,27,28,28,28,28,29,29,29,29,30,30,30,30,31,31,31,31,32,31,31,31,31,30,30,30,30,29,29,29,29,28,28,28,28,27,27,27,27,26,26,26,26,25,25,25,25,24,24,24,24,23,23,23,23,22,22,22,22,21,21,21,21,20,20,20,20,19,19,19,19,18,18,18,18,17,17,17,17,16,16,16,16,15,15,15,15,14,14,14,14,13,13,13,13,12,12,12,12,11,11,11,11,10,10,10,10,9,9,9,9,8,8,8,8,7,7,7,7,6,6,6,6,5,5,5,5,4,4,4,4,3,3,3,3,2,2,2,2,1,1,1,1,0,0,0};
 static const uint32_t ALZ_REG_T2[256]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,8,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
@@ -90,21 +135,85 @@ void alz_ps_gen_ctxs(uint32_t cls, const uint8_t *data, uint32_t n, uint32_t *ou
 {
     uint32_t i;
     if (cls == 0u) {
-        /* Path order-2 (0x414b2e) : row = prev1 + (0x100 if same class some 2 MSB). */
+        /* Voie ordre-2 (0x414b2e) : row = prev1 + (0x100 si même classe des 2 MSB). */
         for (i = 0; i < n; i++) {
             uint32_t b  = data[i];
             uint32_t p1 = rb(data, i, 1);
             uint32_t p2 = rb(data, i, 2);
             uint32_t row = p1 + (((p1 & 0xc0u) == (p2 & 0xc0u)) ? 0x100u : 0u);
             out[i] = (row << 8) | b;
+            /* [GATED UHA_A3_ESCWR_CLS] écriture du maître = (row, octet brut) : la même paire. */
+            if (alz_ps_escwr && ps_escwr_cls_on()) alz_ps_escwr[i] = out[i];
         }
         return;
     }
     {
         uint32_t ebx = 0u, flag = 0u, ebp = 0u;
         uint32_t esc = alz_ps_escape[cls];
-        /* [GATED UHA_PFILE, M33] for cls3, there prediction cm-engine replaces the ctx lag3. */
+        /* [GATED UHA_PFILE, M33] pour cls3, la prédiction cm-engine remplace le ctx lag‑3. */
         const uint8_t *pc = (cls == 3u) ? alz_ps_pfile_try(n) : NULL;
+        /* [GATED UHA_A3_ESCBRANCH, défaut-OFF] boucle fidèle classe 3 : état d'échappement
+         * (f6/rem par slot mod 6, cap, ecc2/5/6, fenêtre 32 bits, référence ecbf).
+         * Sortie = (ligne bande-relative de l'appel précédent — lag du maître — << 8) |
+         * delta d'ENTRÉE de l'appel courant = la cellule écrite par le maître. */
+        if (cls == 3u && !pc && ps_escbranch_on()) {
+            uint32_t f6[6] = {0u,0u,0u,0u,0u,0u}, rem[6] = {0u,0u,0u,0u,0u,0u};
+            uint32_t cap = 0u, ecc2 = 0u, ecc5 = 0u, ecc6 = 0u, ecbf = 0u, win = 0u;
+            uint32_t row = 0u;      /* ligne d'ÉCRITURE de l'appel précédent (escape ou ordinaire) */
+            uint32_t row_ord = 0u;  /* ligne ORDINAIRE de l'appel précédent (candidat scan/dens) */
+            uint32_t m6 = 0u, m6p1 = 1u, m3 = 0u;
+            for (i = 0; i < n; i++) {
+                uint32_t b = data[i];
+                uint32_t win_pre = rb(data, i, 1) | (rb(data, i, 2) << 8) |
+                                   (rb(data, i, 3) << 16) | (rb(data, i, 4) << 24);
+                uint32_t de = (b + 0x100u - ecbf) & 0xffu;          /* delta d'entrée (0x4101e6) */
+                uint32_t dl;
+                if (ecc6) de = (0u - de) & 0xffu;
+                if (de >= 0x80u) ecc6 ^= 1u;                        /* flip 0x4101fd */
+                dl = de;
+                if (ecc2) {                                         /* réarmement 0x41039b+ */
+                    uint32_t ref2 = (win_pre >> 16) & 0xffu;
+                    dl = (b + 0x100u - ref2) & 0xffu;
+                    ecc6 = ecc5;
+                    if (ecc6) dl = (0u - dl) & 0xffu;
+                    if (dl >= 0x80u) ecc6 = (ecc6 == 0u) ? 1u : 0u;
+                }
+                /* CANDIDAT (scan/dens, confront m9) = ligne ORDINAIRE + cellule `dl` ;
+                 * ÉCRITURE du maître (journal m18) = ligne escape/ordinaire + cellule `de`,
+                 * exposée par `alz_ps_escwr` si le consommateur l'a demandée. */
+                out[i] = (row_ord << 8) | dl;
+                if (alz_ps_escwr) alz_ps_escwr[i] = (row << 8) | de;
+                {
+                    uint32_t u = m6;                                /* cmp octet vs rem[u] */
+                    if (b == rem[u]) f6[u] += 1u; else f6[u] >>= 1u;
+                }
+                win = ((win << 8) | b) & 0xffffffffu;
+                {
+                    uint32_t v = m6p1;
+                    uint32_t ph = m3 << 5;
+                    uint32_t ecbf_new = (win >> 16) & 0xffu;
+                    rem[v] = (ecbf_new + b - ((win >> 24) & 0xffu)) & 0xffu;
+                    uint32_t t3r = alz_ps_t3[dl] + ph;   /* ligne ORDINAIRE (candidat) */
+                    if (f6[v] > 8u && cap < 5u) {                   /* ÉCHAPPEMENT 0x41031f */
+                        ecc5 = ecc6;
+                        row  = 16u + ph;                            /* ligne d'ÉCRITURE seulement */
+                        ecc6 = 0u; ecbf = rem[v]; cap += 1u; ecc2 = 1u;
+                    } else {
+                        uint32_t fl = (f6[v] > 8u) ? 1u : 0u;
+                        ecc2 = 0u; ecbf = ecbf_new;
+                        row  = t3r;
+                        cap  = fl ? cap + 1u : 0u;
+                    }
+                    row_ord = t3r;
+                }
+                m6 = m6p1;
+                m6p1 = (m6p1 == 5u) ? 0u : (m6p1 + 1u);
+                m3 = (m3 == 2u) ? 0u : (m3 + 1u);
+            }
+            return;
+        }
+        {
+        uint32_t ebp_m3 = 0u;
         for (i = 0; i < n; i++) {
             uint32_t b = data[i];
             uint32_t ctx;
@@ -117,14 +226,20 @@ void alz_ps_gen_ctxs(uint32_t cls, const uint8_t *data, uint32_t n, uint32_t *ou
             }
             uint32_t delta = flag ? ((ctx + 0x100u - b) & 0xffu) : ((b + 0x100u - ctx) & 0xffu);
             out[i] = (ebx << 8) | delta;
+            /* [GATED UHA_A3_ESCWR_CLS] boucle générique : écriture du maître = (ebx, delta),
+             * soit exactement `out[i]` ; n'expose le canal que pour cls ≥ 4 (cls 1/2 non
+             * requises par le corpus, `random` est déjà exact sans ligne dérivée). */
+            if (alz_ps_escwr && cls >= 4u && ps_escwr_cls_on()) alz_ps_escwr[i] = out[i];
             if (delta >= 0x80u) flag ^= 1u;
             switch (cls) {
                 case 1: ebx = alz_ps_t1[delta] + ((uint32_t)alz_ps_tnib[ebx & 0xfu] << 4); break;
                 case 2: ebx = alz_ps_t1[delta] + ((ebp & 1u) << 4); break;
-                case 3: ebx = alz_ps_t3[delta] + ((ebp % 3u) << 5); break;
+                case 3: ebx = alz_ps_t3[delta] + (ebp_m3 << 5); break;
                 default: ebx = alz_ps_t1[delta] + ((ebp & 3u) << 4); break; /* cls>=4 */
             }
             ebp++;
+            ebp_m3 = (ebp_m3 == 2u) ? 0u : (ebp_m3 + 1u);
+        }
         }
     }
 }
@@ -150,28 +265,28 @@ uint32_t alz_ps_class_sigma(uint32_t cls, const uint8_t *data, uint32_t n,
         uint32_t row = ctx >> 8;
         uint32_t delta = ctx & 0xffu;
         uint32_t T, f, c, inc, cs;
-        if (row >= ALZ_ARENA2D_MAX_ROW) row = ALZ_ARENA2D_MAX_ROW - 1u; /* keeps */
+        if (row >= ALZ_ARENA2D_MAX_ROW) row = ALZ_ARENA2D_MAX_ROW - 1u; /* garde */
         T   = a->total[row];
         f   = a->freq[ctx];
         c   = a->counter[row];
         inc = a->promo[row];
 
-        if (f != 0u) {                                   /* --- WARM : 1 term --- */
+        if (f != 0u) {                                   /* --- WARM : 1 terme --- */
             cs = alz_score_proba_to_cost((f << 14) / T);
-        } else {                                         /* --- COLD : 2 terms --- */
+        } else {                                         /* --- COLD : 2 termes --- */
             cs = alz_score_proba_to_cost(cold_first)
                + alz_score_proba_to_cost((c << 14) / T);
         }
         acc += cs;
         if (percost) percost[i] = cs;
 
-        if (best_in && acc > *best_in) {                 /* abandon precoce (0x4149c2) */
+        if (best_in && acc > *best_in) {                 /* abandon précoce (0x4149c2) */
             if (pnpos) *pnpos = i + 1u;
             free(ctxs); free(a);
             return acc;
         }
 
-        /* update d'arena (identical has alz_arena2d_score) */
+        /* mise à jour d'arène (identique à alz_arena2d_score) */
         if (f == 0u) {
             a->freq[ctx]    = (uint16_t)inc;
             a->counter[row] = (uint16_t)(c + inc);
@@ -205,12 +320,12 @@ uint32_t alz_ps_block_argmin(const uint8_t *data, uint32_t n,
 }
 
 /* ============================================================================
- * [A5.1 it2] path PERSISTANT : machine ctx + arena threadees cross-blocks.
- * Voir alz_parse_score.h for there specification (gated, read-only).
+ * [A5.1 it2] Chemin PERSISTANT : machine ctx + arène threadées cross-blocs.
+ * Voir alz_parse_score.h pour la spécification (gated, lecture seule).
  * ========================================================================== */
 
-/* Has not of the machine ctx : returns ctx=(row<<8)|delta for there position ABSOLUE
- * abs in the buffer global g, and advances st-state (ebx/flag/ebp). cls0 = order-2 direct. */
+/* Un pas de la machine ctx : renvoie ctx=(row<<8)|delta pour la position ABSOLUE
+ * abs dans le buffer global g, et avance st-état (ebx/flag/ebp). cls0 = ordre-2 direct. */
 static inline uint32_t ps_ctx_step(uint32_t cls, const uint8_t *g, uint32_t abs,
                                    uint32_t *ebx, uint32_t *flag, uint32_t *ebp)
 {
@@ -243,7 +358,7 @@ static inline uint32_t ps_ctx_step(uint32_t cls, const uint8_t *g, uint32_t abs,
     }
 }
 
-/* [a5-e briquet 1] wrappers d'state machine for the scan of couverture legacy. */
+/* [a5-e briquet 1] wrappers d'état machine pour le scan de couverture legacy. */
 uint32_t alz_ps_ctx_step_run(uint32_t cls, const uint8_t *g, uint32_t abs, uint32_t *mm)
 {
     return ps_ctx_step(cls, g, abs, &mm[0], &mm[1], &mm[2]);
@@ -251,21 +366,76 @@ uint32_t alz_ps_ctx_step_run(uint32_t cls, const uint8_t *g, uint32_t abs, uint3
 
 uint32_t alz_ps_ctx_scan3(const uint8_t *g, uint32_t abs, uint32_t *mm, uint32_t delta)
 {
-    uint32_t b     = g[abs];                    /* roule ctx machine (as cls3) */
+    uint32_t b     = g[abs];                    /* roule ctx machine (comme cls3) */
     uint32_t roll  = rb(g, abs, 1) | (rb(g, abs, 2) << 8) |
                      (rb(g, abs, 3) << 16) | (rb(g, abs, 4) << 24);
     uint32_t ctx   = (roll >> alz_ps_escape[3]) & 0xffu;
     uint32_t e = mm[0], f = mm[1], p = mm[2];
     uint32_t d;
     uint32_t out;
-    (void)b; (void)ctx;                          /* the scan fournit son clean delta */
+    (void)b; (void)ctx;                          /* le scan fournit son propre delta */
     d   = delta & 0xffu;
-    out = (e << 8) | d;                          /* line BEFORE reading (mirror) */
+    out = (e << 8) | d;                          /* ligne AVANT lecture (miroir) */
     if (d >= 0x80u) f ^= 1u;
-    e = alz_ps_t3[d] + ((p % 3u) << 5);          /* machine advances sure delta-scan */
+    e = alz_ps_t3[d] + ((p % 3u) << 5);          /* machine avance sur delta-scan */
     p++;
     mm[0] = e; mm[1] = f; mm[2] = p;
     return out;
+}
+
+/* [GATED UHA_A3_ESCFEED, DEFAUT-OFF, lane ALZ -m3] MODELE D'ESCAPE cls3 (ligne
+ * 0x402+cls, registre m9 ligne 1029) : 256 symboles, freq init 4, total init 1024,
+ * +16 par ÉVÉNEMENT FROID du scan, appliqué AUX FRONTIÈRES de bloc (la table est
+ * FIGÉE dans le bloc : m9, 29/29 Fenwick = 2528). Premier terme du coût froid =
+ * LUT[FLOOR(f<<14/tot)] (le second, LUT[(counter<<14)/T], est déjà posé).
+ * État bloc1 attendu = 4+16*n, total 1024+16*94 (n = compte froid du bloc 0). */
+static uint16_t g_escf[256];
+static uint32_t g_esct = 1024u;
+static uint32_t g_esccnt[256];
+static int      g_esc_on = -1;
+static int      g_esc_count = 0;   /* comptage armé UNIQUEMENT sur la passe de SORTIE */
+static void ps_esc_lazy(void)
+{
+    if (g_esc_on < 0) {
+        int s;
+        g_esc_on = getenv("UHA_A3_ESCFEED") ? 1 : 0;
+        if (g_esc_on) for (s = 0; s < 256; s++) g_escf[s] = 4u;
+    }
+}
+static uint32_t ps_esc_term(uint32_t sym)
+{
+    uint32_t p;
+    sym &= 0xffu;
+    p = g_esct ? (uint32_t)((((uint64_t) g_escf[sym]) << 14) / g_esct) : (ALZ_SCORE_CUM_N - 1u);
+    if (p >= ALZ_SCORE_CUM_N) p = ALZ_SCORE_CUM_N - 1u;
+    if (g_esc_count) g_esccnt[sym]++;
+    return alz_score_proba_to_cost(p);
+}
+/* Accesseurs exportés (lane ALZ -m3) : terme froid d'escape + frontière de bloc,
+ * pour le canal LIVE-WALK de alz.c (qui remplit g_lmin_dens en mode banque). */
+static void ps_esc_boundary(void);
+uint32_t alz_ps_esc_coldcost(uint32_t sym)
+{
+    uint32_t cv;
+    int save;
+    ps_esc_lazy();
+    if (!g_esc_on) return 0u;
+    save = g_esc_count; g_esc_count = 1;
+    cv = ps_esc_term(sym);
+    g_esc_count = save;
+    return cv;
+}
+void alz_ps_esc_boundary_pub(void) { ps_esc_boundary(); }
+
+static void ps_esc_boundary(void)
+{
+    uint32_t na = 0u;
+    int s;
+    ps_esc_lazy();
+    if (!g_esc_on) return;
+    for (s = 0; s < 256; s++) na += g_esccnt[s];
+    for (s = 0; s < 256; s++) { g_escf[s] = (uint16_t)(g_escf[s] + 16u * g_esccnt[s]); g_esccnt[s] = 0u; }
+    g_esct += 16u * na;
 }
 
 uint32_t alz_ps_class_sigma_carry(alz_ps_carry_t *st, uint32_t cls,
@@ -287,13 +457,13 @@ uint32_t alz_ps_class_sigma_carry(alz_ps_carry_t *st, uint32_t cls,
     for (i = 0; i < n; i++) {
         uint32_t ctx = ps_ctx_step(cls, g, base + i, &st->ebx, &st->flag, &st->ebp);
         uint32_t row, delta, T, f, c, inc, cs;
-        /* [GATED UHA_PHASEFIX] fixes the term of phase of the row cls3 = (abs+2)%3. */
+        /* [GATED UHA_PHASEFIX] corrige le terme de phase du row cls3 = (abs+2)%3. */
         if (g_ps_phasefix && cls == 3u) {
-            static int s_phrel = -1;   /* [GATED UHA_PHASEFIX_REL, default-OFF, 14.147] */
+            static int s_phrel = -1;   /* [GATED UHA_PHASEFIX_REL, défaut-OFF, §14.147] */
             uint32_t e = ctx >> 8;
             uint32_t pbase;
             if (s_phrel < 0) s_phrel = getenv("UHA_PHASEFIX_REL") ? 1 : 0;
-            pbase = s_phrel ? i : (base + i);   /* relatif-au-block vs absolu */
+            pbase = s_phrel ? i : (base + i);   /* relatif-au-bloc vs absolu */
             e = (e & 0x1fu) + (((pbase + 2u) % 3u) << 5);
             ctx = (e << 8) | (ctx & 0xffu);
         }
@@ -306,8 +476,11 @@ uint32_t alz_ps_class_sigma_carry(alz_ps_carry_t *st, uint32_t cls,
         inc = a->promo[row];
 
         if (f != 0u) cs = alz_score_proba_to_cost((f << 14) / T);
-        else         cs = alz_score_proba_to_cost(cold_first)
-                            + alz_score_proba_to_cost((c << 14) / T);
+        else {
+            ps_esc_lazy();
+            cs = (g_esc_on ? ps_esc_term(delta) : alz_score_proba_to_cost(cold_first))
+                   + alz_score_proba_to_cost((c << 14) / T);
+        }
         if (g_adump && cls == 3u)
             fprintf(g_adump, "%u\t%u\t%u\t%u\t%u\t%u\n",
                     (unsigned)(base + i), (unsigned)row, (unsigned)f,
@@ -315,12 +488,12 @@ uint32_t alz_ps_class_sigma_carry(alz_ps_carry_t *st, uint32_t cls,
         acc += cs;
         if (percost) percost[i] = cs;
 
-        if (best_in && acc > *best_in) {          /* abandon : machine avancee, arena NO entrainee */
+        if (best_in && acc > *best_in) {          /* abandon : machine avancée, arène NON entraînée */
             if (pnpos) *pnpos = i + 1u;
             return acc;
         }
-        /* [GATED UHA_WLEARNLIT] skip there MUTATION d'arena out some positions masquees
-         * (the cost/percost ci-dessus remainder computed for all positions). */
+        /* [GATED UHA_WLEARNLIT] skip la MUTATION d'arène hors des positions masquées
+         * (le coût/percost ci-dessus reste calculé pour TOUTES les positions). */
         if (g_ps_learn_mask && !g_ps_learn_mask[base + i]) continue;
 
         if (f == 0u) {
@@ -347,7 +520,7 @@ uint32_t alz_ps_block_argmin_carry(alz_ps_carry_t *st, uint32_t seed_cls,
     uint32_t order[ALZ_PS_NCLASS];
     uint32_t k, cls, best = 0xffffffffu, winner = 0u, cnt = 0u;
 
-    /* seed_cls en first (best_in=NULL, never aborts), then the others en order croissant. */
+    /* seed_cls en premier (best_in=NULL, jamais abandonné), puis les autres en ordre croissant. */
     order[cnt++] = seed_cls;
     for (cls = 0; cls < ALZ_PS_NCLASS; cls++)
         if (cls != seed_cls) order[cnt++] = cls;
@@ -373,7 +546,7 @@ void alz_ps_carry_free(alz_ps_carry_t *st)
     }
 }
 
-/* ---- Self-test : image.raw bloc1, Sigma_cls from-scratch == oracles + argmin cls3 (13.141). ---- */
+/* ---- Self-test : image.raw bloc1, Σ_cls from-scratch == oracles + argmin cls3 (§13.141). ---- */
 int alz_parse_score_selftest(void)
 {
 #include "alz_parse_score_vecs.inc"   /* alz_ps_testdata[12544] */
@@ -403,11 +576,11 @@ int alz_parse_score_selftest(void)
     return fails ? 1 : 0;
 }
 
-/* ---- [A5.1 it1] Multitest by blocks (gated UHA_PARSEMULTI=<image.raw>) : rolle P1
- * (alz_ps_block_argmin, INIT COLD = hypothese zero " no persistance ") sure the
- * 6 blocks of scoring d'image.raw and compares to the Sigma_cls ORACLE (blockcost_perclass.log,
- * 13.118/13.165). Objectif : (has) confirmer winner cls3 robuste, (b) quantifier
- * l'impact of the seed inter-blocks. read-only, n'affecte NOT l'encoding. ---- */
+/* ---- [A5.1 it1] Multitest par blocs (gated UHA_PARSEMULTI=<image.raw>) : rolle P1
+ * (alz_ps_block_argmin, INIT COLD = hypothèse nulle « pas de persistance ») sur les
+ * 6 blocs de scoring d'image.raw et compare aux Σ_cls ORACLE (blockcost_perclass.log,
+ * §13.118/§13.165). Objectif : (a) confirmer gagnant cls3 robuste, (b) quantifier
+ * l'impact de la graine inter-blocs. Lecture seule, n'affecte PAS l'encodage. ---- */
 static const uint32_t am_blk_pos[6] = {0x0000u, 0x3100u, 0x620cu, 0x931cu, 0xc4ffu, 0xff00u};
 static const uint32_t am_blk_len[6] = {0x3100u, 0x3100u, 0x3100u, 0x3100u, 0x3a01u, 0x100u};
 static const uint32_t am_blk_oracle[6][ALZ_PS_NCLASS] = {
@@ -435,7 +608,7 @@ int alz_parse_score_multitest(const char *path)
         uint32_t sigma[ALZ_PS_NCLASS];
         uint32_t pos = am_blk_pos[b], len = am_blk_len[b], w;
         int exact = 1, wsmatch;
-        if ((long)(pos + len) > sz) { printf("  blk%d OUT-OF-BOUNDS\n", b); free(buf); return 1; }
+        if ((long)(pos + len) > sz) { printf("  blk%d HORS-FICHIER\n", b); free(buf); return 1; }
         w = alz_ps_block_argmin(buf + pos, len, 32u, ALZ_PS_COLD0, sigma);
         wsmatch = (w == 3u);
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++)
@@ -443,8 +616,8 @@ int alz_parse_score_multitest(const char *path)
         if (wsmatch) winok++;
         if (exact) sigma_ok++;
         printf("  blk%d pos=0x%05x len=0x%05x : gagnant=cls%u (%s cls3) | "
-               "gotallo=%s | Sigma[0..4]=",
-               b, pos, len, w, wsmatch ? "==" : "!=", exact ? "==ORACLE" : ">=1 ecart");
+               "gotallo=%s | Σ[0..4]=",
+               b, pos, len, w, wsmatch ? "==" : "!=", exact ? "==ORACLE" : ">=1 écart");
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++)
             printf(" %s0x%08x%s", k ? "" : "", sigma[k], k < 4 ? "" : "");
         printf(" vs oracle:");
@@ -452,15 +625,15 @@ int alz_parse_score_multitest(const char *path)
             printf(" 0x%08x", am_blk_oracle[b][k]);
         printf("\n");
     }
-    printf("[PARSE-MULTI] gagnant==cls3 : %d/6 blocs | Sigma 5/5 exacts : %d/6 blocs\n", winok, sigma_ok);
+    printf("[PARSE-MULTI] gagnant==cls3 : %d/6 blocs | Σ 5/5 exacts : %d/6 blocs\n", winok, sigma_ok);
     free(buf);
     return 0;
 }
 
-/* ---- [A5.1 it2] Multitest PERSISTANCE (gated UHA_PARSEMULTI2=<image.raw>) : same decoupage
- * that it1 but arenas + machine ctx threadees of has block at the other (vainqueur score en first,
- * context global, ebp absolu). Objectif : to verify convergence Sigma_cls -> oracle (target exact).
- * read-only, n'affecte NOT l'encoding. ---- */
+/* ---- [A5.1 it2] Multitest PERSISTANCE (gated UHA_PARSEMULTI2=<image.raw>) : même découpage
+ * que it1 MAIS arènes + machine ctx threadées d'un bloc à l'autre (vainqueur scoré en premier,
+ * contexte global, ebp absolu). Objectif : vérifier convergence Σ_cls -> oracle (cible exact).
+ * Lecture seule, n'affecte PAS l'encodage. ---- */
 static int s_pm2_machine_reset = 0;
 int alz_parse_score_multitest2(const char *path)
 {
@@ -479,18 +652,18 @@ int alz_parse_score_multitest2(const char *path)
     for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
         st[k].arena = NULL; st[k].ebx = 0; st[k].flag = 0; st[k].ebp = 0;
     }
-    printf("[PARSE-MULTI2] %s sz=%ld, 6 blocs, PERSISTANCE arene+machine (vainqueur d'abord)\n", path, sz);
+    printf("[PARSE-MULTI2] %s sz=%ld, 6 blocs, PERSISTANCE arène+machine (vainqueur d'abord)\n", path, sz);
     {
-        const char *mm = getenv("UHA_PM2");   /* "m" = machine reinit/by-block (arena single carry) */
+        const char *mm = getenv("UHA_PM2");   /* "m" = machine réinit/par-bloc (arène seule carry) */
         s_pm2_machine_reset = (mm && mm[0] == 'm') ? 1 : 0;
-        printf("[PARSE-MULTI2] mode carry = %s\n", s_pm2_machine_reset ? "ARENE seule (machine reset/bloc)" : "arene+machine");
+        printf("[PARSE-MULTI2] mode carry = %s\n", s_pm2_machine_reset ? "ARÈNE seule (machine reset/bloc)" : "arène+machine");
     }
     for (b = 0; b < 6; b++) {
         uint32_t sigma[ALZ_PS_NCLASS], npos[ALZ_PS_NCLASS];
         uint32_t base = am_blk_pos[b], len = am_blk_len[b], w;
         int exact = 1, wsmatch;
         double dev = 0.0;
-        if ((long)(base + len) > sz) { printf("  blk%d OUT-OF-BOUNDS\n", b); free(buf); return 1; }
+        if ((long)(base + len) > sz) { printf("  blk%d HORS-FICHIER\n", b); free(buf); return 1; }
         if (s_pm2_machine_reset && b > 0) {
             for (k = 0; k < (int)ALZ_PS_NCLASS; k++) { st[k].ebx = 0; st[k].flag = 0; st[k].ebp = 0; }
         }
@@ -505,10 +678,10 @@ int alz_parse_score_multitest2(const char *path)
         if (wsmatch) winok++;
         if (exact) sigma_ok++;
         printf("  blk%d base=0x%05x len=0x%05x seed=cls%u : gagnant=cls%u (%s cls3) | %s | "
-               "devSigma moy=%+.2f%% | npos=", b, base, len, w, w,
-               wsmatch ? "==" : "!=", exact ? "==ORACLE" : ">=1 ecart", dev * 20.0);
+               "dévΣ moy=%+.2f%% | npos=", b, base, len, w, w,
+               wsmatch ? "==" : "!=", exact ? "==ORACLE" : ">=1 écart", dev * 20.0);
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++) printf(" %u", npos[k]);
-        printf("\n      Sigma   =");
+        printf("\n      Σ   =");
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++) printf(" 0x%08x", sigma[k]);
         printf("\n      orc =");
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++) printf(" 0x%08x", am_blk_oracle[b][k]);
@@ -521,25 +694,37 @@ int alz_parse_score_multitest2(const char *path)
 }
 
 /* ============================================================================
- * [A5.1 it3] Modelisation SNAPSHOT : at each call of scoring 0x414630, there class
- * copie l'arena-SNAPSHOT current in has arena LIVE jetable (13.13/14 " copie
- * snapshot->live at each call, rep movsb ") ; l'entrainement of has class not pollue
- * therefore NOT the others classes of the block. The snapshot n'advances only to  SINGLE FOIS by block,
- * entraine sure the stream of there class WINNING (argmin). There machine ctx (ebx/flag/ebp)
- * remainder GLOBAL by class and advances of all the block, abandon now not (from-plain).
- * C'is there granularity of persistance correcte attendue of a5-d3b. read-only, gated.
+ * [A5.1 it3] Modelisation SNAPSHOT : a chaque appel de scoring 0x414630, la classe
+ * copie l'arène-SNAPSHOT courante dans une arène LIVE jetable (§13.13/14 « copie
+ * snapshot->live a chaque appel, rep movsb ») ; l'entrainement d'une classe ne pollue
+ * DONC PAS les autres classes du bloc. Le snapshot n'avance QU'UNE SEULE FOIS par bloc,
+ * entraine sur le flux de la classe GAGNANTE (argmin). La machine ctx (ebx/flag/ebp)
+ * reste GLOBALE par classe et avance de tout le bloc, abandon ou pas (from-plain).
+ * C'est la granularity de persistance correcte attendue de a5-d3b. Lecture seule, gated.
  * ========================================================================== */
 
-/* Score has class sure has stream ctxs already genere, in l'arena has (m.has.j + rescale),
- * abandon optionnel contre *best_in. returns l'accunulateur 32 bits.
- * percost (optionnel, size n) : y writes the cost of each position (cs). */
+/* Score une classe sur un flux ctxs deja genere, dans l'arène a (m.a.j + rescale),
+ * abandon optionnel contre *best_in. Retourne l'accunulateur 32 bits.
+ * percost (optionnel, taille n) : y écrit le coût de CHAQUE position (cs). */
+/* [GATED UHA_A3_CELLDUMP=<f>, LECTURE SEULE] base absolue du dump cellule (posn ée
+ * par le producteur snapshot avant sa passe de re-score gagnante). */
+static uint32_t g_ps_dumpbase = 0u;
+static uint32_t g_ps_dumpn    = 0u;
+
 static uint32_t ps_score_ctxs(alz_arena2d_t *a, const uint32_t *ctxs, uint32_t n,
                               uint32_t default_inc, uint32_t cold_first,
                               const uint32_t *best_in, uint32_t *pnpos,
                               uint32_t *percost)
 {
     uint32_t i, acc = 0u;
+    static FILE *cd = NULL;
+    static int cdi = -1;
     (void)default_inc;
+    if (cdi < 0) {
+        const char *ce = getenv("UHA_A3_CELLDUMP");
+        cdi = 0;
+        if (ce && *ce) { cd = fopen(ce, "w"); cdi = cd ? 1 : 0; }
+    }
     for (i = 0u; i < n; i++) {
         uint32_t ctx = ctxs[i];
         uint32_t row = ctx >> 8;
@@ -549,11 +734,19 @@ static uint32_t ps_score_ctxs(alz_arena2d_t *a, const uint32_t *ctxs, uint32_t n
         f   = a->freq[ctx];
         c   = a->counter[row];
         inc = a->promo[row];
-        if (f != 0u) cs = alz_score_proba_to_cost((f << 14) / T);
-        else         cs = alz_score_proba_to_cost(cold_first)
-                            + alz_score_proba_to_cost((c << 14) / T);
+        if (f != 0u) cs = alz_score_proba_to_cost((f << 14) / (T ? T : 1u));
+        else {
+            ps_esc_lazy();
+            cs = (g_esc_on ? ps_esc_term(ctx & 0xffu) : alz_score_proba_to_cost(cold_first))
+                   + alz_score_proba_to_cost((c << 14) / (T ? T : 1u));
+        }
         acc += cs;
         if (percost) percost[i] = cs;
+        if (cd && percost)   /* cellule intime de la position publiée */
+            fprintf(cd, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+                    (unsigned)(g_ps_dumpbase + i), (unsigned) row, (unsigned)(ctx & 0xffu),
+                    (unsigned) f, (unsigned) T, (unsigned) c,
+                    (unsigned)(((f << 14) | 0u) / (T ? T : 1u)), (unsigned) cs);
         if (best_in && acc > *best_in) { if (pnpos) *pnpos = i + 1u; return acc; }
         if (f == 0u) {
             a->freq[ctx]    = (uint16_t)inc;
@@ -569,11 +762,11 @@ static uint32_t ps_score_ctxs(alz_arena2d_t *a, const uint32_t *ctxs, uint32_t n
     return acc;
 }
 
-/* --- briques of the producteur per-position argmin (13.729, UHA_PERPOS) ------------
- * cost READ-ONLY of has ctx in l'arena (mirror exact of the branch cost of
- * ps_score_ctxs, without mutation) ; and ps_learn = MAJ d'arena (mutation) mirror of
- * ps_score_ctxs. Indexation f=has->freq[ctx] (ctx no clampe) / total=row clampe,
- * identical has ps_score_ctxs for rester conforme au model validated. */
+/* --- briques du producteur per-position argmin (§13.729, UHA_PERPOS) ------------
+ * coût READ-ONLY d'un ctx dans l'arène (miroir exact de la branche coût de
+ * ps_score_ctxs, SANS mutation) ; et ps_learn = MAJ d'arène (mutation) miroir de
+ * ps_score_ctxs. Indexation f=a->freq[ctx] (ctx non clampé) / total=row clampé,
+ * identique à ps_score_ctxs pour rester conforme au modèle validé. */
 static uint32_t ps_cost_of(const alz_arena2d_t *a, uint32_t ctx, uint32_t cold_first)
 {
     uint32_t row = ctx >> 8, T, f, c, cs;
@@ -600,7 +793,7 @@ static void ps_learn(alz_arena2d_t *a, uint32_t ctx)
     if (!g_ps_no_inline_rescale && a->total[row] >= ALZ_ARENA2D_RESCALE) alz_arena2d_rescale(a, row);
 }
 
-/* rescale by line at the frontier (total>=0x4000), mirror of the reload/commit legacy. */
+/* rescale par ligne à la frontière (total≥0x4000), miroir du reload/commit legacy. */
 static void ps_rescale_all(alz_arena2d_t *a)
 {
     uint32_t r; for (r = 0u; r < ALZ_ARENA2D_MAX_ROW; r++)
@@ -615,7 +808,7 @@ int alz_parse_score_multitest3(const char *path)
     int b, k, winok = 0, sigma_ok = 0;
     alz_arena2d_t *snap, *live;
     uint32_t *ctxs[ALZ_PS_NCLASS];
-    uint32_t mm[ALZ_PS_NCLASS][3];   /* ebx, flag, ebp by class */
+    uint32_t mm[ALZ_PS_NCLASS][3];   /* ebx, flag, ebp par classe */
     uint32_t seed_cls = 0u;
     uint32_t maxlen;
     if (!fp) { printf("[PARSE-MULTI3] open fail %s\n", path); return 1; }
@@ -634,24 +827,24 @@ int alz_parse_score_multitest3(const char *path)
         mm[k][0] = mm[k][1] = mm[k][2] = 0u;
         ctxs[k] = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)maxlen);
     }
-    printf("[PARSE-MULTI3] %s sz=%ld, 6 blocks, SNAPSHOT (per-class copy, snap advanced by winner)\n", path, sz);
+    printf("[PARSE-MULTI3] %s sz=%ld, 6 blocs, SNAPSHOT (copie per-classe, snap avance par gagnant)\n", path, sz);
     for (b = 0; b < 6; b++) {
         uint32_t sigma[ALZ_PS_NCLASS], npos[ALZ_PS_NCLASS];
         uint32_t base = am_blk_pos[b], len = am_blk_len[b], order[ALZ_PS_NCLASS];
         uint32_t best = 0xffffffffu, winner = 0u, cnt = 0u, c;
         int exact = 1, wsmatch;
         double dev = 0.0;
-        if ((long)(base + len) > sz) { printf("  blk%d OUT-OF-BOUNDS\n", b); break; }
-        /* (1) generer the stream ctxs by class sure all the block (machine advances full). */
+        if ((long)(base + len) > sz) { printf("  blk%d HORS-FICHIER\n", b); break; }
+        /* (1) generer les flux ctxs par classe sur TOUT le bloc (machine avance pleine). */
         for (c = 0u; c < ALZ_PS_NCLASS; c++) {
             uint32_t i;
             for (i = 0u; i < len; i++)
                 ctxs[c][i] = ps_ctx_step(c, buf, base + i, &mm[c][0], &mm[c][1], &mm[c][2]);
         }
-        /* (2) order : seed (= winner block previous) d'abord, then ascending. */
+        /* (2) ordre : seed (= gagnant bloc precedent) d'abord, puis ascending. */
         order[cnt++] = seed_cls;
         for (c = 0u; c < ALZ_PS_NCLASS; c++) if (c != seed_cls) order[cnt++] = c;
-        /* (3) each class copie the snapshot in live, score, jette live. */
+        /* (3) chaque classe copie le snapshot dans live, score, jette live. */
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
             uint32_t cc = order[(uint32_t)k], s, np = 0;
             *live = *snap;
@@ -660,8 +853,8 @@ int alz_parse_score_multitest3(const char *path)
             sigma[cc] = s; npos[cc] = np;
             if (s < best) { best = s; winner = cc; }
         }
-        /* (4) to advance the snapshot en entrainant the stream of there winning (full).
-         * Override env UHA_PM3ADV=<0..4> for tester which class alimente the snapshot. */
+        /* (4) avancer le snapshot en entrainant le flux de la gagnante (plein).
+         * Override env UHA_PM3ADV=<0..4> pour tester quelle classe alimente le snapshot. */
         {
             uint32_t adv = winner;
             const char *ae = getenv("UHA_PM3ADV");
@@ -693,15 +886,15 @@ int alz_parse_score_multitest3(const char *path)
 }
 
 /* ==========================================================================
- * [cost-literal-live SNAPSHOT dens - GATED by l'appelant alz.c UHA_COSTSNAP]
- * Reproduces there granularity SNAPSHOT of MULTI3 (it3) but fills `out[base+i]`
- * of the cost BY position of the class WINNING (argmin) of the block, for alimenter
- * g_lmin_dens of has cost d'arena of PARSE position-indexe PASSIF faithful to legacy
- * (validated +/-0,4 % under oracle t9-sim-arena), au lieu of the cold0-by-block (24 %).
- * Machine ctx (ebx/flag/ebp) threadee GLOBALEMENT by class via ps_ctx_step.
- * Pur : n'affecte no arena global, buffers local. returns 0 OK, <0 error. */
-/* [GATED UHA_SNAPINC=<n>, default-OFF] Fixe the inc (promo) some lines of has arena.
- * 0 = not touche not (behavior actuel, promo issu d'alz_arena2d_init). No-regressif. */
+ * [cost-literal-live SNAPSHOT dens — GATED par l'appelant alz.c UHA_COSTSNAP]
+ * Reproduit la granularity SNAPSHOT de MULTI3 (it3) mais remplit `out[base+i]`
+ * du COÛT PAR POSITION de la classe GAGNANTE (argmin) du bloc, pour alimenter
+ * g_lmin_dens d'un coût d'arène de PARSE position-indexé PASSIF fidèle au legacy
+ * (validé ±0,4 % sous oracle §t9-sim-arena), au lieu du cold0-par-bloc (24 %).
+ * Machine ctx (ebx/flag/ebp) threadée GLOBALEMENT par classe via ps_ctx_step.
+ * Pur : n'affecte aucune arène globale, buffers locaux. Retourne 0 OK, <0 erreur. */
+/* [GATED UHA_SNAPINC=<n>, DEFAUT-OFF] Fixe le inc (promo) des LIGNES d'une arène.
+ * 0 = ne touche pas (comportement actuel, promo issu d'alz_arena2d_init). Non-régressif. */
 static void ps_set_promo_all(alz_arena2d_t *a, uint32_t inc)
 {
     uint32_t r;
@@ -713,16 +906,22 @@ int alz_ps_snapshot_percost(const uint8_t *g, uint32_t usize,
                             const uint32_t *blkpos, const uint32_t *blklen,
                             int nblk, uint32_t *out)
 {
+    static alz_arena2d_t *s_snap_ar = NULL, *s_live_ar = NULL;
+    static uint32_t *s_snap_ctxs[ALZ_PS_NCLASS] = {NULL, NULL, NULL, NULL, NULL};
+    static uint32_t  s_snap_ctx_cap[ALZ_PS_NCLASS] = {0u, 0u, 0u, 0u, 0u};
     alz_arena2d_t *snap, *live;
     uint32_t *ctxs[ALZ_PS_NCLASS];
     uint32_t mm[ALZ_PS_NCLASS][3];
-    uint32_t seed_cls = 0u, maxlen = 0u;
-    uint32_t snap_inc = 0u;   /* [GATED UHA_SNAPINC] inc d'learning of the SNAPSHOT persiste */
-    uint32_t snap_adv = 0xffffffffu;  /* [GATED UHA_SNAPADV=<0..4>] class which alimente l'avancement of the carry; sentinel=winner (default) */
+    uint32_t seed_cls = 0u, maxlen = 0u, need;
+    uint32_t snap_inc = 0u;   /* [GATED UHA_SNAPINC] inc d'apprentissage du SNAPSHOT persisté */
+    uint32_t snap_adv = 0xffffffffu;  /* [GATED UHA_SNAPADV=<0..4>] classe qui alimente l'avancement du carry; sentinel=winner (défaut) */
+    const char *nomm_env = getenv("UHA_NOMM");
+    uint32_t nclass = (nomm_env && nomm_env[0] == '1') ? 1u : ALZ_PS_NCLASS;
     int b, k;
 
     if (!g || !blkpos || !blklen || !out || nblk <= 0)
         return -1;
+    alz_ps_snapwin_n = 0;   /* [UHA_A3_CTXCLASS_AUTO] cache de processus remis a zero */
     {
         const char *se = getenv("UHA_SNAPINC");
         if (se && *se) snap_inc = (uint32_t)strtoul(se, NULL, 10);
@@ -731,35 +930,68 @@ int alz_ps_snapshot_percost(const uint8_t *g, uint32_t usize,
         const char *ae = getenv("UHA_SNAPADV");
         if (ae && ae[0] >= '0' && ae[0] <= '4') snap_adv = (uint32_t)(ae[0] - '0');
     }
-    /* [GATED UHA_PHASEFIX, default-OFF, 13.739] phase cls3 corrigee (abs+2)%3. */
+    /* [GATED UHA_PHASEFIX, défaut-OFF, §13.739] phase cls3 corrigée (abs+2)%3. */
     if (getenv("UHA_PHASEFIX")) g_ps_phasefix = 1;
     for (b = 0; b < nblk; b++)
         if (blklen[b] > maxlen) maxlen = blklen[b];
-    snap = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
-    live = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
-    if (!snap || !live) { free(snap); free(live); return -1; }
+    if (!s_snap_ar) s_snap_ar = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
+    if (!s_live_ar) s_live_ar = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
+    snap = s_snap_ar;
+    live = s_live_ar;
+    if (!snap || !live) return -1;
     alz_arena2d_init(snap, (uint16_t)32u);
-    ps_set_promo_all(snap, snap_inc);   /* snapshot learns has inc=N if probe (otherwise 32) */
-    for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
+    ps_set_promo_all(snap, snap_inc);   /* snapshot apprend à inc=N si sondé (sinon 32) */
+    need = maxlen ? maxlen : 1u;
+    for (k = 0; k < (int)nclass; k++) {
         mm[k][0] = mm[k][1] = mm[k][2] = 0u;
-        ctxs[k] = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)(maxlen ? maxlen : 1u));
-        if (!ctxs[k]) { int j; for (j = 0; j < k; j++) free(ctxs[j]); free(snap); free(live); return -1; }
+        if (!s_snap_ctxs[k] || s_snap_ctx_cap[k] < need) {
+            uint32_t *nb = (uint32_t *)realloc(s_snap_ctxs[k], sizeof(uint32_t) * (size_t)need);
+            if (!nb) return -1;
+            s_snap_ctxs[k] = nb;
+            s_snap_ctx_cap[k] = need;
+        }
+        ctxs[k] = s_snap_ctxs[k];
     }
     for (b = 0; b < nblk; b++) {
         uint32_t base = blkpos[b], len = blklen[b], order[ALZ_PS_NCLASS];
         uint32_t best = 0xffffffffu, winner = 0u, cnt = 0u, c, np = 0;
+        /* [GATED UHA_A3_BLKAGE=<1|2>, défaut-OFF, lane ALZ -m3] TRANSFORMATION DE
+         * FRONTIÈRE du scoreur : aging maître 0x40ffa0 (`freq>16 → >>1, sinon 0`) sur
+         * TOUTES les lignes, puis `total := Σfreq + counter` (1) ou counter >>1 (2).
+         * Mesuré contre la table legacy du bloc 1 (capture n°16, 12 544 valeurs). */
+        {
+            static int s_blkage = -1;
+            if (s_blkage < 0) {
+                const char *ba = getenv("UHA_A3_BLKAGE");
+                s_blkage = (ba && *ba) ? atoi(ba) : 0;
+            }
+            if (s_blkage && b > 0) {
+                uint32_t r2, c2;
+                for (r2 = 0u; r2 < ALZ_ARENA2D_MAX_ROW; r2++) {
+                    uint32_t s2 = 0u;
+                    alz_arena2d_rescale_master(snap, r2);
+                    if (s_blkage >= 2)
+                        snap->counter[r2] = (uint16_t)(snap->counter[r2] >> 1);
+                    for (c2 = 0u; c2 < 256u; c2++) s2 += snap->freq[(r2 << 8) | c2];
+                    snap->total[r2] = (uint16_t)(s2 + snap->counter[r2]);
+                }
+            }
+        }
         if (base >= usize) continue;
         if (base + len > usize) len = usize - base;
         if (!len) continue;
-        /* (1) generer stream ctxs by class sure all the block (machine advances full). */
-        /* [GATED UHA_SNAPCTXROW, default-OFF, 14.066] Seed : to advance the moteur CM live
-         * once by position (cmlive_symrow advances+returns there line vecue) and memoriser
-         * the lines, then the injecter in ctxs[] (au lieu of the delta2D). Reset if base==0. */
-        static uint32_t s_sx_buf[ALZ_ARENA2D_MAX_ROW * 64u];
+        /* (1) générer flux ctxs par classe sur TOUT le bloc (machine avance pleine). */
+        /* [GATED UHA_SNAPCTXROW, défaut-OFF, §14.066] Seed : avancer le moteur CM live
+         * UNE fois par position (cmlive_symrow avance+renvoie la ligne vécue) et memoriser
+         * les lignes, puis les injecter dans ctxs[] (au lieu du delta‑2D). Reset si base==0. */
+        static uint32_t *s_sx_buf = NULL;
         static int s_sx_on = -1, s_sx_ready = 0;
         if (s_sx_on < 0) s_sx_on = getenv("UHA_SNAPCTXROW") ? 1 : 0;
+        if (s_sx_on && !s_sx_buf) {
+            s_sx_buf = (uint32_t *)calloc((size_t)(ALZ_ARENA2D_MAX_ROW * 64u), sizeof(uint32_t));
+        }
         if (base == 0u && s_sx_on) { alz_ps_cmlive_reset(0u); s_sx_ready = 0; }
-        if (s_sx_on) {
+        if (s_sx_on && s_sx_buf) {
             uint32_t j;
             for (j = 0u; j < len && (base + j) < (uint32_t)(ALZ_ARENA2D_MAX_ROW * 64u); j++) {
                 uint32_t fr, fs;
@@ -769,48 +1001,63 @@ int alz_ps_snapshot_percost(const uint8_t *g, uint32_t usize,
                 }
             }
         }
-        for (c = 0u; c < ALZ_PS_NCLASS; c++) {
+        for (c = 0u; c < nclass; c++) {
             uint32_t i;
             for (i = 0u; i < len; i++) {
                 uint32_t cx = ps_ctx_step(c, g, base + i, &mm[c][0], &mm[c][1], &mm[c][2]);
-                /* [GATED UHA_PHASEFIX] row cls3 : phase = (abs+2)%3 (au lieu of ebp%3). */
+                /* [GATED UHA_PHASEFIX] row cls3 : phase = (abs+2)%3 (au lieu de ebp%3). */
                 if (g_ps_phasefix && c == 3u) {
                     uint32_t e = (cx >> 8) & 0x1fu;
                     e += (((base + i + 2u) % 3u) << 5);
                     cx = (e << 8) | (cx & 0xffu);
                 }
-                /* [GATED UHA_SNAPCTXROW, default-OFF, 14.064] To replace there line
-                 * delta2D by there line `ctx` VECUE (moteur CM live), mirror of the scan
-                 * legacy (row=(ctx>>8)&0x1ff sure the recon). DefautOFF = delta2D unchanged. */
+                /* [GATED UHA_SNAPCTXROW, défaut-OFF, §14.064] Remplacer la ligne
+                 * delta‑2D par la LIGNE `ctx` VÉCUE (moteur CM live), miroir du scan
+                 * legacy (row=(ctx>>8)&0x1ff sur le recon). Défaut‑OFF = delta‑2D inchangé. */
                 if (s_sx_on && s_sx_ready && (base + i) < (ALZ_ARENA2D_MAX_ROW * 64u)) {
                     cx = (s_sx_buf[base + i] << 8) | (cx & 0xffu);
                 }
                 ctxs[c][i] = cx;
             }
         }
-        /* (2) order : seed (winner block previous) d'abord, then ascending. */
+        /* (2) ordre : seed (gagnant bloc précédent) d'abord, puis ascending. */
+        if (seed_cls >= nclass) seed_cls = 0u;
         order[cnt++] = seed_cls;
-        for (c = 0u; c < ALZ_PS_NCLASS; c++) if (c != seed_cls) order[cnt++] = c;
-        /* (3) argmin : each class copie snap->live, score (abandon precoce). */
-        for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
+        for (c = 0u; c < nclass; c++) if (c != seed_cls) order[cnt++] = c;
+        /* (3) argmin : chaque classe copie snap->live, score (abandon précoce). */
+        for (k = 0; k < (int)nclass; k++) {
             uint32_t cc = order[(uint32_t)k], s;
             *live = *snap;
-            ps_set_promo_all(live, 32u);   /* scorer LIVE always inc=32 (13.270) */
+            ps_set_promo_all(live, 32u);   /* scoreur LIVE toujours inc=32 (§13.270) */
             s = ps_score_ctxs(live, ctxs[cc], len, 32u, ALZ_PS_COLD0,
                               (k == 0) ? NULL : &best, &np, NULL);
             if (s < best) { best = s; winner = cc; }
         }
-        /* (4) RE-score there winning sure copie fraiche of snap (without abandon) en
-         * ecrivant the cost BY position in out[base..base+len). */
+        /* [GATED UHA_A3_SNAPWIN, LECTURE SEULE, DEFAUT-OFF, lane ALZ -m3] la classe GAGNANTE
+         * de chaque bloc, telle que la calcule le modèle froid à deux arènes (argmin de Σ sur
+         * les classes 0..4, copie d'état snapshot->live à chaque classe). Sert à juger si le
+         * producteur chaud — qui déroule cls 3 partout, sauf surcharge
+         * `UHA_LIVEWALK_CTXCLASS` — doit dérouler la gagnante **PAR BLOC** : mesure sur
+         * `biased` (sel 0) et `records` (sel 4), rendus byte‑exactes par le modèle froid et
+         * régressés par le chaud. Zéro effet sinon. */
+        if (getenv("UHA_A3_SNAPWIN") != NULL)
+            fprintf(stderr, "[SNAPWIN] b=%d base=0x%05x len=0x%05x winner=cls%u sigma=0x%08x\n",
+                    b, base, len, winner, best);
+        /* [GATED UHA_A3_CTXCLASS_AUTO] export de la gagnante par bloc (ordre des blocs). */
+        if (alz_ps_snapwin_n < ALZ_PS_SNAPWIN_MAX)
+            alz_ps_snapwin_blk[alz_ps_snapwin_n++] = (int) winner;
+        /* (4) RE-score la gagnante sur copie fraîche de snap (sans abandon) en
+         * écrivant le coût PAR POSITION dans out[base..base+len). */
         *live = *snap;
-        ps_set_promo_all(live, 32u);   /* scorer LIVE always inc=32 (out dens) */
+        ps_set_promo_all(live, 32u);   /* scoreur LIVE toujours inc=32 (out dens) */
+        g_ps_dumpbase = base; g_ps_dumpn = len;
         ps_score_ctxs(live, ctxs[winner], len, 32u, ALZ_PS_COLD0, NULL, NULL, out + base);
-        /* (5) to advance the snapshot en entrainant the stream of the winner (full).
-         * [GATED UHA_SNAPADV] : surcharge which class alimente the carry cross-block,
-         * without toucher au dens by block (out[] remainder sure `winner`). Default = winner. */
-        /* [GATED UHA_SNAPLITMASK=<maskfile>, default-OFF, 14.017] Porter the MASTER sure the
-         * STREAM EMIS (literals single) au lieu of the rescan full-ctx : mirror of the update
-         * of the master by l'emission reelle (block0 emis == legacy because firstdiv>12544). */
+        /* (5) avancer le snapshot en entrainant le flux du gagnant (plein).
+         * [GATED UHA_SNAPADV] : surcharge quelle classe alimente le carry cross-bloc,
+         * SANS toucher au dens par bloc (out[] reste sur `winner`). Défaut = winner. */
+        /* [GATED UHA_SNAPLITMASK=<maskfile>, défaut-OFF, §14.017] Porter le MAÎTRE sur le
+         * FLUX ÉMIS (littéraux seuls) au lieu du rescan full-ctx : miroir de la mise à jour
+         * du maître par l'émission réelle (block0 émis == legacy car firstdiv>12544). */
         {
             static uint8_t *s_slm = NULL; static int s_slm_load = 0; static uint32_t s_slm_n = 0u;
             if (!s_slm_load) {
@@ -830,27 +1077,51 @@ int alz_ps_snapshot_percost(const uint8_t *g, uint32_t usize,
                 uint32_t i;
                 for (i = 0u; i < len; i++)
                     if (s_slm[base + i])
-                        (void) ps_score_ctxs(snap, ctxs[(snap_adv <= 4u) ? snap_adv : winner] + i,
+                        (void) ps_score_ctxs(snap, ctxs[(snap_adv < nclass) ? snap_adv : winner] + i,
                                              1u, 32u, ALZ_PS_COLD0, NULL, NULL, NULL);
             } else
-                ps_score_ctxs(snap, ctxs[(snap_adv <= 4u) ? snap_adv : winner],
+                ps_score_ctxs(snap, ctxs[(snap_adv < nclass) ? snap_adv : winner],
                               len, 32u, ALZ_PS_COLD0, NULL, NULL, NULL);
         }
         seed_cls = winner;
+        /* [GATED UHA_A3_SNAPK2, LECTURE SEULE, DEFAUT-OFF, lane ALZ -m3, tour 124] Σ des carrés
+         * des fréquences de l'arène carry après avancement du bloc. La porte du sélecteur
+         * (0x414089/0x414090, décodée à la capture n°48) compare `T * K[best]` à `64 * K[0]`, où K
+         * est un accumulateur de `Σ f²` (0x414d2e : `imul ecx,ecx` sur `[0x452f08+...]`, entretenu
+         * à ± en 0x414ee4-0x414f33 à chaque apprentissage). CIBLES mesurées n°48 (division exacte
+         * par 64 et par T=80/75, zéro fraction sur les 23 passages) : K[0] = 5214 5152 5010 5006
+         * 5074 5228 5118 5080 5172 5056 (random, 10 blocs) et 75968 74606 76154 67290 62378 66274
+         * 78716 76136 75658 76494 75840 76514 104206 74954 75122 66348 61862 (records, 17 blocs) ;
+         * K[best] = 5004..5022 (random, best 1) et 36962..35822 (records, best 4). Sert à dire si
+         * l'arène du clone rend cette grandeur, et à quelle plage de lignes. Zéro effet sinon. */
+        {
+            static int s_k2 = -1;
+            if (s_k2 < 0) s_k2 = getenv("UHA_A3_SNAPK2") ? 1 : 0;
+            if (s_k2) {
+                uint32_t rk, ck;
+                unsigned long long sq = 0ull, warm = 0ull;
+                for (rk = 0u; rk < ALZ_ARENA2D_MAX_ROW; rk++)
+                    for (ck = 0u; ck < 256u; ck++) {
+                        unsigned long long v = snap->freq[(rk << 8) + ck];
+                        sq += v * v;
+                        if (v) warm++;
+                    }
+                fprintf(stderr, "[A3K2] b=%d winner=%u sumsq=%llu cellules=%llu\n",
+                        b, winner, sq, warm);
+            }
+        }
     }
-    for (k = 0; k < (int)ALZ_PS_NCLASS; k++) free(ctxs[k]);
-    free(snap); free(live);
     return 0;
 }
 
 /* ==========================================================================
- * [13.729 GATED UHA_PERPOS, default-OFF] Producteur dens per-position argmin.
- * the legacy engine selects THERE class by position (argmin 5 classes 0x413ea0), not
- * by block. model : Has arena global continue + machines ctx threadees by class
- * ; at each position i, cost READ-ONLY some 5 ctx (by class) in l'arena,
- * winner = argmin, dens[i] = min, THEN learning (ps_learn) of the ctx of the winner
- * ONLY. learning DENSE (all positions) in this 1 variante (there
- * sparse by-literal-emis remainder has coupler au parse). Pur, buffers local. 0 OK <0 err. */
+ * [§13.729 GATED UHA_PERPOS, DEFAUT-OFF] Producteur dens per-POSITION argmin.
+ * Le legacy sélectionne LA classe par POSITION (argmin 5 classes 0x413ea0), pas
+ * par bloc. Modèle : UNE arène globale continue + machines ctx threadées par classe
+ * ; à chaque position i, coût READ-ONLY des 5 ctx (par classe) dans l'arène,
+ * gagnant = argmin, dens[i] = min, PUIS apprentissage (ps_learn) du ctx du gagnant
+ * SEULEMENT. Apprentissage DENSE (toutes positions) dans cette 1ʳᵉ variante (la
+ * sparse par-littéral-émis reste à coupler au parse). Pur, buffers locaux. 0 OK <0 err. */
 int alz_ps_perpos_percost(const uint8_t *g, uint32_t usize,
                           const uint32_t *blkpos, const uint32_t *blklen,
                           int nblk, uint32_t *out)
@@ -878,12 +1149,12 @@ int alz_ps_perpos_percost(const uint8_t *g, uint32_t usize,
         if (base >= usize) continue;
         if (base + len > usize) len = usize - base;
         if (!len) continue;
-        /* (1) generer the stream ctx of each class sure all the block (machines advance full). */
+        /* (1) générer le flux ctx de CHAQUE classe sur tout le bloc (machines avancent pleine). */
         for (c = 0u; c < ALZ_PS_NCLASS; c++)
             for (i = 0u; i < len; i++)
                 ctxs[c][i] = ps_ctx_step(c, g, base + i, &mm[c][0], &mm[c][1], &mm[c][2]);
-        /* (2) by position : argmin some 5 costs of class in l'arena current ;
-         *     dens = min ; then apprendre the ctx of the winner (mutates arena). */
+        /* (2) par position : argmin des 5 coûts de classe dans l'arène courante ;
+         *     dens = min ; puis apprendre le ctx du gagnant (mutates arène). */
         for (i = 0u; i < len; i++) {
             uint32_t best = 0xffffffffu, win = 0u, cs;
             for (c = 0u; c < ALZ_PS_NCLASS; c++) {
@@ -899,12 +1170,12 @@ int alz_ps_perpos_percost(const uint8_t *g, uint32_t usize,
     return 0;
 }
 
-/* [GATED UHA_SNAPWALK, validation reading-single] Producteur `dens` faithful au model
- * TWO-ARENAS (memory d2229f89, 13.270/271) : the snapshot PERSISTE n'advances only to the 
- * positions LITERAL EMISES (is_lit[abs]==1) has inc=16 (pass EMISSION sparse), NOT dense ;
- * dens[pos] = scorer DENSE (copie live of the snapshot, inc=32) au stream cls3 (winner
- * universel 13.593). Machine ctx cls3 GLOBAL threadee cross-blocks. is_lit size
- * usize (0/1). returns 0 OK, <0 error. ZERO effet sure l'encoding (path gated). */
+/* [GATED UHA_SNAPWALK, VALIDATION lecture-seule] Producteur `dens` fidele au modele
+ * DEUX-ARENES (memoire d2229f89, §13.270/271) : le snapshot PERSISTE n'avance qu'aux
+ * positions LITTERAL EMISES (is_lit[abs]==1) a inc=16 (pass EMISSION sparse), PAS dense ;
+ * dens[pos] = scoreur DENSE (copie live du snapshot, inc=32) au flux cls3 (gagnant
+ * universel §13.593). Machine ctx cls3 GLOBALE threadee cross-blocs. is_lit taille
+ * usize (0/1). Retourne 0 OK, <0 erreur. NUL effet sur l'encodage (chemin gated). */
 int alz_ps_snapshot_percost_sparse(const uint8_t *g, uint32_t usize,
                                    const uint32_t *blkpos, const uint32_t *blklen,
                                    int nblk, const uint8_t *is_lit, uint32_t *out)
@@ -923,20 +1194,20 @@ int alz_ps_snapshot_percost_sparse(const uint8_t *g, uint32_t usize,
     live = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
     ctx  = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)(maxlen ? maxlen : 1u));
     if (!snap || !live || !ctx) { free(snap); free(live); free(ctx); return -1; }
-    alz_arena2d_init(snap, (uint16_t)16u);   /* SNAPSHOT learns has inc=16 (13.271) */
+    alz_arena2d_init(snap, (uint16_t)16u);   /* SNAPSHOT apprend a inc=16 (§13.271) */
     for (b = 0; b < nblk; b++) {
         uint32_t base = blkpos[b], len = blklen[b], i;
         if (base >= usize) continue;
         if (base + len > usize) len = usize - base;
         if (!len) continue;
-        /* (1) stream ctx cls3 sure all the block (machine GLOBAL advances full). */
+        /* (1) flux ctx cls3 sur TOUT le bloc (machine GLOBALE avance pleine). */
         for (i = 0u; i < len; i++)
             ctx[i] = ps_ctx_step(3u, g, base + i, &mm[0], &mm[1], &mm[2]);
-        /* (2) dens[pos] = scorer dense (live copie snap, inc=32) writes in out. */
+        /* (2) dens[pos] = scoreur dense (live copie snap, inc=32) ecrit dans out. */
         *live = *snap;
         ps_set_promo_all(live, 32u);
         ps_score_ctxs(live, ctx, len, 32u, ALZ_PS_COLD0, NULL, NULL, out + base);
-        /* (3) to advance the SNAPSHOT sure the single positions LITERAL emes, inc=16. */
+        /* (3) avancer le SNAPSHOT sur les seules positions LITTERAL émes, inc=16. */
         for (i = 0u; i < len; i++) {
             uint32_t c = ctx[i], row = c >> 8;
             if (!is_lit[base + i]) continue;
@@ -949,17 +1220,17 @@ int alz_ps_snapshot_percost_sparse(const uint8_t *g, uint32_t usize,
 }
 
 /* ==========================================================================
- * [13.723 GATED UHA_EMIPROD, default-OFF, FRONTIER emission-walk-producer]
- * model FAITHFUL decode : there pre-pass `0x414630` is READ-ONLY vs master (restore
- * `rep movs` master->working by call, no store towards master) ; the master is
- * advances ONLY by the LIVE `0x415ab0` which LEARNS by LITERAL EMIS (sparse).
- * Producteur : by block, W = copie(master M) then scan DENSE intra-block cls3
- * (score+learn in W) => `out[i]` = cost fige lu by the decider ; THEN to advance M
- * en n'apprenant only to the  positions `is_lit` of the block (nothing sure the matchs). Machine
- * cls3 relative-block (seed ebp=1) ALIGNEE between W (reading) and M (write) for
- * that the carry tombe in the same cellules. Pur, buffers local. 0 OK, <0 error. */
+ * [§13.723 GATED UHA_EMIPROD, DEFAUT-OFF, FRONTIÈRE emission-walk-producer]
+ * Modèle FIDÈLE décodé : la pré-passe `0x414630` est READ-ONLY vs master (restore
+ * `rep movs` master→working par appel, aucun store vers master) ; le master est
+ * avancé UNIQUEMENT par le LIVE `0x415ab0` qui APPREND par LITTÉRAL ÉMIS (sparse).
+ * Producteur : par bloc, W = copie(master M) puis scan DENSE intra-bloc cls3
+ * (score+learn dans W) ⟹ `out[i]` = coût figé lu par le décideur ; PUIS avancer M
+ * en n'apprenant qu'aux positions `is_lit` du bloc (rien sur les matchs). Machine
+ * cls3 relative-bloc (graine ebp=1) ALIGNÉE entre W (lecture) et M (écriture) pour
+ * que le carry tombe dans les MÊMES cellules. Pur, buffers locaux. 0 OK, <0 erreur. */
 
-/* [GATED UHA_CM_WIRE, 13.796] delta/base section-relatifs (sentinelle 0x80 before `base`). */
+/* [GATED UHA_CM_WIRE, §13.796] delta/base section-relatifs (sentinelle 0x80 avant `base`). */
 static int32_t ps_q(const uint8_t *g, long base, long k)
 {
     if (k < base) return 0;
@@ -971,11 +1242,11 @@ static int32_t ps_b(const uint8_t *g, long base, long k)
     return (int32_t)g[k] - 0x80;
 }
 
-/* [GATED UHA_CM_WIRE, 13.796] Advances faithful of the master sure there law image sym->row.
- * Deroule l'engine CM (alz_arena+alz_arb+alz_cm) DENSEMENT by rc sure there section
- * [base,base+len) and reproduces EXACTEMENT the harnais validated _scratch/cm_closed.c
+/* [GATED UHA_CM_WIRE, §13.796] Avance fidèle du maître sur la loi image sym→row.
+ * Déroule l'engine CM (alz_arena+alz_arb+alz_cm) DENSEMENT par rc sur la section
+ * [base,base+len) et reproduit EXACTEMENT le harnais validé _scratch/cm_closed.c
  * (sym 12700/12700, idx/ref/b8 15000/15000). master_learn(M, relrow=aff, sym)
- * ONLY to the literals. Reset engine+registres+flag at the frontier of section. */
+ * UNIQUEMENT aux littéraux. Reset engine+registres+flag à la frontière de section. */
 static void ps_cmwire_advance_master(alz_arena2d_t *M, const uint8_t *g,
                                      uint32_t base, uint32_t len,
                                      const uint8_t *is_lit, uint32_t usize)
@@ -984,7 +1255,7 @@ static void ps_cmwire_advance_master(alz_arena2d_t *M, const uint8_t *g,
     alz_cm_learner L; memset(&L, 0, sizeof L);
     alz_arena A; alz_arena_init(&A);
     alz_arb   R; alz_arb_init(&R);
-    uint32_t rf70 = 0xffffffffu, rf74 = 0xffffffffu, rf78 = 0xffffffffu; /* 13.796 reset section */
+    uint32_t rf70 = 0xffffffffu, rf74 = 0xffffffffu, rf78 = 0xffffffffu; /* §13.796 reset section */
     int rflag = 0, last_prev_idx_for_P = 0;
     int32_t prev_rh_sim = 0;
     uint32_t i;
@@ -1011,7 +1282,7 @@ static void ps_cmwire_advance_master(alz_arena2d_t *M, const uint8_t *g,
         int32_t dr_ref_learn = ps_q(g, (long)base, (long)(abs + 1) - (int32_t)A.ref);
         alz_cm_learn_byte(&L, b_cur, b_prev, b_prev2, dr_ref_learn);
         int32_t rh_sim = L.prev_dot_full;
-        /* law sym->row (13.796) : taps en domaine base, ref/b8 BEFORE update, idx lag. */
+        /* loi sym→row (§13.796) : taps en domaine base, ref/b8 AVANT update, idx lag. */
         {
             uint32_t taps6[6];
             uint8_t vp1 = (uint8_t)(base_p1);
@@ -1024,7 +1295,7 @@ static void ps_cmwire_advance_master(alz_arena2d_t *M, const uint8_t *g,
             taps6[5] = (uint8_t)A.dr[(abs - (uint32_t)b8_prev)  & 0x7fu];
             int ip = last_prev_idx_for_P;
             uint32_t Pcur = ((taps6[ip % 6u] & 0xffu) + ((ip >= 4) ? (uint32_t)vp1 : 0u) + 0x80u) & 0xffu;
-            uint32_t Pprev = (i == 0u) ? 0u : Pcur;   /* 1ere line section : [0x45ecbf]=reset 0 */
+            uint32_t Pprev = (i == 0u) ? 0u : Pcur;   /* 1ere ligne section : [0x45ecbf]=reset 0 */
             uint8_t d = (uint8_t)((uint32_t)b_cur - Pprev);
             uint8_t sym = rflag ? (uint8_t)(0u - (uint32_t)d) : d;
             rf70 = (rf70 << 8) | sym;
@@ -1033,13 +1304,13 @@ static void ps_cmwire_advance_master(alz_arena2d_t *M, const uint8_t *g,
             if (sym >= 0x80u) rflag ^= 1;
             uint32_t aff = (rf70 == 0u) ? 1u : (rf74 == 0u) ? 2u : (rf78 == 0u) ? 3u : 0u;
             if (is_lit[abs]) {
-                /* [GATED UHA_CMROWHASH, default-OFF, ARENA_TASK16] index of the master = row_hash_cm
-                 * (0x44d8d8 = L->prev_dot_full, & 0x1ff) - there LAW validated M11, au lieu of
-                 * `aff` (band 4lines). DefaultOFF = behavior cmwire unchanged (aff). */
+                /* [GATED UHA_CMROWHASH, défaut-OFF, ARENA_TASK16] index du maître = row_hash_cm
+                 * (0x44d8d8 = L->prev_dot_full, & 0x1ff) — la LOI VALIDÉE M11, au lieu de
+                 * `aff` (bande 4‑lignes). Défault‑OFF = comportement cmwire inchangé (aff). */
                 if (getenv("UHA_CMROWHASH") != NULL)
                     alz_arena2d_master_learn(M, ((uint32_t)rh_sim) & 0x1FFu, sym);
                 else
-                    alz_arena2d_master_learn(M, aff, sym);   /* relrow=aff (band 4-lines cls5), sym dir-flippe */
+                    alz_arena2d_master_learn(M, aff, sym);   /* relrow=aff (bande 4-lignes cls5), sym dir-flippé */
             }
             last_prev_idx_for_P = (int)idx_i;
         }
@@ -1049,18 +1320,21 @@ static void ps_cmwire_advance_master(alz_arena2d_t *M, const uint8_t *g,
 }
 
 /* ==========================================================================
- * [ARENA_TASK16 - GATED default-OFF] alz_ps_livewalk_cm : the MASTER D'EMISSION indexe
- * by `row_hash_cm` (0x44d8d8 = alz_cm prev_dot_full, validated 83/83 13.115). arena P
- * SEPAREE (not touche NOT the path EMIPROD/bloc0). Deroule the moteur CM densement sure
- * [0,usize) ; to the LITERALS of the bloc0 (q<0x3100) learns P[row_hash_cm&0x1ff][sym]
- * (cold/warm +32, rescale @0x4000) = the PERM d'emission legacy. Then, if `out` no NULL,
- * recharge W:=P and score DENSE gen_ctxs(3) sure [0x3100,usize) -> cost pre-learn publie.
- * Digeste has fingerprint P (rows 37/68) sure stderr if UHA_LIVEWALK_STATS (validation vs
- * dumps GT : freq[68]=7 cell. Sigma~11130 +/-2..+/-5 ; freq[37]=0). returns 0. */
+ * [ARENA_TASK16 — GATED défaut-OFF] alz_ps_livewalk_cm : le MAÎTRE D'ÉMISSION indexé
+ * par `row_hash_cm` (0x44d8d8 = alz_cm prev_dot_full, validé 83/83 §13.115). Arène P
+ * SÉPARÉE (ne touche PAS le chemin EMIPROD/bloc0). Déroule le moteur CM densement sur
+ * [0,usize) ; aux LITTÉRAUX du bloc0 (q<0x3100) apprend P[row_hash_cm&0x1ff][sym]
+ * (cold/warm +32, rescale @0x4000) = le PERM d'émission legacy. Then, si `out` non NULL,
+ * recharge W:=P et score DENSE gen_ctxs(3) sur [0x3100,usize) → coût pré-learn publié.
+ * Digeste un fingerprint P (rows 37/68) sur stderr si UHA_LIVEWALK_STATS (validation vs
+ * dumps GT : freq[68]=7 cell. Σ~11130 ±2..±5 ; freq[37]=0). Retourne 0. */
 int alz_ps_livewalk_cm(const uint8_t *g, uint32_t usize, const uint8_t *is_lit,
                        uint32_t from, uint32_t *out)
 {
+    static const uint32_t s_bp[6] = {0x0000u,0x3100u,0x620cu,0x931cu,0xc4ffu,0xff00u};
+    static const uint32_t s_bl[6] = {0x3100u,0x3100u,0x3100u,0x3100u,0x3a01u,0x100u};
     static const uint32_t MASKW[6] = {127u,127u,127u,127u,7u,3u};
+    (void)s_bp; (void)s_bl;
     alz_cm_learner L; alz_arena A; alz_arb R;
     alz_arena2d_t *P;
     uint32_t rf70=0xffffffffu, rf74=0xffffffffu, rf78=0xffffffffu;
@@ -1071,8 +1345,8 @@ int alz_ps_livewalk_cm(const uint8_t *g, uint32_t usize, const uint8_t *is_lit,
     P = (alz_arena2d_t*)malloc(sizeof(alz_arena2d_t));
     if (!P) return -1;
     alz_arena2d_init(P, 32u);
-    /* (1)+(2) moteur CM (conduiteur EXACT cmwire, section base=0) ; learn P to the
-     * literals of the bloc0 (i<0x3100), row = row_hash_cm(prev_dot_full)&0x1ff. */
+    /* (1)+(2) moteur CM (conduiteur EXACT cmwire, section base=0) ; learn P aux
+     * littéraux du bloc0 (i<0x3100), row = row_hash_cm(prev_dot_full)&0x1ff. */
     for (i = 0; i < usize; i++) {
         uint8_t b_cur = g[i];
         uint8_t b_prev  = (i>=1u)? g[i-1u] : 0x80u;
@@ -1106,7 +1380,7 @@ int alz_ps_livewalk_cm(const uint8_t *g, uint32_t usize, const uint8_t *is_lit,
             uint8_t sym = rflag ? (uint8_t)(0u-(uint32_t)d) : d;
             rf70=(rf70<<8)|sym; rf74=(rf74<<8)+ALZ_REG_T1[sym]; rf78=(rf78<<8)+ALZ_REG_T2[sym];
             if (sym>=0x80u) rflag^=1;
-            if (i < 0x3100u && is_lit[i])              /* PERM d'emission = literals bloc0 */
+            if (i < 0x3100u && is_lit[i])              /* PERM d'émission = littéraux bloc0 */
                 alz_arena2d_master_learn(P, ((uint32_t)rh)&0x1FFu, sym);
             last_prev_idx = (int)idx_i;
         }
@@ -1118,7 +1392,7 @@ int alz_ps_livewalk_cm(const uint8_t *g, uint32_t usize, const uint8_t *is_lit,
         fprintf(stderr, "[LWC] P-perm@b1 freq68 SUM=%u nz=%u | freq37 SUM=%u nz=%u\n",
                 (unsigned)s68,(unsigned)n68,(unsigned)s37,(unsigned)n37);
     }
-    /* (4) reload W:=P, scan dense gen_ctxs(3) sure block>=from -> cost pre-learn. */
+    /* (4) reload W:=P, scan dense gen_ctxs(3) sur bloc≥from → coût pré-learn. */
     if (out) {
         uint32_t *ctx3 = (uint32_t*)malloc(sizeof(uint32_t)*(size_t)usize);
         alz_arena2d_t W;
@@ -1139,14 +1413,14 @@ int alz_ps_livewalk_cm(const uint8_t *g, uint32_t usize, const uint8_t *is_lit,
 }
 
 /* ==========================================================================
- * [ARENA_TASK16/17 - GATED defautOFF, side B] alz_ps_livewalk_dual : producteur
- * DOUBLEBUFFER `P`(PERM/master, persiste) / `H`(HOT/working, recharge by block),
- * contrat `DUAL_INTEGRATION.md`. 1 RELOAD `H:=copy(P)` by block ; SCORAGE DENSE
- * `gen_ctxs(3)` in H (score+learn, rescale @0x4000) -> cost PRElearn writes in
- * `out` if `base>=from` (bloc0 keeps EMIPROD). 2 EMISSIONLEARN of the P = **NOT
- * D'INJECTION** (#17 fournit row/subset/increment/coldvswarm) ; STUB baseline =
- * learn to the LITERALS sure row `gen_ctxs(3)` ( EMIPROD/16685). Probe _STATS :
- * fingerprint freq[68]/[37] of P (target 11130/0). returns 0 ; zero effet out gate. */
+ * [ARENA_TASK16/17 — GATED défaut‑OFF, côté B] alz_ps_livewalk_dual : producteur
+ * DOUBLE‑BUFFER `P`(PERM/maître, persiste) / `H`(HOT/working, rechargé par bloc),
+ * contrat `DUAL_INTEGRATION.md`. §1 RELOAD `H:=copy(P)` par bloc ; SCORAGE DENSE
+ * `gen_ctxs(3)` dans H (score+learn, rescale @0x4000) → coût PRÉ‑learn écrit dans
+ * `out` si `base>=from` (bloc0 garde EMIPROD). §2 EMISSION‑LEARN du P = **POINT
+ * D'INJECTION** (#17 fournit row/subset/incrément/cold‑vs‑warm) ; STUB baseline =
+ * learn aux LITTÉRAUX sur row `gen_ctxs(3)` (≈ EMIPROD/16685). Sonde _STATS :
+ * fingerprint freq[68]/[37] de P (cible 11130/0). Retourne 0 ; zéro effet hors gate. */
 int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit,
                          uint32_t from, uint32_t *out)
 {
@@ -1157,11 +1431,11 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
     uint32_t i, b, c, stats = getenv("UHA_LIVEWALK_STATS") ? 1u : 0u;
     int feed_used = 0;
     int brscale = getenv("UHA_LIVEWALK_BOUNDRESCALE") ? 1 : 0;
-    g_ps_no_inline_rescale = brscale;   /* decroche the rescale of the learn if boundaryrescale ON */
-    /* feed parblock (contrat #17) : evenements stockes with leur block (marqueur `#B <n>`,
-     * invisible for dual_sim which ignores the lines '#'). */
+    g_ps_no_inline_rescale = brscale;   /* décroche le rescale du learn si boundary‑rescale ON */
+    /* feed par‑bloc (contrat #17) : événements stockés avec leur bloc (marqueur `#B <n>`,
+     * invisible pour dual_sim qui ignore les lignes '#'). */
     int fcap = 0, fn = 0; int *fblk = NULL, *frow = NULL, *fsym = NULL, *flrn = NULL;
-    uint32_t rctx = 0u;   /* [RECON] ctx roulant 17 bits continu sure all the file */
+    uint32_t rctx = 0u;   /* [RECON] ctx roulant 17 bits continu sur tout le fichier */
     if (!g || !is_lit || !out || usize > 0x10000u) return -1;
     P = (alz_arena2d_t*) malloc(sizeof(alz_arena2d_t));
     H = (alz_arena2d_t*) malloc(sizeof(alz_arena2d_t));
@@ -1170,10 +1444,10 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
     if (!P||!H||!ctx3||!tmp){ free(P);free(H);free(ctx3);free(tmp); return -1; }
     alz_arena2d_init(P, 32u);
     alz_ps_gen_ctxs(3u, g, usize, ctx3);
-    /* [CONTRAT #17] UHA_LIVEWALK_FEED=<file> : feed d'evenements d'emission by block.
-     * lines : `#B <n>` = currentblock ; `<row> <sym> [learn]` = evenement (2 now 3 fields).
-     * Retrocompatible dual_sim (which ignores `#`). P recoit the evenements of the block b AFTER the
-     * traitement of b -> at the input cls3 of b+1, P = emission some blocks 0..b (oracle exact). */
+    /* [CONTRAT #17] UHA_LIVEWALK_FEED=<fichier> : feed d'évènements d'émission par bloc.
+     * Lignes : `#B <n>` = courant‑bloc ; `<row> <sym> [learn]` = évènement (2 ou 3 champs).
+     * Rétro‑compatible dual_sim (qui ignore `#`). P reçoit les évènements du bloc b APRÈS le
+     * traitement de b → à l'entrée cls3 de b+1, P = émission des blocs 0..b (oracle exact). */
     {
         const char *ff = getenv("UHA_LIVEWALK_FEED");
         if (ff && *ff) {
@@ -1207,9 +1481,9 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
             fprintf(stderr, "[DUAL] reload@0x%05x P freq68 SUM=%u nz=%u | freq37 SUM=%u nz=%u\n",
                     (unsigned)base,(unsigned)s68,(unsigned)n68,(unsigned)s37,(unsigned)n37);
         }
-        /* [B#17 DIFF] dump l'state COMPLETE of P (master) at the input of the 1er block>=from (=cls3 b1)
-         * -> "row total freqsum nonzero" by line, for diff automatique contre the bitmap of
-         * reference dumpe by #17 has 0x413ea0. Gated UHA_LIVEWALK_DUMPOUT=<file>, 1 single fois. */
+        /* [B↔#17 DIFF] dump l'état COMPLET de P (maître) à l'ENTRÉE du 1er bloc≥from (=cls3 b1)
+         * → "row total freqsum nonzero" par ligne, pour diff automatique contre le bitmap de
+         * référence dumpé par #17 à 0x413ea0. Gated UHA_LIVEWALK_DUMPOUT=<fichier>, 1 seule fois. */
         {
             const char *dop = getenv("UHA_LIVEWALK_DUMPOUT");
             static int dumped_once = 0;
@@ -1218,7 +1492,7 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
                 dumped_once = 1;
                 if (dp) {
                     uint32_t rr;
-                    fprintf(dp, "# row total freqsum nonzero (P master @entry 0x%05x)\n", (unsigned)base);
+                    fprintf(dp, "# row total freqsum nonzero (P maître @entrée 0x%05x)\n", (unsigned)base);
                     for (rr = 0u; rr < ALZ_ARENA2D_MAX_ROW; rr++) {
                         uint32_t cc, fsum = 0u, fnz = 0u;
                         for (cc = 0u; cc < 256u; cc++) { uint32_t fq = P->freq[(rr<<8)|cc]; if (fq) { fsum += fq; fnz++; } }
@@ -1228,14 +1502,14 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
                 }
             }
         }
-        /* 1 RELOAD HOT := PERM(P) ; SCORAGE dense gen_ctxs(3) in H -> cost pre-learn */
-        if (brscale && b > 0u) ps_rescale_all(P);   /* [BOUNDRESCALE] rescale by column at the frontier (cadence commit legacy) */
+        /* §1 RELOAD HOT := PERM(P) ; SCORAGE dense gen_ctxs(3) dans H → coût pré-learn */
+        if (brscale && b > 0u) ps_rescale_all(P);   /* [BOUNDRESCALE] rescale par colonne à la frontière (cadence commit legacy) */
         *H = *P;
         (void) ps_score_ctxs(H, ctx3 + base, len, 32u, ALZ_PS_COLD0, NULL, NULL, tmp);
         if (base >= from) memcpy(out + base, tmp, (size_t)len * sizeof(uint32_t));
-        /* [validation B, gated UHA_LIVEWALK_TRAJ, out `out`] replays the scan bloc1 sure has copie
-         * of P and trace H->total[68]/[37] by position -> confront `leg_b1_tot68` (test of bout
-         * en bout of the consommateur, n'affecte NOT there output). */
+        /* [VALIDATION B, gated UHA_LIVEWALK_TRAJ, hors `out`] rejoue le scan bloc1 sur une copie
+         * de P et trace H->total[68]/[37] par position → confront `leg_b1_tot68` (test de bout
+         * en bout du consommateur, n'affecte PAS la sortie). */
         if (getenv("UHA_LIVEWALK_TRAJ") && base == from && ctx3) {
             alz_arena2d_t H2 = *P; uint32_t jj;
             for (jj = 0u; jj < len && jj < 1300u; jj++) {
@@ -1247,17 +1521,17 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
                         (unsigned)(base + jj), (unsigned)T0, (unsigned)H2.total[68u], (unsigned)H2.total[37u]);
             }
         }
-        /* 2 EMISSIONLEARN of the P  >>> DUAL_LAW (#17) <<<  applies AFTER the scan of the block b,
-         * therefore P reflete l'emission some blocks 0..b at the input cls3 of b+1. SOURCE = feed #17
-         * (by block) if fourni ; otherwise STUB baseline = literals sure row gen_ctxs(3). */
+        /* §2 EMISSION‑LEARN du P  >>> DUAL_LAW (#17) <<<  appliqué APRÈS le scan du bloc b,
+         * donc P reflète l'émission des blocs 0..b à l'entrée cls3 de b+1. SOURCE = feed #17
+         * (par bloc) si fourni ; sinon STUB baseline = littéraux sur row gen_ctxs(3). */
         if (feed_used) {
             int e;
             for (e = 0; e < fn; e++)
                 if (fblk[e] == (int)b && flrn[e]) ps_learn(P, (frow[e] << 8) | fsym[e]);
         } else if (getenv("UHA_LIVEWALK_RECON") != NULL) {
-            /* [TEST B] law reconlag (as s_acl.mem of the clone) but DENSE (all positions).
+            /* [TEST B] loi recon‑lag (comme s_acl.mem du clone) mais DENSE (toutes positions).
              * erow = (rctx>>8)&0x1ff, rctx=((rctx<<8)|g[q])&0x1FFFF ; sym = g[q].
-             * Test : dense reconlag chauffetil row68 towards 11130 en epargnant row37 ? */
+             * Test : dense recon‑lag chauffe‑t‑il row68 vers 11130 en épargnant row37 ? */
             for (i = 0u; i < len; i++) {
                 uint32_t q = base + i, erow;
                 rctx = ((rctx << 8) | (g[q] & 0xffu)) & 0x1FFFFu;
@@ -1265,30 +1539,30 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
                 ps_learn(P, (erow << 8) | (g[q] & 0xffu));
             }
         } else if (getenv("UHA_LIVEWALK_CMROW") != NULL) {
-            /* [TEST B] prime P via the moteur CM (row_hash_cm&0x1ff if UHA_CMROWHASH, otherwise aff) ;
-             * teste if there law of row CM reproduces the bitmap oracle. */
+            /* [TEST B] prime P via le moteur CM (row_hash_cm&0x1ff si UHA_CMROWHASH, sinon aff) ;
+             * teste si la loi de row CM reproduit le bitmap oracle. */
             ps_cmwire_advance_master(P, g, base, len, is_lit, usize);
         } else if (getenv("UHA_LIVEWALK_ALLCLASS") != NULL) {
-            /* [TEST B] hypothese : the master accumule the 5 PASSES of class (each position
-             * contribue au row of each class), not only cls3. Recharge carry mm by class. */
+            /* [TEST B] hypothèse : le maître accumule les 5 PASSES de classe (chaque position
+             * contribue au row de CHAQUE classe), pas seulement cls3. Recharge carry mm par classe. */
             static uint32_t mm5[ALZ_PS_NCLASS][3] = {{0,0,1},{0,0,1},{0,0,1},{0,0,1},{0,0,1}};
             uint32_t cc;
             int only_lit = getenv("UHA_LIVEWALK_ALLCLASS_LIT") ? 1 : 0;
             const char *cl_env = getenv("UHA_LIVEWALK_CLASS");
-            int single_class = cl_env ? atoi(cl_env) : -1;   /* -1 = the 5 classes ; otherwise Has single */
+            int single_class = cl_env ? atoi(cl_env) : -1;   /* -1 = les 5 classes ; sinon UNE seule */
             for (cc = 0u; cc < ALZ_PS_NCLASS; cc++) {
                 if (single_class >= 0 && (int)cc != single_class) continue;
                 for (i = 0u; i < len; i++) {
                     uint32_t sc = ps_ctx_step(cc, g, base + i, &mm5[cc][0], &mm5[cc][1], &mm5[cc][2]);
                     uint32_t row = (sc >> 8) & 0x1FFu;
-                    if (only_lit && !is_lit[base + i]) continue;   /* ctx advances, n'learns only to the  literals emis */
+                    if (only_lit && !is_lit[base + i]) continue;   /* ctx avance, n'apprend qu'aux littéraux émis */
                     if (row >= ALZ_ARENA2D_MAX_ROW) row = ALZ_ARENA2D_MAX_ROW - 1u;
                     ps_learn(P, (row << 8) | (sc & 0xffu));
                 }
             }
         } else { int dense_stub = getenv("UHA_LIVEWALK_DENSESTUB") ? 1 : 0; for (i = 0u; i < len; i++) {
             uint32_t q = base + i, sc = ctx3[q], row = (sc >> 8) & 0x1FFu;
-            if (!dense_stub && !is_lit[q]) continue;   /* default: literals; DENSESTUB: all positions */
+            if (!dense_stub && !is_lit[q]) continue;   /* défaut: littéraux; DENSESTUB: toutes positions */
             if (row >= ALZ_ARENA2D_MAX_ROW) row = ALZ_ARENA2D_MAX_ROW - 1u;
             ps_learn(P, (row << 8) | (sc & 0xffu));
         } }
@@ -1299,20 +1573,24 @@ int alz_ps_livewalk_dual(const uint8_t *g, uint32_t usize, const uint8_t *is_lit
 }
 
 
-/* [GATED UHA_CM_WIRE, 13.798] Moteur CM persistant INCREMENTAL for l'arena LIVE
- * (acclive_event_once -> alz_arena_c4). Reproduces there law validated cm_closed (sym 100 %)
- * position by position (rc dense), for has section donnee (sec_start). The caller
- * (acclive) calls reset at each frontier of section and symrow for each pos.
- * returns row_abs = row_base + aff and sym = dirflip(valueP). State module-static. */
+/* [GATED UHA_CM_WIRE, §13.798] Moteur CM persistant INCREMENTAL pour l'arène LIVE
+ * (acclive_event_once → alz_arena_c4). Reproduit la loi validée cm_closed (sym 100 %)
+ * position par position (rc dense), pour une section donnée (sec_start). Le caller
+ * (acclive) appelle reset à chaque frontière de section et symrow pour chaque pos.
+ * Retourne row_abs = row_base + aff et sym = dirflip(value−P). État module-static. */
 typedef struct {
     int      started;
-    uint32_t done;        /* last rc advances (inclus) */
-    long     sec;         /* start of section current */
+    uint32_t done;        /* dernier rc avancé (inclus) */
+    long     sec;         /* début de section courant */
     alz_cm_learner L; alz_arena A; alz_arb R;
     uint32_t rf70, rf74, rf78; int rflag, last_prev_idx; int32_t prev_rh;
     uint32_t last_sym, last_aff;
+    /* [GATED UHA_A3_CPRED, défaut-OFF, §A3 tour 37] prédiction du pas PRÉCÉDENT : c'est elle
+     * que le sélecteur de classe retranche (`*0x45ecbf`, écrite au pas i-1), alors que le proxy
+     * historique réutilise `Pcur` du pas courant. N'a d'effet que si la porte est ON. */
+    uint32_t prev_pred;
 } ps_cmlive_t;
-static ps_cmlive_t s_cml;
+static ps_cmlive_t s_cml = {0};
 static const uint32_t PS_MASKW[6] = {127u,127u,127u,127u,7u,3u}; /* tbl 0x437af8/idx */
 
 void alz_ps_cmlive_reset(uint32_t sec_start)
@@ -1320,9 +1598,27 @@ void alz_ps_cmlive_reset(uint32_t sec_start)
     memset(&s_cml, 0, sizeof s_cml);
     alz_arena_init(&s_cml.A);
     alz_arb_init(&s_cml.R);
-    s_cml.rf70 = s_cml.rf74 = s_cml.rf78 = 0xffffffffu;   /* 13.796 reset registres section */
+    s_cml.rf70 = s_cml.rf74 = s_cml.rf78 = 0xffffffffu;   /* §13.796 reset registres section */
+    s_cml.prev_pred = 0u;
     s_cml.sec = (long)sec_start;
-    s_cml.done = sec_start > 0u ? sec_start - 1u : 0u;
+    /* [GATED UHA_A3_CPRED0, défaut-OFF] indexation 0-base : le premier pas traite `g[0]`
+     * (le legacy 0x415444 démarre à `ebp = 0`). Sans la porte, `done = 0` fait démarrer
+     * la marche à `k = 1` et saute donc `g[0]`. */
+    {
+        /* PROMU défaut-ON au tour 39 : c'est la sémantique du legacy (`ebp = 0`), validée 32/32
+         * deltas + 31/31 lignes sur `image.raw` pos 0 et 171 = GT sur `mixed`@30003 ; l'ancien
+         * démarrage à `k = 1` sautait `g[0]` et rendait 17/31. `UHA_A3_CPRED0=0` rétablit l'ancien
+         * comportement pour l'A/B. */
+        static int s_cp0 = -1;
+        if (s_cp0 < 0) {
+            const char *e = getenv("UHA_A3_CPRED0");
+            s_cp0 = (e && e[0] == '0') ? 0 : 1;
+        }
+        if (s_cp0 && sec_start == 0u)
+            s_cml.done = 0xFFFFFFFFu;          /* done+1 == 0 : premier pas = g[0] */
+        else
+            s_cml.done = sec_start > 0u ? sec_start - 1u : 0u;
+    }
     s_cml.started = 1;
 }
 
@@ -1355,10 +1651,32 @@ static void ps_cmlive_step(const uint8_t *g, uint32_t k)
     taps6[3]=(uint8_t)rh;
     taps6[4]=(uint8_t)s_cml.A.dr[(k-(uint32_t)ref_prev)&0x7fu];
     taps6[5]=(uint8_t)s_cml.A.dr[(k-(uint32_t)b8_prev )&0x7fu];
-    int ip = s_cml.last_prev_idx;
+    /* [GATED UHA_A3_CPRED, défaut-OFF] niveaux :
+     *   1 = w du pas précédent (sémantique `*0x45ecbf`)
+     *   2 = 1 + sélection de tap par l'idx COURANT (`[0x44d4b0]` lu en 0x415831)
+     *   3 = 2 + trace (pos, idx, taps, Pcur, Pprev, sym) sur stderr
+     * ⚠ Les variantes 4 (`w` courant, 0 sur 2 pas) et 5 (tap3 = dot frais) ont été RETIRÉES au
+     * tour 39 : elles ne compensaient qu'un défaut d'indexation (`UHA_A3_CPRED0`, g[0] sauté).
+     * Une fois la marche calée sur `g[0]` (legacy `ebp=0`), le niveau 0 rend 32/32 deltas GT
+     * (`m13_cand_image.log`) et la 1ʳᵉ ligne de `mixed`@30003 — voir OUT/A3_port_selecteur_plan.md
+     * §3quater. La variante 5 était de plus une FUITE (le dot avait déjà vu l'octet). */
+    static int s_cpred = -1;
+    if (s_cpred < 0) {
+        const char *cp = getenv("UHA_A3_CPRED");
+        s_cpred = cp ? atoi(cp) : 0;
+        if (s_cpred < 0) s_cpred = 1;
+    }
+    int ip = (s_cpred >= 2) ? (int)idx_i : s_cml.last_prev_idx;
     uint32_t Pcur = ((taps6[ip%6u]&0xffu) + ((ip>=4)?(uint32_t)vp1:0u) + 0x80u) & 0xffu;
-    uint32_t Pprev = (i == 0u) ? 0u : Pcur;
+    uint32_t Pprev = (i == 0u) ? 0u : (s_cpred ? s_cml.prev_pred : Pcur);
     uint8_t d = (uint8_t)(b_cur - Pprev);
+    if (s_cpred >= 3) {
+        fprintf(stderr, "[CPRED] k=%u i=%u b=%u idx_prev=%d idx=%u taps=%u,%u,%u,%u,%u,%u ip=%d Pcur=%u Pprev=%u sym=%u\n",
+                (unsigned)k, (unsigned)i, (unsigned)b_cur, s_cml.last_prev_idx,
+                (unsigned)idx_i, (unsigned)taps6[0], (unsigned)taps6[1], (unsigned)taps6[2],
+                (unsigned)taps6[3], (unsigned)taps6[4], (unsigned)taps6[5], ip,
+                (unsigned)Pcur, (unsigned)Pprev, (unsigned)((s_cml.rflag ? (uint8_t)(0u-(uint32_t)d) : d)));
+    }
     uint8_t sym = s_cml.rflag ? (uint8_t)(0u-(uint32_t)d) : d;
     s_cml.rf70 = (s_cml.rf70<<8)|sym;
     s_cml.rf74 = (s_cml.rf74<<8) + ALZ_REG_T1[sym];
@@ -1368,6 +1686,7 @@ static void ps_cmlive_step(const uint8_t *g, uint32_t k)
     s_cml.last_aff = (s_cml.rf70==0u)?1u:(s_cml.rf74==0u)?2u:(s_cml.rf78==0u)?3u:0u;
     s_cml.last_prev_idx = (int)idx_i;
     s_cml.prev_rh = s_cml.L.prev_dot_full;
+    s_cml.prev_pred = Pcur;
     s_cml.done = k;
 }
 
@@ -1378,7 +1697,7 @@ int alz_ps_cmlive_symrow(const uint8_t *g, uint32_t pos, uint32_t row_base,
     if (!s_cml.started)
         return -1;
     if ((long)pos < s_cml.sec)
-        return -1;                        /* out section current without reset */
+        return -1;                        /* hors section courante sans reset */
     for (k = s_cml.done + 1u; k <= pos; k++)
         ps_cmlive_step(g, k);
     *row_abs = row_base + s_cml.last_aff;
@@ -1386,9 +1705,9 @@ int alz_ps_cmlive_symrow(const uint8_t *g, uint32_t pos, uint32_t row_base,
     return 0;
 }
 
-/* [GATED UHA_CM_EMISS, default-OFF, 13.909] returns there line d'emission = window
- * glissante of the registre `rf70` (roule by `ps_cmlive_step`, `rf70=(rf70<<8|sym)`),
- * analogue structurel of the `ctx` `[0x45dca8]` of legacy : `row=(rf70>>8)&0x1ff`. */
+/* [GATED UHA_CM_EMISS, défaut-OFF, §13.909] Renvoie la ligne d'émission = fenêtre
+ * glissante du registre `rf70` (roulé par `ps_cmlive_step`, `rf70=(rf70<<8|sym)`),
+ * analogue structurel du `ctx` `[0x45dca8]` du legacy : `row=(rf70>>8)&0x1ff`. */
 int alz_ps_cmlive_ctxrow(const uint8_t *g, uint32_t pos, uint32_t *row_out, uint32_t *sym_out)
 {
     uint32_t k;
@@ -1401,28 +1720,31 @@ int alz_ps_cmlive_ctxrow(const uint8_t *g, uint32_t pos, uint32_t *row_out, uint
     return 0;
 }
 
-/* [GATED UHA_CM_EMCARRY, default-OFF, 13.896/897] Carry MASTER d'emission (mecanisme
- * validated m13 91,5 %) : has `arena2d` M persistant (by file), recharge en working
- * `W:=copy(M)` at the beginning of each block, then scan DENSE (score+learn, rescale **working
- * 0x414590**) ecrivant `out[]=prod_dens` (there window pass#0 of the `sm`). `M` is ensuite
- * advances by the carry d'emission of the block. The `(row,sym)` viennent of the law ctx->row
- * (M14) ; here on branch `ps_ctx_step` (delta2D) as SOURCE EN ATTENTE of M14.
- * DefautOFF : never appele if no requis -> zero effet / zero regression. */
+/* [GATED UHA_CM_EMCARRY, défaut-OFF, §13.896/897] Carry MAÎTRE d'émission (mécanisme
+ * validé m13 91,5 %) : un `arena2d` M persistant (par fichier), rechargé en working
+ * `W:=copy(M)` au début de chaque bloc, puis scan DENSE (score+learn, rescale **working
+ * 0x414590**) écrivant `out[]=prod_dens` (la fenetre passe#0 du `sm`). `M` est ensuite
+ * avancé par le carry d'émission du bloc. Les `(row,sym)` viennent de la loi ctx→row
+ * (M14) ; ici on branch `ps_ctx_step` (delta‑2D) comme SOURCE EN ATTENTE de M14.
+ * Défaut‑OFF : jamais appelé si non requis → zéro effet / zéro régression. */
 int alz_ps_emission_master_carry(const uint8_t *g, uint32_t base, uint32_t len,
                                  uint32_t *out_dens)
 {
-    static alz_arena2d_t M, W;
+    static alz_arena2d_t *M = NULL, *W = NULL;
     static int m_init = 0;
     static uint32_t s_ctx_seed = 0u;
     uint32_t i, ctx_run;
     if (!g || !out_dens || len == 0u)
         return -1;
-    if (!m_init) { alz_arena2d_init(&M, 32u); alz_arena2d_init(&W, 32u); m_init = 1; }
-    if (base == 0u) { alz_arena2d_init(&M, 32u); alz_arena2d_init(&W, 32u); s_ctx_seed = 0u;
-        alz_ps_cmlive_reset(0u); }   /* relance the moteur CM live (source row/sym) */
-    /* (1) reload W:=copy(M) ; (2) scan dense : lines = `ctx` of the moteur CM (`rf70`) if
-     * dispo, otherwise roulage position of the recon ; arena2d rescale working. */
-    W = M;
+    if (!M) M = (alz_arena2d_t *)malloc(sizeof *M);
+    if (!W) W = (alz_arena2d_t *)malloc(sizeof *W);
+    if (!M || !W) return -1;
+    if (!m_init) { alz_arena2d_init(M, 32u); alz_arena2d_init(W, 32u); m_init = 1; }
+    if (base == 0u) { alz_arena2d_init(M, 32u); alz_arena2d_init(W, 32u); s_ctx_seed = 0u;
+        alz_ps_cmlive_reset(0u); }   /* relance le moteur CM live (source row/sym) */
+    /* (1) reload W:=copy(M) ; (2) scan dense : lignes = `ctx` du moteur CM (`rf70`) si
+     * dispo, sinon roulage position du recon ; arena2d rescale working. */
+    *W = *M;
     ctx_run = s_ctx_seed;
     for (i = 0u; i < len; i++) {
         uint32_t row, sym;
@@ -1432,13 +1754,13 @@ int alz_ps_emission_master_carry(const uint8_t *g, uint32_t base, uint32_t len,
             sym = (uint32_t) g[base + i] & 0xffu;
         }
         if (row >= ALZ_ARENA2D_MAX_ROW) row = ALZ_ARENA2D_MAX_ROW - 1u;
-        out_dens[base + i] = alz_arena2d_score(&W, row, sym & 0xffu, NULL);
+        out_dens[base + i] = alz_arena2d_score(W, row, sym & 0xffu, NULL);
     }
-    /* (3) to advance the MASTER by the same lines (carry d'emission).
-     * [GATED UHA_CMCARRY_LEARN, default-OFF, 14.061] the producteur LEGACY LEARNS in
-     * the master (`add WORD[edx],0x20` @0x414966) : without LEARN, `M` remainder cold and the
-     * reload block1 recharge has master static -> EMISS mediocre. Gate ON => M s'accumule
-     * (promo +0x20), mirror of the carry reel. DefautOFF = NULL (unchanged, no regressif). */
+    /* (3) avancer le MAÎTRE par les mêmes lignes (carry d'émission).
+     * [GATED UHA_CMCARRY_LEARN, défaut-OFF, §14.061] le producteur LEGACY APPREND dans
+     * le maître (`add WORD[edx],0x20` @0x414966) : sans LEARN, `M` reste froid et le
+     * reload block1 recharge un maître static → EMISS médiocre. Gate ON ⇒ M s'accumule
+     * (promo +0x20), miroir du carry réel. Défaut‑OFF = NULL (inchangé, non régressif). */
     {
         static int s_ccl = -1;
         int cl;
@@ -1448,7 +1770,7 @@ int alz_ps_emission_master_carry(const uint8_t *g, uint32_t base, uint32_t len,
             uint32_t row, sym, lo = 0u;
             if (alz_ps_cmlive_symrow(g, base + i, 0u, &row, &sym) != 0) { row = 0u; sym = (uint32_t) g[base + i] & 0xffu; }
             if (row >= ALZ_ARENA2D_MAX_ROW) row = ALZ_ARENA2D_MAX_ROW - 1u;
-            (void) alz_arena2d_score(&M, row, sym & 0xffu, cl ? &lo : NULL);
+            (void) alz_arena2d_score(M, row, sym & 0xffu, cl ? &lo : NULL);
         }
     }
     s_ctx_seed = ctx_run;
@@ -1456,16 +1778,16 @@ int alz_ps_emission_master_carry(const uint8_t *g, uint32_t base, uint32_t len,
 }
 
 /* ==========================================================================
- * [ARENA_TASK16 - GATED default-OFF, path faithful datadriven] alz_ps_livewalk_master.
- * Recette validated `Sigma==ORACLE` by `alz_ps_multi3` (l.605611) : has SNAPSHOT master
- * `snap` PERSISTANT, RECHARGE `live:=snap` by block, each class copiant snap->live
- * and SCORANT son stream (argmin 5 classes -> winner). The `snap` n'is advances THAT by the
- * stream DENSE of the class WINNING (cls3 for image.raw) - not by all the literals,
- * not by `gen_ctxs` - via `ps_score_ctxs` (cold/warm promo=32 + `rescale @0x4000`).
- * L'advances machine ctx (`ps_ctx_step(c,...)`) is has CARRY which roule sure all the file.
- * output = cost PRElearn by position of the `live` winner (mirror of the `sm`). N'WRITES
- * `out` that for the blocks whose `base >= from` (overlay ; the bloc0 keeps EMIPROD).
- * returns 0 OK, <0 error. Zero effet out gate (appele under `UHA_LIVEWALK`). */
+ * [ARENA_TASK16 — GATED défaut-OFF, voie fidèle data‑driven] alz_ps_livewalk_master.
+ * Recette validée `Σ==ORACLE` par `alz_ps_multi3` (l.605‑611) : un SNAPSHOT maître
+ * `snap` PERSISTANT, RECHARGÉ `live:=snap` par bloc, chaque classe copiant snap→live
+ * et SCORANT son flux (argmin 5 classes → gagnant). Le `snap` n'est avancé QUE par le
+ * flux DENSE de la CLASSE GAGNANTE (cls3 pour image.raw) — pas par tous les littéraux,
+ * pas par `gen_ctxs` — via `ps_score_ctxs` (cold/warm promo=32 + `rescale @0x4000`).
+ * L'avance machine ctx (`ps_ctx_step(c,…)`) est un CARRY qui roule sur tout le fichier.
+ * Sortie = coût PRÉ‑learn par position du `live` gagnant (miroir du `sm`). N'ÉCRIT
+ * `out` que pour les blocs dont `base >= from` (overlay ; le bloc0 garde EMIPROD).
+ * Retourne 0 OK, <0 erreur. Zéro effet hors gate (appelé sous `UHA_LIVEWALK`). */
 int alz_ps_livewalk_master(const uint8_t *g, uint32_t usize,
                            const uint32_t *blkpos, const uint32_t *blklen,
                            int nblk, uint32_t from, uint32_t *out)
@@ -1485,7 +1807,7 @@ int alz_ps_livewalk_master(const uint8_t *g, uint32_t usize,
     if (!snap || !live || !tmp) { free(snap); free(live); free(tmp); return -1; }
     for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
         ctxs[k] = (uint32_t *) malloc(sizeof(uint32_t) * (size_t)(maxlen ? maxlen : 1u));
-        mm[k][0] = mm[k][1] = 0u; mm[k][2] = 1u;   /* init carry (idem alz.c advances M) */
+        mm[k][0] = mm[k][1] = 0u; mm[k][2] = 1u;   /* init carry (idem alz.c avance M) */
         if (!ctxs[k]) { while (--k >= 0) free(ctxs[k]); free(snap); free(live); free(tmp); return -1; }
     }
     alz_arena2d_init(snap, 32u);
@@ -1496,19 +1818,19 @@ int alz_ps_livewalk_master(const uint8_t *g, uint32_t usize,
         if (base >= usize) continue;
         if (base + len > usize) len = usize - base;
         if (!len) continue;
-        /* [probe] reload of the master at the input of THIS block (= total after blocks previous). */
+        /* [sonde] reload du maître à l'entrée de CE bloc (= total après blocs précédents). */
         if (stats && base >= from)
             fprintf(stderr, "[LWM] reload@0x%05x t68=%u(tree68 cnt68=%u) t37=%u(tree37 cnt37=%u)\n",
                     (unsigned) base, (unsigned) snap->total[68u], (unsigned) snap->counter[68u],
                     (unsigned) snap->total[37u], (unsigned) snap->counter[37u]);
-        /* (1) generer the stream ctx by class sure all the block (carry machine). */
+        /* (1) générer les flux ctx par classe sur TOUT le bloc (carry machine). */
         for (c = 0u; c < ALZ_PS_NCLASS; c++)
             for (i = 0u; i < len; i++)
                 ctxs[c][i] = ps_ctx_step(c, g, base + i, &mm[c][0], &mm[c][1], &mm[c][2]);
-        /* (2) order : seed (winner block previous) d'abord, then ascendant. */
+        /* (2) ordre : seed (gagnant bloc précédent) d'abord, puis ascendant. */
         order[cnt++] = seed_cls;
         for (c = 0u; c < ALZ_PS_NCLASS; c++) if (c != seed_cls) order[cnt++] = c;
-        /* (3) argmin : each class copie snap->live and score (abandon precoce). */
+        /* (3) argmin : chaque classe copie snap→live et score (abandon précoce). */
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
             uint32_t cc = order[(uint32_t)k], s;
             *live = *snap;
@@ -1516,11 +1838,11 @@ int alz_ps_livewalk_master(const uint8_t *g, uint32_t usize,
                               (k == 0) ? NULL : &best, NULL, NULL);
             if (s < best) { best = s; winner = cc; }
         }
-        /* (4) output : cost by position of the `live` winner (recharge since snap). */
+        /* (4) SORTIE : coût par position du `live` gagnant (rechargé depuis snap). */
         *live = *snap;
         (void) ps_score_ctxs(live, ctxs[winner], len, 32u, ALZ_PS_COLD0, NULL, NULL, tmp);
         if (base >= from) memcpy(out + base, tmp, (size_t) len * sizeof(uint32_t));
-        /* (5) to advance the SNAP master by the stream DENSE of the winner (persiste interblocks). */
+        /* (5) avancer le SNAP maître par le flux DENSE du gagnant (persiste inter‑blocs). */
         (void) ps_score_ctxs(snap, ctxs[winner], len, 32u, ALZ_PS_COLD0, NULL, NULL, NULL);
         seed_cls = winner;
     }
@@ -1530,14 +1852,14 @@ int alz_ps_livewalk_master(const uint8_t *g, uint32_t usize,
 }
 
 /* ==========================================================================
- * [ARENA_TASK16 - MEASURES, gated UHA_LIVEWALK_LC, N'WRITES NOT `out`] master " literalcarry ".
- * Hypothese datadriven (hit68 729 vs GT 420) : the legacy engine does to advance there machine ctx
- * (`ps_ctx_step(3)` carry ebx/flag/ebp) ONLY to the EMISSIONS of LITERAL (carry gele
- * during the runs of match), and n'LEARNS the master (0x4111a0) qu'has these same emissions.
- * Here : `snap` master persistant (init 32), mm[3] carry pasapas ; for q croissant, if
- * is_lit[q] -> ctx=ps_ctx_step(3,...,&mm) then learn snap (cold/warm + rescale @0x4000).
- * Digite tree/counter/hit of rows 68/37 at the input of each block (via _STATS) for
- * confront has GT (tree68=13438 tree37=4496, hit420/140). returns 0. */
+ * [ARENA_TASK16 — MESURE, gated UHA_LIVEWALK_LC, N'ÉCRIT PAS `out`] maître « literal‑carry ».
+ * Hypothèse data‑driven (hit68 729 vs GT 420) : le legacy fait avancer la machine ctx
+ * (`ps_ctx_step(3)` carry ebx/flag/ebp) UNIQUEMENT aux ÉMISSIONS de LITTÉRAL (carry gelé
+ * pendant les runs de match), et n'APPREND le maître (0x4111a0) qu'à ces mêmes émissions.
+ * Ici : `snap` maître persistant (init 32), mm[3] carry pas‑à‑pas ; pour q croissant, si
+ * is_lit[q] → ctx=ps_ctx_step(3,…,&mm) puis learn snap (cold/warm + rescale @0x4000).
+ * Digite tree/counter/hit de rows 68/37 à l'entrée de chaque bloc (via _STATS) pour
+ * confront à GT (tree68=13438 tree37=4496, hit≈420/140). Retourne 0. */
 int alz_ps_livewalk_litcarry(const uint8_t *g, uint32_t usize,
                              const uint32_t *blkpos, const uint32_t *blklen,
                              int nblk, const uint8_t *is_lit, uint32_t *out_stats)
@@ -1555,8 +1877,8 @@ int alz_ps_livewalk_litcarry(const uint8_t *g, uint32_t usize,
         uint32_t base = blkpos[b], len = blklen[b], r, sum68 = 0u, sum37 = 0u, col;
         if (base >= usize) continue;
         if (base + len > usize) len = usize - base;
-        /* input of block : snapshot of the master (reload total:=tree+counter is there law of
-         * rescale(); here on reads l'state cumule). */
+        /* entrée de bloc : snapshot du maître (reload total:=tree+counter est la loi de
+         * rescale(); ici on lit l'état cumulé). */
         for (col = 0u; col < 256u; col++) { sum68 += snap->freq[(68u<<8)+col]; sum37 += snap->freq[(37u<<8)+col]; }
         (void)r;
         fprintf(stderr, "[LC] blk%d base=0x%05x t68=%u(tree68=%u cnt68=%u hit68=%u) t37=%u(tree37=%u cnt37=%u hit37=%u)\n",
@@ -1565,12 +1887,12 @@ int alz_ps_livewalk_litcarry(const uint8_t *g, uint32_t usize,
         for (i = 0u; i < len; i++) {
             uint32_t ctx, row, delta;
             q = base + i;
-            if (!is_lit[q]) continue;                 /* carry GELE during the matchs */
+            if (!is_lit[q]) continue;                 /* carry GELÉ pendant les matchs */
             ctx = ps_ctx_step(3u, g, q, &mm[0], &mm[1], &mm[2]);
             row = ctx >> 8; delta = ctx & 0xffu;
             if (row >= ALZ_ARENA2D_MAX_ROW) row = ALZ_ARENA2D_MAX_ROW - 1u;
-            if (q >= 0x3100u) { }                      /* (learn bloc0 only for there measures of the reload b1) */
-            /* learn master = cold/warm + rescale @0x4000 (reutilise via has miniinline) */
+            if (q >= 0x3100u) { }                      /* (learn bloc0 uniquement pour la mesure du reload b1) */
+            /* learn maître = cold/warm + rescale @0x4000 (réutilisé via un mini‑inline) */
             {
                 uint32_t T = snap->total[row], f = snap->freq[(row<<8)|delta], inc = snap->promo[row];
                 if (f == 0u) { snap->freq[(row<<8)|delta]=(uint16_t)inc; snap->counter[row]=(uint16_t)(snap->counter[row]+inc); snap->total[row]=(uint16_t)(T+2u*inc); }
@@ -1586,28 +1908,28 @@ int alz_ps_livewalk_litcarry(const uint8_t *g, uint32_t usize,
     return 0;
 }
 
-/* [GATED UHA_CM_WIRE, 13.803 M5] Produces g_lmin = cost[rc] BIT-EXACT sure there section
- * [base,base+len). Recette validated 100 % by ISOL_M5/m5_harness.c : CM engine dense sure
- * the literals (is_lit) -> sym/aff (row d'affinite R1), with LAG of line (relrow=aff[i-1]),
+/* [GATED UHA_CM_WIRE, §13.803 M5] Produit g_lmin = cost[rc] BIT-EXACT sur la section
+ * [base,base+len). Recette validée 100 % par ISOL_M5/m5_harness.c : CM engine dense sur
+ * les litteraux (is_lit) -> sym/aff (row d'affinite R1), avec LAG de ligne (relrow=aff[i-1]),
  * arena2d WORKING (score+learn, rescale 0x414590), WARM=1 LUT / COLD=LUT[64]+LUT[(cnt<<14)/total]
- * (master fenwick has sa seed freqM=4/fenwick=1024). Not TOUCHE NOT the master M. */
+ * (maitre fenwick a sa seed freqM=4/fenwick=1024). Ne TOUCHE PAS le maitre M. */
 static void ps_cmwire_dens(const uint8_t *g, uint32_t base, uint32_t len,
                            const uint8_t *is_lit, uint32_t *out)
 {
-    (void)is_lit;
     static const uint32_t MASKW[6] = {127u,127u,127u,127u,7u,3u};
     alz_cm_learner L; memset(&L, 0, sizeof L);
     alz_arena A; alz_arena_init(&A);
     alz_arb   R; alz_arb_init(&R);
-    alz_arena2d_t S; alz_arena2d_init(&S, 32u);   /* arena of SCORAGE working (section) */
+    alz_arena2d_t S; alz_arena2d_init(&S, 32u);   /* arène de SCORAGE working (section) */
     uint32_t rf70 = 0xffffffffu, rf74 = 0xffffffffu, rf78 = 0xffffffffu; int rflag = 0;
     int lpi = 0; int32_t prev_rh = 0;
-    uint32_t aff_cost = 0, idx_cost = 0;          /* LAG line i-1 */
+    uint32_t aff_cost = 0, idx_cost = 0;          /* LAG ligne i-1 */
     uint32_t i;
+    (void)is_lit;
     for (i = 0; i < len; i++) {
         uint32_t abs = base + i;
-        /* M5 : the scorer advances has all rc (dense) ; is_lit-advances under-advances l'arena
-         * and does to drift cost[rc] some ~rc544. (m5_harness advances has gt_have_engine  dense.) */
+        /* M5 : le scoreur avance à TOUT rc (dense) ; is_lit-avance sous-avance l'arène
+         * et fait dériver cost[rc] dès ~rc544. (m5_harness avance à gt_have_engine ≈ dense.) */
         uint8_t b_cur   = g[abs];
         uint8_t b_prev  = (i >= 1u) ? g[abs - 1u] : 0x80u;
         uint8_t b_prev2 = (i >= 2u) ? g[abs - 2u] : 0x80u;
@@ -1641,80 +1963,258 @@ static void ps_cmwire_dens(const uint8_t *g, uint32_t base, uint32_t len,
         if (sym >= 0x80u) rflag ^= 1;
         uint32_t aff = (rf70==0u)?1u:(rf74==0u)?2u:(rf78==0u)?3u:0u;
         lpi = (int)idx_i; prev_rh = L.prev_dot_full;
-        /* cost = cost[rc] with LAG (relrow = aff of the line previous), sym current */
+        /* coût = cost[rc] avec LAG (relrow = aff de la LIGNE PRÉCÉDENTE), sym courant */
         uint32_t rel = aff_cost;                 /* LAG */
         uint32_t freqF = alz_arena2d_freq(&S, rel, sym);
         uint32_t cnt   = S.counter[rel];
         uint32_t T_before = S.total[rel];
         uint32_t cost;
-        if (freqF != 0u) {                        /* WARM 1 term */
+        if (freqF != 0u) {                        /* WARM 1 terme */
             uint32_t p2 = (T_before!=0u)?((freqF<<14)/T_before):(ALZ_SCORE_CUM_N-1u);
             if (p2 >= ALZ_SCORE_CUM_N) p2 = ALZ_SCORE_CUM_N-1u;
             cost = alz_score_proba_to_cost(p2);
-        } else {                                  /* COLD 2 terms (master has sa seed) */
+        } else {                                  /* COLD 2 termes (maitre à sa seed) */
             uint32_t p1 = (1024u!=0u)?((4u<<14)/1024u):(ALZ_SCORE_CUM_N-1u);   /* freqM=4,fenwick=1024 -> 64 */
             if (p1 >= ALZ_SCORE_CUM_N) p1 = ALZ_SCORE_CUM_N-1u;
             uint32_t p2 = (T_before!=0u)?((cnt<<14)/T_before):(ALZ_SCORE_CUM_N-1u);
             if (p2 >= ALZ_SCORE_CUM_N) p2 = ALZ_SCORE_CUM_N-1u;
             cost = alz_score_proba_to_cost(p1) + alz_score_proba_to_cost(p2);
         }
-        (void)alz_arena2d_score(&S, rel, sym, NULL);   /* advances (learn+rescale working) */
+        (void)alz_arena2d_score(&S, rel, sym, NULL);   /* avance (learn+rescale working) */
         aff_cost = aff; idx_cost = idx_i;
         out[abs] = cost;
     }
     (void)idx_cost;
 }
 
+/* ==========================================================================
+ * [GATED UHA_A3_CLASS0, défaut-OFF] Producteur densité FIDÈLE classe-0 (-m1).
+ *
+ * Maître persistant (HOT lignes 0..511, seed, 8 lignes d'échappement) appris PAR
+ * LITTÉRAL ÉMIS via le bloc learn 0x4120fd..0x4121c1 ; par bloc, working = snapshot
+ * du maître puis scan DENSE cls0 (a3_est_cost / 0x414630). Rescale maître 0x40ffa0
+ * (double porte seed+root>=0x4000 OU budget<0, ré-arme <<6 car ligne<0x300), escape
+ * 0x40fe90. Loi VALIDÉE offline 100 % (replay_master.c : hotfreq/seed/wtotal/escape
+ * 0 mismatch ; verify_taildens.c : 256/256 cellules queue).
+ *
+ * Le maître densité est FROID à l'entrée du bloc 1 : le bloc 0 émet via les lignes
+ * d'émission >=512 (mesuré : 0 événement row<512 avant pos 12544). On n'écrit `out`
+ * que pour les blocs >=1 ; le bloc 0 est laissé intact (l'appelant garde son snapshot
+ * froid). Géométrie legacy 0x413ed9 : block=rest>=0x4b00?0x3200:rest, len=block-0x100.
+ * ========================================================================== */
+#define A3_C0_NROW 512u
+typedef struct a3_c0_master {
+    uint16_t hot[A3_C0_NROW * 256];   /* HOT[row][sym] (PERM *0x4373cc) */
+    uint16_t seed[A3_C0_NROW];        /* compteur secondaire (*0x4373d4) */
+    uint32_t root[A3_C0_NROW];        /* racine Fenwick = Σ freq (invariant) */
+    int32_t  budget[A3_C0_NROW];      /* [0x45cc94 + row*4] aging budget signé */
+    uint16_t esc[8 * 256];            /* lignes escape 1017..1024, cellules */
+    uint32_t escroot[8];              /* racine Fenwick de chaque ligne escape */
+} a3_c0_master_t;
+
+/* Rescale maître 0x40ffa0 : f>16 → f>>1 sinon 0 ; root=Σ ; seed=(seed+1)>>1 ;
+ * budget=(seed_new+root_new)<<6 (ligne densité <0x300 → 0x4100a8 shl 6). */
+static void a3_c0_rescale_master(a3_c0_master_t *m, uint32_t row)
+{
+    uint32_t j, s = 0u;
+    for (j = 0u; j < 256u; j++) {
+        uint32_t v = m->hot[row * 256u + j];
+        v = (v > 16u) ? (v >> 1) : 0u;
+        m->hot[row * 256u + j] = (uint16_t)v;
+        s += v;
+    }
+    m->root[row]   = s;
+    m->seed[row]   = (uint16_t)((m->seed[row] + 1u) >> 1);
+    m->budget[row] = (int32_t)((m->seed[row] + s) << 6);
+}
+
+/* Rescale escape 0x40fe90 : v'=((v+1)&~1)>>1 ; racine=Σ. */
+static void a3_c0_rescale_esc(a3_c0_master_t *m, uint32_t k)
+{
+    uint32_t j, s = 0u;
+    for (j = 0u; j < 256u; j++) {
+        uint32_t v = m->esc[k * 256u + j];
+        v = ((v + 1u) & ~1u) >> 1;
+        m->esc[k * 256u + j] = (uint16_t)v;
+        s += v;
+    }
+    m->escroot[k] = s;
+}
+
+/* Learn d'un littéral émis (0x4120fd..0x4121c1). row cls0 = p1 + (0x100 si
+ * (p1&0xc0)==(p2&0xc0)) ; escape k=(p1&0xe0)>>5 ; sym=g[pos] BRUT. promo=32,
+ * escape_inc=8 (lignes densité). budget -= (seed+freq_avant) ; froid → escape+8
+ * et seed+=32 ; HOT+=32, root+=32 ; rescale si seed+root>=0x4000 OU budget<0. */
+static void a3_c0_learn(a3_c0_master_t *m, const uint8_t *g, uint32_t pos)
+{
+    uint32_t p1 = (pos >= 1u) ? g[pos - 1u] : 0u;
+    uint32_t p2 = (pos >= 2u) ? g[pos - 2u] : 0u;
+    uint32_t row = p1 + (((p1 & 0xc0u) == (p2 & 0xc0u)) ? 0x100u : 0u);
+    uint32_t k   = (p1 & 0xe0u) >> 5;
+    uint32_t sym = g[pos];
+    uint32_t f0  = m->hot[row * 256u + sym];
+    m->budget[row] -= (int32_t)(m->seed[row] + f0);   /* 0x412144 (avant update) */
+    if (f0 == 0u) {                                    /* COLD */
+        m->esc[k * 256u + sym] = (uint16_t)(m->esc[k * 256u + sym] + 8u);
+        m->escroot[k] += 8u;
+        if (m->escroot[k] >= 0x4000u) a3_c0_rescale_esc(m, k);
+        m->seed[row] = (uint16_t)(m->seed[row] + 32u); /* 0x412169 */
+    }
+    m->hot[row * 256u + sym] = (uint16_t)(f0 + 32u);    /* 0x41216d */
+    m->root[row] += 32u;
+    if (m->seed[row] + m->root[row] >= 0x4000u || m->budget[row] < 0)
+        a3_c0_rescale_master(m, row);
+}
+
+int alz_ps_class0_percost_ex(const uint8_t *g, uint32_t usize,
+                             const uint32_t *blkpos, const uint32_t *blklen,
+                             int nblk, const uint8_t *is_lit, int b0_learn,
+                             uint32_t *out)
+{
+    static a3_c0_master_t *s_c0_m = NULL;
+    static alz_arena2d_t  *s_c0_w = NULL;
+    a3_c0_master_t *m;
+    alz_arena2d_t *W;
+    a3_esc_line_t E[8];
+    int b;
+    uint32_t i;
+
+    if (!g || !blkpos || !blklen || !is_lit || !out || nblk <= 0)
+        return -1;
+    if (!s_c0_m)
+        s_c0_m = (a3_c0_master_t *) calloc(1, sizeof(a3_c0_master_t));
+    else
+        memset(s_c0_m, 0, sizeof(a3_c0_master_t));
+    if (!s_c0_w)
+        s_c0_w = (alz_arena2d_t *) calloc(1, sizeof(alz_arena2d_t));
+    m = s_c0_m;
+    W = s_c0_w;
+    if (!m || !W) return -1;
+    W->aging_on = 0;
+
+    /* init froid : HOT=0, seed=1, root=0, budget=0x4000 ; escape cellules=2 racine=512. */
+    for (i = 0u; i < A3_C0_NROW; i++) { m->seed[i] = 1u; m->budget[i] = 0x4000; }
+    for (i = 0u; i < 8u * 256u; i++) m->esc[i] = 2u;
+    for (i = 0u; i < 8u; i++) m->escroot[i] = 512u;
+
+    for (b = 0; b < nblk; b++) {
+        uint32_t base = blkpos[b], len = blklen[b];
+        if (base >= usize) continue;
+        if (base + len > usize) len = usize - base;
+        if (!len) continue;
+        if (b == 0) {
+            /* bloc 0 : maître froid à l'entrée ; si b0_learn != 0 (sel 0,
+             * escape_changed == 0), bloc 0 émet via lignes 0..511 et apprend
+             * ses littéraux dans le maître ; sinon (sel 10) lignes >= 512.
+             * `out` du bloc 0 reste intact (snapshot froid de l'appelant). */
+            if (b0_learn) {
+                for (i = 0u; i < len; i++) {
+                    uint32_t abs = base + i;
+                    if (is_lit[abs]) a3_c0_learn(m, g, abs);
+                }
+            }
+            continue;
+        }
+
+        /* (1) snapshot working W = maître (freq=HOT, counter=seed, total=seed+root). */
+        memcpy(W->freq, m->hot, sizeof W->freq);
+        for (i = 0u; i < ALZ_ARENA2D_MAX_ROW; i++) {
+            W->counter[i] = m->seed[i];
+            W->total[i]   = (uint16_t)(m->seed[i] + m->root[i]);
+            W->promo[i]   = 32u;
+        }
+        for (i = 0u; i < 8u; i++) {
+            memcpy(E[i].freq, m->esc + i * 256u, 256u * sizeof(uint16_t));
+            memset(E[i].fen, 0, sizeof E[i].fen);
+            E[i].fen[0] = (uint16_t)m->escroot[i];
+        }
+        /* (2) scan DENSE cls0 intra-bloc → coût figé par position (0x414630). */
+        for (i = 0u; i < len; i++) {
+            uint32_t abs = base + i;
+            uint32_t p1 = (abs >= 1u) ? g[abs - 1u] : 0u;
+            uint32_t p2 = (abs >= 2u) ? g[abs - 2u] : 0u;
+            uint32_t row = p1 + (((p1 & 0xc0u) == (p2 & 0xc0u)) ? 0x100u : 0u);
+            uint32_t k   = (p1 & 0xe0u) >> 5;
+            out[abs] = a3_est_cost(W, &E[k], row, g[abs], NULL);
+        }
+        /* (3) avancer le MAÎTRE : learn sparse aux seuls littéraux émis, en ordre pos. */
+        for (i = 0u; i < len; i++) {
+            uint32_t abs = base + i;
+            if (is_lit[abs]) a3_c0_learn(m, g, abs);
+        }
+    }
+    return 0;
+}
+
+int alz_ps_class0_percost(const uint8_t *g, uint32_t usize,
+                          const uint32_t *blkpos, const uint32_t *blklen,
+                          int nblk, const uint8_t *is_lit, uint32_t *out)
+{
+    return alz_ps_class0_percost_ex(g, usize, blkpos, blklen, nblk, is_lit, 0, out);
+}
+
 int alz_ps_emiprod_percost(const uint8_t *g, uint32_t usize,
                            const uint32_t *blkpos, const uint32_t *blklen,
                            int nblk, const uint8_t *is_lit, uint32_t *out)
 {
+    static alz_arena2d_t *s_ep_m = NULL, *s_ep_w = NULL;
+    static uint32_t *s_ep_tmp = NULL;
+    static uint32_t  s_ep_tmp_cap = 0u;
     alz_arena2d_t *M, *W;
-    uint32_t *tmp, maxlen = 0u;
+    uint32_t *tmp, maxlen = 0u, need;
     int b, dense = 0, masterlaw = 0, cmwire = 0, cmwire_prod = 0, emcarry = 0, mbound = 0, mcold = 0, litcarry = 0;
-    FILE *cd = NULL;   /* [GATED UHA_CTXDUMP, default-OFF] journal pos/relrow/delta/byte. */
+    FILE *cd = NULL;   /* [GATED UHA_CTXDUMP, défaut-OFF] journal pos/relrow/delta/octet. */
 
     if (!g || !blkpos || !blklen || !is_lit || !out || nblk <= 0)
         return -1;
     for (b = 0; b < nblk; b++)
         if (blklen[b] > maxlen) maxlen = blklen[b];
-    M   = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
-    W   = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
-    tmp = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)(maxlen ? maxlen : 1u));
-    if (!M || !W || !tmp) { free(M); free(W); free(tmp); return -1; }
+    if (!s_ep_m) s_ep_m = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
+    if (!s_ep_w) s_ep_w = (alz_arena2d_t *)malloc(sizeof(alz_arena2d_t));
+    need = maxlen ? maxlen : 1u;
+    if (!s_ep_tmp || s_ep_tmp_cap < need) {
+        uint32_t *nt = (uint32_t *)realloc(s_ep_tmp, sizeof(uint32_t) * (size_t)need);
+        if (!nt) return -1;
+        s_ep_tmp = nt;
+        s_ep_tmp_cap = need;
+    }
+    M   = s_ep_m;
+    W   = s_ep_w;
+    tmp = s_ep_tmp;
+    if (!M || !W || !tmp) return -1;
     alz_arena2d_init(M, 32u);
-    {   /* [GATED UHA_AADUMP, read-only] opens there probe (row,freq,total) cls3. */
+    {   /* [GATED UHA_AADUMP, LECTURE SEULE] ouvre la sonde (row,freq,total) cls3. */
         const char *ad = getenv("UHA_AADUMP");
         if (ad && *ad) g_adump = fopen(ad, "w");
-        /* [GATED UHA_EMIPROD_DENSE] master learns has all positions (otherwise lits single). */
+        /* [GATED UHA_EMIPROD_DENSE] master apprend à TOUTES les positions (sinon lits seuls). */
         if (getenv("UHA_EMIPROD_DENSE")) dense = 1;
-        /* [GATED UHA_EMIPROD_LITCARRY, defautOFF, ARENA_TASK16] the master advances sa machine
-         * ctx (carry mm) AND learns ONLY to the emissions of LITERAL (carry gele during
-         * the runs of match) - mirror of the learn d'emission `0x4111a0`. Reduit `reload[68]` of
-         * 15248 (sourceorder) towards ~14257 (GT 13501, gap +5,6 % vs +13 %). */
+        /* [GATED UHA_EMIPROD_LITCARRY, défaut‑OFF, ARENA_TASK16] le maître avance sa machine
+         * ctx (carry mm) ET apprend UNIQUEMENT aux émissions de LITTÉRAL (carry gelé pendant
+         * les runs de match) — miroir du learn d'émission `0x4111a0`. Réduit `reload[68]` de
+         * 15248 (source‑order) vers ~14257 (GT 13501, écart +5,6 % vs +13 %). */
         if (getenv("UHA_EMIPROD_LITCARRY")) litcarry = 1;
-        /* [GATED UHA_EMIPROD_MASTERLAW] rescale of the master = law 0x40ffa0 (!= working). */
+        /* [GATED UHA_EMIPROD_MASTERLAW] rescale du maître = loi 0x40ffa0 (≠ working). */
         if (getenv("UHA_EMIPROD_MASTERLAW")) masterlaw = 1;
-        /* [GATED UHA_MCOLD, default-OFF, 14.127] not NOT to advance the master (M remainder
-         * cold) : teste l'hypothese " there legacy keeps M cold, single W accumule ".
-         * Combine has UHA_WLEARNLIT for there pass of output. */
+        /* [GATED UHA_MCOLD, défaut-OFF, §14.127] ne PAS avancer le maître (M reste
+         * froid) : teste l'hypothèse « la legacy garde M cold, seul W accumule ».
+         * Combiné à UHA_WLEARNLIT pour la passe de sortie. */
         if (getenv("UHA_MCOLD")) mcold = 1;
-        /* [GATED UHA_CM_WIRE, default-OFF] band registre (affin{0..3}) vs proxy cls3. */
+        /* [GATED UHA_CM_WIRE, défaut-OFF] bande registre (aff∈{0..3}) vs proxy cls3. */
         if (getenv("UHA_CM_WIRE")) cmwire = 1;
-        /* [GATED UHA_CMWIRE_PROD, defautOFF] Surcharge producteur g_lmin=cost[rc] (M5/argmin).
-         * Desactivable for tester there feed CM acclive SINGLE (13.859). */
+        /* [GATED UHA_CMWIRE_PROD, défaut‑OFF] Surcharge producteur g_lmin=cost[rc] (M5/argmin).
+         * Désactivable pour tester la feed CM acclive SEULE (§13.859). */
         if (getenv("UHA_CMWIRE_PROD")) cmwire_prod = 1;
-        /* [GATED UHA_CM_EMCARRY, defautOFF] carry master d'emission arena2d (13.897). */
+        /* [GATED UHA_CM_EMCARRY, défaut‑OFF] carry maître d'émission arena2d (§13.897). */
         if (getenv("UHA_CM_EMCARRY")) emcarry = 1;
-        /* [GATED UHA_CM_MBOUND, defautOFF] rescale master to the frontiers of block (13.911) ;
-         * value = NB of rescales at each frontier (cadence of the scribe). */
+        /* [GATED UHA_CM_MBOUND, défaut‑OFF] rescale maître aux frontières de bloc (§13.911) ;
+         * valeur = NB de rescales à chaque frontière (cadence du scribe). */
         { const char *mb = getenv("UHA_CM_MBOUND"); if (mb) mbound = atoi(mb); }
-        /* [GATED UHA_CTXDUMP=path, default-OFF] journal (pos,relrow=e,delta,byte) by
-         * position of the machine cls3, for diff vs stream reel learn 0x411bb8 (13.738). */
+        /* [GATED UHA_CTXDUMP=chemin, défaut-OFF] journal (pos,relrow=e,delta,octet) par
+         * position de la machine cls3, pour diff vs flux réel learn 0x411bb8 (§13.738). */
         {   const char *cx = getenv("UHA_CTXDUMP");
             if (cx && *cx) cd = fopen(cx, "w");
         }
-        /* [GATED UHA_PHASEFIX, default-OFF] phase cls3 = (abs+2)%3 (scan OUT + advances M). */
+        /* [GATED UHA_PHASEFIX, défaut-OFF] phase cls3 = (abs+2)%3 (scan OUT + avance M). */
         if (getenv("UHA_PHASEFIX")) g_ps_phasefix = 1;
     }
     for (b = 0; b < nblk; b++) {
@@ -1724,45 +2224,50 @@ int alz_ps_emiprod_percost(const uint8_t *g, uint32_t usize,
         if (base >= usize) continue;
         if (base + len > usize) len = usize - base;
         if (!len) continue;
-        /* [GATED UHA_CM_MBOUND, default-OFF, 13.911] rescale of the MASTER at the frontier of
-         * block (the scribe re-echelle `M` between blocks) : refroidit the working reloade au
-         * block1 -> target `esi` front  towards 58364. Mecanisme, not reglage. */
+        /* [GATED UHA_CM_MBOUND, défaut-OFF, §13.911] rescale du MAÎTRE à la frontière de
+         * bloc (le scribe ré-échelle `M` entre blocs) : refroidit le working reloadé au
+         * block1 → cible `esi` front ↓ vers 58364. Mécanisme, pas réglage. */
         if (mbound && b > 0) {
             uint32_t rr, nb; for (nb = 0u; nb < (uint32_t)mbound; nb++)
                 for (rr = 0u; rr < ALZ_ARENA2D_MAX_ROW; rr++) alz_arena2d_rescale(M, rr);
         }
-        /* (1) snapshot working = copie of the master, then scan DENSE intra-block cls3
-         *     (score + learn) => cost fige by position in `tmp`. */
+        /* [GATED UHA_A3_ESCFEED] frontière de bloc : le modèle d'escape encaisse les
+         * événements froids du bloc précédent (+16 chacun). */
+        if (b > 0) ps_esc_boundary();
+        /* (1) snapshot working = copie du master, puis scan DENSE intra-bloc cls3
+         *     (score + learn) ⟹ coût figé par position dans `tmp`. */
         *W = *M;
         memset(&stW, 0, sizeof stW);
         stW.ebp = 1u;
         stW.arena = W;
-        /* [GATED UHA_WLEARNLIT, default-OFF] there pass of output (cls3) n'learns that
-         * sure the LITERALS emis (is_lit), all en scorant each position. */
+        /* [GATED UHA_WLEARNLIT, défaut-OFF] la passe de sortie (cls3) n'apprend que
+         * sur les LITTÉRAUX émis (is_lit), tout en scorant chaque position. */
         if (getenv("UHA_WLEARNLIT") && base >= 0x3100u) g_ps_learn_mask = is_lit;
+        g_esc_count = 1;   /* [GATED UHA_A3_ESCFEED] compte les froids de la passe de SORTIE */
         (void) alz_ps_class_sigma_carry(&stW, 3u, g, base, len, 32u, ALZ_PS_COLD0,
                                        NULL, tmp, NULL);
+        g_esc_count = 0;
         g_ps_learn_mask = NULL;
         memcpy(out + base, tmp, (size_t)len * sizeof(uint32_t));
-        /* [GATED UHA_CM_EMCARRY, 13.897] surcharge by there dens of the carry master d'emission. */
+        /* [GATED UHA_CM_EMCARRY, §13.897] surcharge par la dens du carry maître d'émission. */
         if (emcarry) (void) alz_ps_emission_master_carry(g, base, len, out);
-        /* [GATED UHA_CM_WIRE, 13.803] AFTER the memcpy of the proxy : SURCHARGE g_lmin[pos]
-         * = cost[rc] BIT-EXACT (M5) to the single literals (no-literals keep the proxy). */
+        /* [GATED UHA_CM_WIRE, §13.803] APRÈS le memcpy du proxy : SURCHARGE g_lmin[pos]
+         * = cost[rc] BIT-EXACT (M5) aux seuls littéraux (non-littéraux gardent le proxy). */
         if (cmwire && cmwire_prod) ps_cmwire_dens(g, base, len, is_lit, out);
-        /* (2) to advance the MASTER : machine cls3 relative-block (ebp=1, alignee), but
-         *     n'APPRENDRE only to the  LITERALS EMIS (nothing sure the matchs).
-         *     [GATED UHA_CM_WIRE] : path faithful sym->row (engine CM dense) at the place of the proxy. */
+        /* (2) avancer le MASTER : machine cls3 relative-bloc (ebp=1, alignée), mais
+         *     n'APPRENDRE qu'aux LITTÉRAUX ÉMIS (rien sur les matchs).
+         *     [GATED UHA_CM_WIRE] : voie fidèle sym→row (engine CM dense) à la place du proxy. */
         if (cmwire) {
             ps_cmwire_advance_master(M, g, base, len, is_lit, usize);
         } else {
         mm[0] = 0u; mm[1] = 0u; mm[2] = 1u;
         for (i = 0u; !mcold && i < len; i++) {
             uint32_t c;
-            /* [LITCARRY] carry GELE + no learn during the bytes couverts by MATCH. */
+            /* [LITCARRY] carry GELÉ + aucun learn pendant les octets couverts par MATCH. */
             if (litcarry && !is_lit[base + i]) continue;
             c = ps_ctx_step(3u, g, base + i, &mm[0], &mm[1], &mm[2]);
             uint32_t row;
-            /* [GATED UHA_PHASEFIX] same correction of phase that the scan OUT. */
+            /* [GATED UHA_PHASEFIX] même correction de phase que le scan OUT. */
             if (g_ps_phasefix) {
                 uint32_t e = (c >> 8) & 0x1fu;
                 e += (((base + i + 2u) % 3u) << 5);
@@ -1778,7 +2283,6 @@ int alz_ps_emiprod_percost(const uint8_t *g, uint32_t usize,
         }
         }
     }
-    free(M); free(W); free(tmp);
     if (cd) { fclose(cd); cd = NULL; }
     g_ps_phasefix = 0;
     if (g_adump) { fclose(g_adump); g_adump = NULL; }
@@ -1786,18 +2290,18 @@ int alz_ps_emiprod_percost(const uint8_t *g, uint32_t usize,
 }
 
 /* ==========================================================================
- * [13.722 classpass producteur dens - GATED by l'appelant alz.c UHA_CLASSPASS,
- * default-OFF] Producteur FAITHFUL to legacy `0x414630` : Has single arena SHARED
- * monotone (13.717 " 1 buffer monotone ") traversee by 5 PASSES of class by
- * block, each pass SCORANT + APPRENNANT (promo=32, rescale 0x4000 - mirror some
- * apprentissages `0x4149d0..0x4149f2` of `0x414630`). Order some passes :
- * `0,1,2,3,4` (bloc0) then `3,0,1,2,4` (blocks >= 1) (13.717(2)/13.721).
- * There machine ctx (ebx/flag/ebp) is RE-AMORCEE at each pass (setup `0x414645`
- * by call), l'arena N'is NEVER reinitialisee. The snapshot consumes by the
- * decidez = output of the pass `cls3` (1 copie figee, 13.719(2)/13.721(1))
- * => `out[base+i]` n'is writes that durant there pass cls3. Formule of cost validated
- * EXACT 11/11 sure there window @13070 (13.722(2)). Pur : n'affecte no arena
- * global, buffers local. returns 0 OK, <0 error. */
+ * [§13.722 classpass producteur dens — GATED par l'appelant alz.c UHA_CLASSPASS,
+ * DEFAUT-OFF] Producteur FIDELE au legacy `0x414630` : UNE seule arène SHARED
+ * monotone (§13.717 « 1 buffer monotone ») traversée par 5 PASSES de classe par
+ * bloc, chaque passe SCORANT + APPRENNANT (promo=32, rescale 0x4000 — miroir des
+ * apprentissages `0x4149d0..0x4149f2` de `0x414630`). Ordre des passes :
+ * `0,1,2,3,4` (bloc0) puis `3,0,1,2,4` (blocs ≥ 1) (§13.717(2)/§13.721).
+ * La machine ctx (ebx/flag/ebp) est RE-AMORCÉE à chaque passe (setup `0x414645`
+ * par appel), l'arène N'EST JAMAIS réinitialisée. Le snapshot consommé par le
+ * décidez = sortie de la passe `cls3` (1ʳᵉ copie figée, §13.719(2)/§13.721(1))
+ * ⟹ `out[base+i]` n'est écrit que durant la passe cls3. Formule de coût validée
+ * EXACT 11/11 sur la fenêtre @13070 (§13.722(2)). Pur : n'affecte aucune arène
+ * globale, buffers locaux. Retourne 0 OK, <0 erreur. */
 int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
                              const uint32_t *blkpos, const uint32_t *blklen,
                              int nblk, uint32_t *out)
@@ -1816,11 +2320,11 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
     tmp = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)(maxlen ? maxlen : 1u));
     if (!ar || !tmp) { free(ar); free(tmp); return -1; }
     alz_arena2d_init(ar, 32u);
-    /* [GATED UHA_CLASSPASS_COLD, default-OFF, diagnostic 13.723] Hypothese :
-     * master@bloc1 quasi-EMPTY for the cellules cls3 (the LIVE of block0 learns
-     * surtout d'others rows) => producteur faithful = arena COLD by block + scan
-     * DENSE intra-block cls3 (nothing of cross-block, no some 5 others passes).
-     * Test : at each block, RE-INIT `ar` (master cold) and not courir THAT cls3. */
+    /* [GATED UHA_CLASSPASS_COLD, défaut-OFF, diagnostic §13.723] Hypothèse :
+     * master@bloc1 quasi-VIDE pour les cellules cls3 (le LIVE de block0 apprend
+     * surtout d'autres rows) ⟹ producteur fidèle = arène FROIDE par bloc + scan
+     * DENSE intra-bloc cls3 (rien de cross-bloc, aucune des 5 autres passes).
+     * Test : à chaque bloc, RE-INIT `ar` (master cold) et ne courir QUE cls3. */
     if (getenv("UHA_CLASSPASS_COLD") != NULL) {
         for (b = 0; b < nblk; b++) {
             uint32_t base = blkpos[b], len = blklen[b];
@@ -1828,7 +2332,7 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
             if (base >= usize) continue;
             if (base + len > usize) len = usize - base;
             if (!len) continue;
-            alz_arena2d_init(ar, 32u);          /* master cold by block (restore=) */
+            alz_arena2d_init(ar, 32u);          /* master cold par bloc (restore=∅) */
             memset(&st, 0, sizeof st);
             st.ebp = 1u;
             st.arena = ar;
@@ -1839,19 +2343,19 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
         free(ar); free(tmp);
         return 0;
     }
-    /* [GATED UHA_CPADV=<0..3>, default-OFF, 13.733 fix-classpass-model]
-     * model RESTORE faithful at the ASM (`full.asm` l.24140-25010) : MASTER `M`
-     * persistant ; by block * by class, WORKING `W := copie fraiche of M` then
-     * scan DENSE of the class in W (jete). `out` = pass winning (argmin,cls3).
-     * The MASTER is advances between blocks by there law d'emission UHA_CPADV (balayage) :
-     *   0 = cold (no advances => restore-only, master empty) ;
-     *   1 = dense-cls3 (1 ev/pos sure the row cls3)  avancement COSTSNAP ;
-     *   2 = dense ALL classes (5 ev/pos, file some 5 stream) ;
-     *   3 = dense by-position argmin-class (1 ev/pos, row of the class WINNING
-     *       of THIS position, argmin read-only in M) - same DENSITE that 1 but
-     *       ROWS heterogenes (13.726 " densite by-row ", the levier no refute).
-     * Machine ctx threadee GLOBALEMENT by class (as COSTSNAP). No-regressif :
-     * UHA_CLASSPASS single keeps the path partage. SUBSTITUTION interdite. */
+    /* [GATED UHA_CPADV=<0..3>, défaut-OFF, §13.733 fix-classpass-model]
+     * MODÈLE RESTORÉ fidèle à l'ASM (`full.asm` l.24140-25010) : MASTER `M`
+     * persistant ; par bloc × par classe, WORKING `W := copie fraîche de M` puis
+     * scan DENSE de la classe dans W (jeté). `out` = passe gagnante (argmin,≡cls3).
+     * Le MASTER est avancé entre blocs par la loi d'émission UHA_CPADV (balayage) :
+     *   0 = froid (aucune avance ⟹ restore-only, master vide) ;
+     *   1 = dense-cls3 (1 év/pos sur le row cls3) ≡ avancement COSTSNAP ;
+     *   2 = dense TOUTES classes (5 év/pos, file des 5 flux) ;
+     *   3 = dense par-position argmin-classe (1 év/pos, row de la CLASSE GAGNANTE
+     *       de CE position, argmin read-only dans M) — même DENSITÉ que 1 mais
+     *       ROWS hétérogènes (§13.726 « densité par-row », le levier non réfuté).
+     * Machine ctx threadée GLOBALEMENT par classe (comme COSTSNAP). Non-régressif :
+     * UHA_CLASSPASS seul garde le chemin partagé. SUBSTITUTION interdite. */
     {
         const char *advs = getenv("UHA_CPADV");
         if (advs && advs[0] >= '0' && advs[0] <= '3') {
@@ -1862,12 +2366,7 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
             uint32_t cmm[ALZ_PS_NCLASS][3];
             int ok = (M != NULL && W != NULL);
             if (!ok) { free(M); free(W); free(ar); free(tmp); return -1; }
-            {
-                uint32_t minc = 32u;
-                const char *me = getenv("UHA_CPADV_INC");
-                if (me) minc = (uint32_t) atoi(me);
-                alz_arena2d_init(M, (uint16_t) minc);
-            }
+            alz_arena2d_init(M, 32u);
             for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
                 cmm[k][0] = cmm[k][1] = cmm[k][2] = 0u;
                 ctxp[k] = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)(maxlen ? maxlen : 1u));
@@ -1880,10 +2379,10 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
                 if (base >= usize) continue;
                 if (base + len > usize) len = usize - base;
                 if (!len) continue;
-                /* (1) generer the 5 stream ctx sure all the block (machines global). */
-                /* [GATED UHA_CPCTX, default-OFF, 13.881] lines d'emission by `ctx` roulant
-                 * (M11b : ctx=(ctx<<8)|byte ; row=(ctx>>8)&0x1ff ; sym=byte), resets
-                 * by pass of class (reload M10). Replaces the delta2D `ps_ctx_step`. */
+                /* (1) générer les 5 flux ctx sur TOUT le bloc (machines globales). */
+                /* [GATED UHA_CPCTX, défaut-OFF, §13.881] lignes d'émission par `ctx` roulant
+                 * (M11b : ctx=(ctx<<8)|octet ; row=(ctx>>8)&0x1ff ; sym=octet), réinitialisé
+                 * par passe de classe (reload M10). Remplace le delta‑2D `ps_ctx_step`. */
                 if (getenv("UHA_CPCTX") != NULL) {
                     for (c = 0u; c < ALZ_PS_NCLASS; c++) {
                         uint32_t ctxr = 0u;
@@ -1897,7 +2396,7 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
                 for (c = 0u; c < ALZ_PS_NCLASS; c++)
                     for (i = 0u; i < len; i++)
                         ctxp[c][i] = ps_ctx_step(c, g, base + i, &cmm[c][0], &cmm[c][1], &cmm[c][2]);
-                /* (2) argmin by RESTORE : W := copie(M), scan dense class, jeter. */
+                /* (2) argmin par RESTORE : W := copie(M), scan dense classe, jeter. */
                 for (c = 0u; c < ALZ_PS_NCLASS; c++) {
                     uint32_t s, np = 0;
                     *W = *M;
@@ -1906,14 +2405,14 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
                                       (c == 0u) ? NULL : &best, &np, NULL);
                     if (s < best) { best = s; winner = c; }
                 }
-                /* (3) out = pass winning sure copie fraiche of M (without abandon). */
+                /* (3) out = passe gagnante sur copie fraîche de M (sans abandon). */
                 if (base >= 0x3100u && base < 0x3101u && getenv("UHA_CPADV_STATS"))
                     fprintf(stderr, "[CPADV] reload@0x%05x M t68=%u t37=%u\n",
                             (unsigned) base, (unsigned) M->total[68u], (unsigned) M->total[37u]);
                 *W = *M;
                 ps_set_promo_all(W, 32u);
                 ps_score_ctxs(W, ctxp[winner], len, 32u, ALZ_PS_COLD0, NULL, NULL, out + base);
-                /* (4) to advance the MASTER according to there law UHA_CPADV. */
+                /* (4) avancer le MASTER selon la loi UHA_CPADV. */
                 if (law == 1) {
                     ps_score_ctxs(M, ctxp[3u], len, 32u, ALZ_PS_COLD0, NULL, NULL, NULL);
                 } else if (law == 2) {
@@ -1929,7 +2428,7 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
                         ps_learn(M, ctxp[wc][i]);
                     }
                 }
-                /* law == 0 : master never advances (restore-only). */
+                /* law == 0 : master jamais avancé (restore-only). */
             }
             for (k = 0; k < (int)ALZ_PS_NCLASS; k++) free(ctxp[k]);
             free(M); free(W);
@@ -1939,9 +2438,9 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
     }
     for (b = 0; b < nblk; b++) {
         uint32_t base = blkpos[b], len = blklen[b];
-        /* [GATED UHA_CP3LAST, default-OFF, 14.138] order cls3 EN last for blocks>=1
-         * (l'arena SHARED is d'abord rechauffee by the 4 others classes, then cls3
-         * writes out) -> teste if the warm multiclasses intrablock atteint cost[rc] legacy. */
+        /* [GATED UHA_CP3LAST, défaut-OFF, §14.138] ordre cls3 EN DERNIER pour blocs>=1
+         * (l'arène SHARED est d'abord réchauffée par les 4 autres classes, puis cls3
+         * écrit out) → teste si le warm multi‑classes intra‑bloc atteint cost[rc] legacy. */
         static const uint32_t ordL[ALZ_PS_NCLASS] = { 0u, 1u, 2u, 4u, 3u };
         const uint32_t *ord = (b == 0) ? ord0
                             : (getenv("UHA_CP3LAST") ? ordL : ord1);
@@ -1954,13 +2453,13 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
         for (k = 0; k < (int)ALZ_PS_NCLASS; k++) {
             uint32_t cls = ord[k];
             alz_ps_carry_t st;
-            memset(&st, 0, sizeof st);      /* machine ctx re-amorcee by pass */
-            /* Legacy : `0x414a51 inc ebp` BEFORE the computation machine (`0x414bde`),
-             * ebp re-seme au counter RELATIF block => row(i) = table[(i-1)] +
-             * phase(i%3). Seed 1 (and no 0 of the ps_ctx_step default) prouvee by
-             * there window 13.722 : row(526)=t3[5]+32*(526%3)=37  11/11. */
+            memset(&st, 0, sizeof st);      /* machine ctx re-amorcée par passe */
+            /* Legacy : `0x414a51 inc ebp` AVANT le calcul machine (`0x414bde`),
+             * ebp re-semé au compteur RELATIF bloc ⟹ row(i) = table[δ(i-1)] +
+             * phase(i%3). Graine 1 (et non 0 du ps_ctx_step défaut) prouvée par
+             * la fenêtre §13.722 : row(526)=t3[5]+32*(526%3)=37 ✓ 11/11. */
             st.ebp = 1u;
-            st.arena = ar;                  /* arena SHARED monotone */
+            st.arena = ar;                  /* arène SHARED monotone */
             (void) alz_ps_class_sigma_carry(&st, cls, g, base, len, 32u, ALZ_PS_COLD0,
                                             NULL, (cls == 3u) ? tmp : NULL, NULL);
             if (cls == 3u)
@@ -1971,7 +2470,7 @@ int alz_ps_classpass_percost(const uint8_t *g, uint32_t usize,
     return 0;
 }
 
-/* [TEST hook] Enables au harness offline d'aligner there correction of phase cls3
- * (g_ps_phasefix) without passer by getenv ; without effet sure l'encoding standard. */
+/* [TEST hook] Permet au harness offline d'aligner la correction de phase cls3
+ * (g_ps_phasefix) sans passer par getenv ; sans effet sur l'encodage standard. */
 void alz_ps_set_phasefix(int v) { g_ps_phasefix = v; }
 

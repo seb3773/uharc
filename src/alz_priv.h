@@ -119,6 +119,17 @@ typedef struct {
     uint16_t m_low_bit;
     uint16_t m_length[8192];
     uint8_t  m_len_pred[0x40000];
+
+    uint8_t *in_chain;
+    int      trign;
+    uint32_t *bst_head;
+    uint32_t *bst_tree;
+    uint32_t  bst_fed;
+    uint32_t  bst_max_dist;
+    int       bst_depth_limit;
+    uint32_t  bst_last_p;
+    uint32_t  bst_last_b8;
+    uint32_t  bst_last_slen[256];
 } alz_dec;
 
 void alz_state_reset(alz_state *s);
@@ -153,9 +164,9 @@ uint32_t alz_bm_predict_cost(alz_dec *d, int ctx, int ctx2, int sym);
 uint32_t alz_bm_literal_cost_mix(alz_dec *d, int ctx, int ctx2, int sym);
 uint32_t alz_bm_literal_cost_warm(alz_dec *d, const uint8_t *plain,
                                   uint32_t usize, uint32_t pos, uint32_t len);
-/* [RE b3a] Estimator of cost-match FAITHFUL (reading-single, unites 4680*bits,
- * mirror some uha_rcw_encode of the codage reel) + enveloppe read-only of the index of
- * class of token. returns ~0u if the token n'is not codable. */
+/* [RE b3a] Estimateur de cout-match FIDELE (lecture-seule, unites 4680*bits,
+ * miroir des uha_rcw_encode du codage reel) + enveloppe read-only du index de
+ * classe de token. Retourne ~0u si le token n'est pas codable. */
 int      alz_token_class_index_ro(alz_dec *d);
 uint32_t alz_match_model_cost(alz_dec *d, int token, uint32_t dist,
                               uint32_t count);

@@ -1,7 +1,9 @@
 CC ?= gcc
-CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto -fomit-frame-pointer -fno-strict-aliasing -ffunction-sections -fdata-sections -DNDEBUG -Isrc
-WIN64_CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto -fomit-frame-pointer -fno-strict-aliasing -ffunction-sections -DNDEBUG -Isrc
-LDFLAGS ?= -Wl,--gc-sections -s -lm
+CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fno-semantic-interposition -fmerge-all-constants -fvisibility=hidden -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections -fno-strict-aliasing -DNDEBUG -Isrc
+WIN64_CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fmerge-all-constants -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fno-strict-aliasing -DNDEBUG -Isrc
+LDFLAGS ?= -flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -Wl,--as-needed -Wl,--exclude-libs,ALL -s -lm
+WIN64_LDFLAGS ?= -static -flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -Wl,--exclude-all-symbols -s -lm
+STRIP_LINUX ?= strip --strip-all
 BUILD_DIR ?= build
 LINUX_DIR = $(BUILD_DIR)/linux
 WIN64_DIR = $(BUILD_DIR)/win64
@@ -25,7 +27,9 @@ all: linux
 linux: $(TARGET_LINUX)
 	@ln -sf build/linux/uharc uharc
 
-asan: CFLAGS = -std=c99 -Wall -Wextra -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Isrc
+asan: CFLAGS = -std=c99 -Wall -Wextra -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-strict-aliasing -Isrc
+asan: LDFLAGS = -fsanitize=address,undefined -lm
+asan: STRIP_LINUX = true
 asan: clean $(TARGET_LINUX)
 	@ln -sf build/linux/uharc uharc
 	@echo "Built AddressSanitizer/UBSan instrumented binary (uharc)"
@@ -42,14 +46,14 @@ $(WIN64_DIR):
 
 $(TARGET_LINUX): $(SRC_FILES) $(SRC_HEADERS) | $(LINUX_DIR)
 	$(CC) $(CFLAGS) -o $@ $(SRC_FILES) $(LDFLAGS)
-	@strip -s $@ 2>/dev/null || true
+	@$(STRIP_LINUX) $@ 2>/dev/null || true
 	@ln -sf linux/uharc $(BUILD_DIR)/uharc
 	@ln -sf build/linux/uharc uharc
 
 $(TARGET_WIN64): $(SRC_FILES) $(SRC_HEADERS) | $(WIN64_DIR)
 	@if which $(CROSS_WIN64_CC) >/dev/null 2>&1; then \
-		$(CROSS_WIN64_CC) $(WIN64_CFLAGS) -static -o $@ $(SRC_FILES) $(LDFLAGS); \
-		x86_64-w64-mingw32-strip -s $@ 2>/dev/null || true; \
+		$(CROSS_WIN64_CC) $(WIN64_CFLAGS) -o $@ $(SRC_FILES) $(WIN64_LDFLAGS); \
+		x86_64-w64-mingw32-strip --strip-all $@ 2>/dev/null || true; \
 		echo "Windows 64-bit binary built: $@"; \
 	else \
 		echo "WARNING: $(CROSS_WIN64_CC) not found, skipping win64 target."; \
@@ -57,6 +61,8 @@ $(TARGET_WIN64): $(SRC_FILES) $(SRC_HEADERS) | $(WIN64_DIR)
 	fi
 
 debug: CFLAGS = -std=c99 -Wall -Wextra -g -O0 -Isrc
+debug: LDFLAGS = -lm
+debug: STRIP_LINUX = true
 debug: clean $(TARGET_LINUX)
 	@ln -sf build/linux/uharc uharc
 

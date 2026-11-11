@@ -1,6 +1,6 @@
-/* Tables static of the scorer 0x414630 (machine ctx by class). Generees since
- * research/gt_scorer/alz_scorer_tables.inc.txt, validees 100%% image.raw -m3 (13.132/13.141).
- * NOT NOT EDITER at the MAIN. */
+/* Tables statiques du scoreur 0x414630 (machine ctx par classe). Générées depuis
+ * research/gt_scorer/alz_scorer_tables.inc.txt, validées 100%% image.raw -m3 (§13.132/§13.141).
+ * NE PAS ÉDITER À LA MAIN. */
 static const uint8_t alz_ps_escape[5] = { 0x00,0x00,0x08,0x10,0x18 };
 static const uint8_t alz_ps_tnib[16] = {
     0x00,0x00,0x00,0x00,0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,

@@ -1,49 +1,49 @@
 /*
- * alz_arena_c4.c - implementation of the port faithful of l'arena litterale of the scorer
- * 0x411bb0 (UHARC 0.6b). Traduction 1:1 of the model offline validated 29943/29943
- * (_scratch/acccap13/acc_full.py, 13.618 trajectoire + 13.619 costs/acc).
+ * alz_arena_c4.c — implémentation du port fidèle de l'arène littérale du scoreur
+ * 0x411bb0 (UHARC 0.6b). Traduction 1:1 du modèle offline VALIDÉ 29943/29943
+ * (_scratch/acccap13/acc_full.py, §13.618 trajectoire + §13.619 coûts/acc).
  *
- * Laws encodees (references gravees) :
- *  - HOT   : total = BIT0[row] + d4  (without mask u16, C3) ; if escape : total = freq[row][esym] ;
- *            cost  = LUT[(freq[row][sym]<<14)/total]                       (13.609/617)
- *  - COLD  : dx = M16(BIT0[row]  flag*freq[row][esym])   (0x811bdd..bf7)
- *            cost1 = dx ? LUT[(d4<<14)/(dx+d4)] : 0        (store 0x811c64 ; absent if dx==0)
- *            cost2 = LUT[(freq405[sym]<<14)/t2] with
- *                    t2 = BIT0[405]  Sigma_{i:freq[row][i]!=0} freq405[i]  esc405   (re-ancre 0x811d08..)
- *                    esc405 = freq405[esym] ssi flag && freq[row][esym]==0   (0x811f4e ; dx==0 single not suffit not,
- *                    cf rembobinage NULL by escape 13.620 : BIT0==freq[esym]!=0 -> NULL without soustraction bench)
- *            cost  = cost1 + cost2 ; acc au rank n = cost of l'evenement n1 (phase 13.619(1))
- *  - C4    : cc94 = (d4+cell) ; if cell==0 : seed banc 0x405 (+16, Fenwick, bit0+=16) and d4+=0x20 ;
- *            freq[sym]+=0x20 ; Fenwick bit ; bit0+=0x20 (wrap u16) ;
- *            gate (bit0+d4 >= 0x4000) NOW cc94<0 -> commit 0x80ffa0              (13.618(3))
- *  - commit: decay b==0->nothing / b<=0x10->0 no cumul / otherwise b>>1 with Sigma ; bit[1..255]:=freq[0..254] ;
- *            bit[0]=Sigma ; rebuild Fenwick c=1,2,4..64 ; d4=(d4+1)>>1 ; cc94=(Sigma+d4)<<8  (#11)
- *  - Init  : d4=1, cc94=256 (fixpoint PRIME commit, C1) ; bancs freq[i]=4, bit[0]=1024 (13.615(2)).
+ * Lois encodées (références gravées) :
+ *  - HOT   : total = BIT0[row] + d4  (SANS masque u16, C3) ; si escape : total −= freq[row][esym] ;
+ *            cost  = LUT[(freq[row][sym]<<14)/total]                       (§13.609/617)
+ *  - COLD  : dx = M16(BIT0[row] − flag·freq[row][esym])   (0x811bdd..bf7)
+ *            cost1 = dx ? LUT[(d4<<14)/(dx+d4)] : 0        (store 0x811c64 ; absent si dx==0)
+ *            cost2 = LUT[(freq405[sym]<<14)/t2] avec
+ *                    t2 = BIT0[405] − Σ_{i:freq[row][i]≠0} freq405[i] − esc405   (ré-ancre 0x811d08..)
+ *                    esc405 = freq405[esym] ssi flag && freq[row][esym]==0   (0x811f4e ; dx==0 seul ne suffit pas,
+ *                    cf rembobinage NULL par escape §13.620 : BIT0==freq[esym]≠0 → NULL sans soustraction bench)
+ *            cost  = cost1 + cost2 ; acc au rang n = cost de l'événement n−1 (phase §13.619(1))
+ *  - C4    : cc94 −= (d4+cell) ; si cell==0 : seed banc 0x405 (+16, Fenwick↑, bit0+=16) et d4+=0x20 ;
+ *            freq[sym]+=0x20 ; Fenwick↑ bit ; bit0+=0x20 (wrap u16) ;
+ *            gate (bit0+d4 ≥ 0x4000) OU cc94<0 → commit 0x80ffa0              (§13.618(3))
+ *  - commit: decay b==0→rien / b≤0x10→0 non cumul / sinon b>>1 avec Σ ; bit[1..255]:=freq[0..254] ;
+ *            bit[0]=Σ ; rebuild Fenwick c=1,2,4..64 ; d4=(d4+1)>>1 ; cc94=(Σ+d4)<<8  (#11)
+ *  - Init  : d4=1, cc94=256 (fixpoint PRIME commit, C1) ; bancs freq[i]=4, bit[0]=1024 (§13.615(2)).
  */
 #include <stdio.h>
 #include <string.h>
 
 #include "alz_arena_c4.h"
 
-/* LUT of cost capturee au runtime @0x43f154 (13.133/134). alz_score_cum[16385],
- * liaison internal (static) - no collision with alz_score.c which l'inclut also. */
+/* LUT de coût capturée au runtime @0x43f154 (§13.133/134). alz_score_cum[16385],
+ * liaison interne (statique) — aucune collision avec alz_score.c qui l'inclut aussi. */
 #include "alz_score_table.inc"
 
 #define M16(v) ((uint16_t)((v) & 0xFFFFu))
 #define M32(v) ((uint32_t)((v) & 0xFFFFFFFFu))
 
-/* Index LUT bounded has 16384 - CONVENTION OF THE SCORER validated (13.65 port faithful
- * 0x414630, alz_score_proba : p >= ALZ_SCORE_CUM_N-1 -> clamp). En HOT with
- * escape, total peut passer under cell (freq[esym] > 0 soustrait, site 0x811bb0) ;
- * without clamp, reading OOB. Sure there chain GT lockstep, the clamp not se triggers
- * never (29948/29948 preserved) ; il not s active that sure there chain of the clone. */
+/* Index LUT borné à 16384 — CONVENTION DU SCOREUR VALIDÉE (§13.65 port fidèle
+ * 0x414630, alz_score_proba : p >= ALZ_SCORE_CUM_N-1 -> clamp). En HOT avec
+ * escape, total peut passer sous cell (freq[esym] > 0 soustrait, site 0x811bb0) ;
+ * sans clamp, lecture OOB. Sur la chaîne GT lockstep, le clamp ne se déclenche
+ * jamais (29948/29948 préservé) ; il ne s active que sur la chaîne du clone. */
 #define C4_LUT(p) (alz_score_cum[(p) > 16384u ? 16384u : (p)])
-/* Division bounded facon alz_score_proba : total==0 -> index 16384 (13.65). */
+/* Division bornée façon alz_score_proba : total==0 -> index 16384 (§13.65). */
 #define C4_DIVLUT(num, den) ((den) == 0u ? alz_score_cum[16384u] : C4_LUT((num) / (den)))
 
-/* table of bucketing class-3 T @VA 0x4379f8 (law row 13.621), capturee au runtime
- * (`_scratch/acccap13/rowtab.log`, dump 64*M() au BP 0x4103fa) - identical at the
- * table deduite some 29948 evenements (0 divergence). Index : d post-signe K[q]. */
+/* Table de bucketing classe-3 T @VA 0x4379f8 (loi row §13.621), capturée au runtime
+ * (`_scratch/acccap13/rowtab.log`, dump 64×M() au BP 0x4103fa) — identique à la
+ * table déduite des 29948 événements (0 divergence). Index : d post-signe K[q]. */
 const uint8_t alz_arena_c4_tbucket[256] = {
     0,1,2,3,4,5,6,7,7,8,8,9,9,10,10,10,
     11,11,11,11,11,12,12,12,12,12,12,12,12,13,13,13,
@@ -63,7 +63,7 @@ const uint8_t alz_arena_c4_tbucket[256] = {
     21,22,22,22,23,23,24,24,25,25,26,27,28,29,30,31
 };
 
-/* --- primitives Fenwick (13.618(3), mirror exact of the model Python) --- */
+/* --- primitives Fenwick (§13.618(3), miroir exact du modèle Python) --- */
 static void c4_fenwick_up(uint16_t *w, uint32_t sym, uint32_t inc)
 {
     uint32_t i = sym + 1;
@@ -93,7 +93,7 @@ static void c4_row_commit(alz_arena_c4_row *R)
         uint16_t b = R->freq[k];
         uint16_t d;
         if (b == 0u) continue;
-        if (b <= 0x10u) { R->freq[k] = 0u; continue; }   /* 0, no cumulatif */
+        if (b <= 0x10u) { R->freq[k] = 0u; continue; }   /* 0, non cumulatif */
         d = (uint16_t)(b >> 1);
         R->freq[k] = d;
         tot += d;
@@ -111,16 +111,16 @@ void alz_arena_c4_init(alz_arena_c4_t *a)
     uint32_t r, i;
     memset(a, 0, sizeof(*a));
     for (r = 0; r < ALZ_ARENA_C4_ROWMAX; r++) {
-        a->rows[r].d4 = 1u;        /* C1 : fixpoint of the PRIME commit */
+        a->rows[r].d4 = 1u;        /* C1 : fixpoint du PRIME commit */
         a->rows[r].cc94 = 256u;
     }
     for (i = 0; i < 256u; i++) {
-        a->b405.freq[i] = 4u;      /* 13.615(2) : pre-armage d'init */
+        a->b405.freq[i] = 4u;      /* §13.615(2) : pré-armage d'init */
         a->b402.freq[i] = 4u;
     }
     a->b405.bit[0] = 1024u;        /* copie init 0x80f728 : BIT[x][0]=0x400 */
     a->b402.bit[0] = 1024u;
-    a->b405.d4 = 0u;               /* bancs never scores hot : d4/cc94 inertes */
+    a->b405.d4 = 0u;               /* bancs jamais scorés chaud : d4/cc94 inertes */
     a->b402.d4 = 0u;
 }
 
@@ -129,19 +129,19 @@ void alz_arena_c4_mark_special(alz_arena_c4_t *a)
     a->special_pending = 1u;
 }
 
-/* Predit the cost sure l'state current, without NO mutation (13.701). Partage by
- * _event (before learn) and _score (reading pure by byte for `dens`). */
+/* Prédit le coût sur l'état COURANT, sans AUCUNE mutation (§13.701). Partagé par
+ * _event (avant learn) et _score (lecture pure par octet pour `dens`). */
 static uint32_t c4_pred_cost(const alz_arena_c4_t *a, const alz_arena_c4_row *R,
                              uint32_t sym, int esc_flag, uint32_t esc_sym,
                              uint16_t cell)
 {
     if (cell != 0u) {
-        /* ---- HOT (0x811bb0..) ---- */
-        uint32_t total = (uint32_t)R->bit[0] + (uint32_t)R->d4;   /* C3 : no mask u16 */
+        /* ---- CHAUD (0x811bb0..) ---- */
+        uint32_t total = (uint32_t)R->bit[0] + (uint32_t)R->d4;   /* C3 : pas de masque u16 */
         if (esc_flag) total -= R->freq[esc_sym];
         return C4_DIVLUT(((uint32_t)cell << 14), total);
     } else {
-        /* ---- COLD (0x811bdd.. + re-ancre 0x811d08.. + scan 0x811eac..) ---- */
+        /* ---- FROID (0x811bdd.. + ré-ancre 0x811d08.. + scan 0x811eac..) ---- */
         uint32_t dx, c1, c2, present, escb, t2, i, s;
         dx = M16((uint32_t)R->bit[0] - (esc_flag ? R->freq[esc_sym] : 0u));
         c1 = dx ? C4_DIVLUT(((uint32_t)R->d4 << 14), dx + (uint32_t)R->d4) : 0u;
@@ -155,7 +155,7 @@ static uint32_t c4_pred_cost(const alz_arena_c4_t *a, const alz_arena_c4_row *R,
         }
         escb = 0u;
         if (esc_flag && R->freq[esc_sym] == 0u) {
-            escb = a->b405.freq[esc_sym];        /* 0x811f4e : test sure freq[line][esym], NOT dx */
+            escb = a->b405.freq[esc_sym];        /* 0x811f4e : test sur freq[ligne][esym], PAS dx */
         }
         t2 = M16(present - escb);
         c2 = C4_DIVLUT(((uint32_t)a->b405.freq[sym] << 14), t2);
@@ -163,11 +163,11 @@ static uint32_t c4_pred_cost(const alz_arena_c4_t *a, const alz_arena_c4_row *R,
     }
 }
 
-/* Learn C4 (0x81129d..) + path speciale 0x8122bf + gate, single MUTATIONS (13.701). */
+/* Learn C4 (0x81129d..) + voie spéciale 0x8122bf + gate, seules MUTATIONS (§13.701). */
 static void c4_learn(alz_arena_c4_t *a, alz_arena_c4_row *R, uint32_t sym, uint16_t cell)
 {
     if (cell == 0u && a->special_pending) {
-        /* path 0x8122bf : re-seed of the banc 0x402 (weight 6) ; inerte for the cost (13.619). */
+        /* voie 0x8122bf : re-seed du banc 0x402 (poids 6) ; inerte pour le coût (§13.619). */
         a->special_pending = 0u;
         a->b402.freq[sym] = M16(a->b402.freq[sym] + ALZ_ARENA_C4_SEED402);
         c4_fenwick_up(a->b402.bit, sym, ALZ_ARENA_C4_SEED402);
@@ -198,8 +198,8 @@ static void c4_learn(alz_arena_c4_t *a, alz_arena_c4_row *R, uint32_t sym, uint1
     }
 }
 
-/* [13.701 additif NO-BRANCH] Score pur (no mutation) for there law dens
- * score-by-byte ; not consumes NOT special_pending, not counts NOT. */
+/* [§13.701 additif NON-BRANCHÉ] Score pur (aucune mutation) pour la loi dens
+ * score-par-octet ; ne consomme PAS special_pending, ne compte PAS. */
 uint32_t alz_arena_c4_score(const alz_arena_c4_t *a, uint32_t row, uint32_t sym,
                             int esc_flag, uint32_t esc_sym)
 {
@@ -218,7 +218,7 @@ uint32_t alz_arena_c4_event(alz_arena_c4_t *a, uint32_t row, uint32_t sym,
     uint16_t cell;
 
     if (row >= ALZ_ARENA_C4_ROWMAX || sym > 0xFFu || esc_sym > 0xFFu) {
-        return 0xFFFFFFFFu;                     /* contrat appelant viole */
+        return 0xFFFFFFFFu;                     /* contrat appelant violé */
     }
     R = &a->rows[row];
     cell = R->freq[sym];
@@ -236,12 +236,12 @@ void alz_arena_c4_commit(alz_arena_c4_t *a, uint32_t row)
 }
 
 /*
- * Self-test lockstep : replays has stream TSV " rank ctx sym esc_flag esc_sym expected cmp special"
- * (decimal, whitespace ; produces by _scratch/acccap13/export_events.py) and compares the cost
- * renvoye by the module au cost of the model Python validated (13.619). cmp=1  rank whose the cost
- * Python is confirme contre `acc` live ; cmp=0 = ranks no couples au live (evenement special
- * and successeur, cf skip 13.618 C2). returns the number of divergences cmp=1 (objectif 0 ;
- * the gaps cmp=0 are affiches but toleres : the C applies there law, the GT live the exclut).
+ * Self-test lockstep : rejoue un flux TSV « rank ctx sym esc_flag esc_sym expected cmp special»
+ * (décimal, whitespace ; produit par _scratch/acccap13/export_events.py) et compare le coût
+ * renvoyé par le module au coût du modèle Python validé (§13.619). cmp=1 ⟺ rang dont le coût
+ * Python est confirmé contre `acc` live ; cmp=0 = rangs non couplés au live (événement spécial
+ * et successeur, cf skip §13.618 C2). Renvoie le nombre de divergences cmp=1 (objectif 0 ;
+ * les écarts cmp=0 sont affichés mais tolérés : le C applique la loi, le GT live les exclut).
  */
 int alz_arena_c4_replay(alz_arena_c4_t *a, const char *tsv_path)
 {
@@ -268,7 +268,7 @@ int alz_arena_c4_replay(alz_arena_c4_t *a, const char *tsv_path)
     fclose(f);
     printf("replay: %u events | hot=%u cold=%u commit=%u seed405=%u seed402=%u | BIT0[405]=%u\n",
            n, a->n_hot, a->n_cold, a->n_commit, a->n_seed405, a->n_seed402, a->b405.bit[0]);
-    printf("replay: divergences cmp=1 : %u | cmp=0 (non couplees live) : %u\n", ndiv, nskipdiv);
+    printf("replay: divergences cmp=1 : %u | cmp=0 (non couplées live) : %u\n", ndiv, nskipdiv);
     (void)ncmt;
     return (int)ndiv;
 }

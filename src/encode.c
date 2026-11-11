@@ -771,195 +771,34 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
         ofs += members[f].size;
         ends[f] = ofs;
     }
-    /* t15b/t15d : politique automatique croisee (selecteur d'echappement
-     * lateral x threshold min_len some candidates TOK1). each selecteur 0..10 is
-     * conforme (the decodeur UHARC reads has uniform(11) en tete and at each
-     * boundary) ; min_len not change that there GLISSIERE d'emission (never there
-     * conformite). On encode the stream for each (sel,min_len) and on keeps the
-     * payload the more short. min_len=2 (essais inclus) = behavior without
-     * threshold, therefore ratio at least bon qu'before. Balayage empirique : records
-     * vit of min_len=2 (TOK1 courts), biased/code.c of 16/24, image.raw of 16. */
-    {
-        /* t15e-perf : elagage of the grille. Balayage empirique some 11 inputs
-         * ALZ of the corpus : the winners have always t2 in {2,8,16} (32 not
-         * gagne never ; records exige 2, image.raw/image24 exigent 8) and min
-         * in {2,4,12,16,20,24} (6/48/64 not gagnent never). On keeps has
-         * marge (min 8/32) for there ro-bustesse out corpus. 8x3x11 = 264
-         * encodes vs 484 (repereur ~2 min sure records.bin 60 Ko). */
-        static const int mins[8] = {2, 4, 8, 12, 16, 20, 24, 32};
-        static const int t2s[3] = {2, 8, 16};
-        static const int lazys[2] = {1, 8};
-        int sel, mi, ti, li;
-        size_t best_len = (size_t)-1;
-        uint8_t *best_pk = NULL;
-
-        uha_alz_ws ws;
-        uha_alz_ws *pws = NULL;
-        memset(&ws, 0, sizeof(ws));
-        ws.chain_size = 1024;
-        while (ws.chain_size < usize)
-            ws.chain_size <<= 1;
-        ws.hashtab = malloc(((size_t)(1u << 22)) * sizeof(uint32_t));
-        ws.chain = malloc((size_t)ws.chain_size * sizeof(uint32_t));
-        uint32_t dict_sz = 1u << (((order - 40) % 16) + 10);
-        if (dict_sz < 1024) dict_sz = 1024;
-        ws.window = malloc(dict_sz + 4096);
-        ws.dict_size = dict_sz;
-        ws.max_outlen = (size_t)-1;
-        ws.initialized = 0;
-        if (ws.hashtab && ws.chain && ws.window) {
-            pws = &ws;
-        } else {
-            free(ws.hashtab);
-            free(ws.chain);
-            free(ws.window);
-            pws = NULL;
-        }
-
-        pk = NULL;
-        pklen = 0;
-        if (getenv("UHA_ALZ_COSTFRONT") || getenv("UHA_ALZ_COSTSEL")) {
-            /* [GATED UHA_ALZ_COSTSEL / UHA_ALZ_COSTFRONT, default-OFF] CABLAGE : the SELECTEUR n'is more
-             * choisi by there size of the payload (grille 264x = balayage empirique), but by there
-             * LAW RENDUE and CONFIRMEE BY MEASURES sure 20/20 cas of the branch {0..4}
-             * (arena2d_re/OUT/m459_argmin_emission.md) : the rank gagne by l'argmin of the cost of
-             * parse 0x414630 sure the 5 classes of context, geometrie of the master (cls0 d'abord
-             * and never aborts, 1..4 with abandon precoce as soon as the current depasse the
-             * meilleur, adoption strict sure cost < incumbent) - mirror of 0x413fb6..0x414015
-             * now [esp+0x2c] recoit EXACTEMENT l'index of class en cours d'essai.
-             * Evaluates sure the first block blk0 of the driver 0x413ea0.
-             * Has SINGLE VARIABLE : min/t2/lazy restent balayes as before, single the critere
-             * of `sel` change. OUT FIELD (and no simule here) : there branch densite {5..9}
-             * (0x415100) and there branch rejet {10} - there value comparee au threshold 5850 is has
-             * table penalise and glisse ([esp+sel*4]), not notre Sigma from-cold : Q7 of
-             * re_asm/MISSION_M449. without env : grille heritee intacte (=0 reverifie). */
-            uint32_t blk0 = (usize >= 0x4b00u) ? 0x3100u : ((usize > 0x100u) ? ((uint32_t)usize - 0x100u) : (uint32_t)usize);
-            uint32_t law_sel = alz_ps_block_argmin(plain, blk0,
-                                                   32u, ALZ_PS_COLD0, NULL);
-            if (law_sel >= 5u)
-                law_sel = 0u;      /* keeps : out of the domaine of the branch rendue */
-            if (getenv("UHA_NOMM") && getenv("UHA_NOMM")[0] == '1')
-                law_sel = 0u;
-            if (getenv("UHA_GRIDDBG"))
-                fprintf(stderr, "[COSTSEL] loi : sel=%u (usize=%u)\n",
-                        (unsigned)law_sel, (unsigned)usize);
-            if (getenv("UHA_FORCESCFG")) {
-                const char *fc = getenv("UHA_FORCESCFG");
-                int f_sel = (int)law_sel, f_min = 2, f_t2 = 2, f_lz = 1;
-                sscanf(fc, "%d:%d:%d:%d", &f_sel, &f_min, &f_t2, &f_lz);
-                rc = uha_alz_encode(plain, usize, order, ends, count,
-                                    f_sel, f_min, f_t2, f_lz,
-                                    &best_pk, &best_len);
-            } else {
-                for (li = 0; li < 2; li++) {
-                for (ti = 0; ti < 3; ti++) {
-                for (mi = 0; mi < 8; mi++) {
-                    uint8_t *tpk = NULL;
-                    size_t tplen = 0;
-                    if (pws) pws->max_outlen = best_len;
-                    int trc = uha_alz_encode_ws(plain, usize, order, ends, count,
-                                                (int)law_sel, mins[mi], t2s[ti], lazys[li],
-                                                &tpk, &tplen, pws);
-                    if (trc != 0) {
-                        continue;
-                    }
-                    if (tplen < best_len) {
-                        best_len = tplen;
-                        free(best_pk);
-                        best_pk = tpk;
-                    } else {
-                        free(tpk);
-                    }
-                }
-                }
-                }
-            }
-        } else if (getenv("UHA_FORCESCFG")) {
-            /* [A5.3-w6b INC3, GATED] Has SINGLE encoding (sel:min:t2:lazy) for
-             * rendre mesurable there route legacy has bits reels (otherwise grille 264x
-             * true-codition = too slow). Parse "3:20:8:8". without effet if env
-             * absent (grille normale preservee). */
-            const char *fc = getenv("UHA_FORCESCFG");
-            int f_sel = 3, f_min = 20, f_t2 = 8, f_lz = 8;
-            uint8_t *tpk = NULL;
-            size_t tplen = 0;
-            sscanf(fc, "%d:%d:%d:%d", &f_sel, &f_min, &f_t2, &f_lz);
-            int trc = uha_alz_encode(plain, usize, order, ends, count, f_sel,
-                                     f_min, f_t2, f_lz, &tpk, &tplen);
-            if (trc == 0 && tpk) {
-                best_pk = tpk;
-                best_len = tplen;
-                rc = 0;
-                if (getenv("UHA_GRIDDBG"))
-                    fprintf(stderr, "[FORCESCFG] sel=%d min=%d t2=%d lz=%d -> %zu\n",
-                            f_sel, f_min, f_t2, f_lz, tplen);
-            } else {
-                rc = trc;
-            }
-        } else if (getenv("UHA_TRUEPARSE") || getenv("UHA_ORACLE") || getenv("UHA_DP")) {
-            /* [exp Has / oracle / DP] Mode forces : has SINGLE encoding (sel=3,
-             * min_len=2, t2=2, lazy=1) ; there grille is short-circuitee (otherwise
-             * 528 passes lentes en mode DP/oracle). UHA_TRUEPARSE = comparaison
-             * of bits reels ; UHA_ORACLE = replays the parse EXACT of legacy ;
-             * UHA_DP = argmin of cost GLOBAL window (13.73). Selecteur 3 =
-             * ground-truth legacy image.raw (SIDEDBG + token-trace 13.72). */
-            uint8_t *tpk = NULL;
-            size_t tplen = 0;
-            int trc = uha_alz_encode(plain, usize, order, ends, count, 3, 2, 2, 1,
-                                     &tpk, &tplen);
-            if (trc == 0 && tpk) {
-                best_pk = tpk;
-                best_len = tplen;
-                rc = 0;
-            } else {
-                rc = trc;
-            }
-        } else
-        for (li = 0; li < 2; li++) {
-        for (ti = 0; ti < 3; ti++) {
-        for (mi = 0; mi < 8; mi++) {
-            for (sel = 0; sel <= 10; sel++) {
-                uint8_t *tpk = NULL;
-                size_t tplen = 0;
-                if (pws) pws->max_outlen = best_len;
-                int trc = uha_alz_encode_ws(plain, usize, order, ends, count, sel,
-                                            mins[mi], t2s[ti], lazys[li],
-                                            &tpk, &tplen, pws);
-                if (trc != 0) {
-                    continue;
-                }
-                if (tplen < best_len) {
-                    best_len = tplen;
-                    free(best_pk);
-                    best_pk = tpk;
-                } else {
-                    free(tpk);
-                }
-                if (getenv("UHA_GRIDDBG"))
-                    fprintf(stderr, "[GRID] sel=%d min=%d t2=%d lz=%d -> %zu\n",
-                            sel, mins[mi], t2s[ti], lazys[li], tplen);
-            }
-        }
-        }
-        }
-        if (pws) {
-            free(ws.hashtab);
-            free(ws.chain);
-            free(ws.window);
-        }
-        if (!best_pk) {
-            free(plain);
-            free(ends);
-            return rc;
-        }
-        pk = best_pk;
-        pklen = best_len;
-        rc = 0;
+    /* Selection deterministe en passe unique : min_len=2, tok2_min=2, lazy=1,
+     * selecteur d'echappement derive dans uha_alz_encode (a3_sel_derive). */
+    pk = NULL;
+    pklen = 0;
+    if (getenv("UHA_FORCESCFG")) {
+        const char *fc = getenv("UHA_FORCESCFG");
+        int f_sel = 0, f_min = 2, f_t2 = 2, f_lz = 1;
+        sscanf(fc, "%d:%d:%d:%d", &f_sel, &f_min, &f_t2, &f_lz);
+        rc = uha_alz_encode(plain, usize, order, ends, count,
+                            f_sel, f_min, f_t2, f_lz, &pk, &pklen);
+        if (rc == 0 && pk && getenv("UHA_GRIDDBG"))
+            fprintf(stderr, "[FORCESCFG] sel=%d min=%d t2=%d lz=%d -> %zu\n",
+                    f_sel, f_min, f_t2, f_lz, pklen);
+    } else if (getenv("UHA_TRUEPARSE") || getenv("UHA_ORACLE") || getenv("UHA_DP")) {
+        rc = uha_alz_encode(plain, usize, order, ends, count,
+                            3, 2, 2, 1, &pk, &pklen);
+    } else {
+        rc = uha_alz_encode(plain, usize, order, ends, count,
+                            0, 2, 2, 1, &pk, &pklen);
     }
     free(plain);
     free(ends);
-    if (rc != 0)
+    if (rc != 0) {
+        free(pk);
         return rc;
+    }
+    if (!pk)
+        return -4;
     rc = encode_archive(members, count, 1, (uint8_t)order, pk, (uint32_t)pklen,
                         out, outlen);
     free(pk);

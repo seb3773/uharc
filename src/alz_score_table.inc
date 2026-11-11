@@ -1,8 +1,8 @@
-/* alz_score_table.inc - table of cost proba->cost of the SCORER of PARSING 0x414630 (UHARC 0.6b).
- * Capturee AU RUNTIME in the process (winedbg gdb-python) at the address DGROUP VA 0x43f154,
- * 16385 words u16 (indices 0..16384 = proba=(freq<<14)/total). Stabilite verified (hit1 == hit40000).
- * NB: the bytes-file @0x3d154 different (table reconstruite au startup) -> not NOT re-to extract of the file.
- * Source gravee: research/gt_scorer/0x43f154_cost_lut_runtime.log  (voir UHARC_RE_REPORT.md SS13.133/13.134)
+/* alz_score_table.inc — table de coût proba->coût du SCOREUR de PARSING 0x414630 (UHARC 0.6b).
+ * Capturée AU RUNTIME dans le process (winedbg gdb-python) à l'adresse DGROUP VA 0x43f154,
+ * 16385 mots u16 (indices 0..16384 = proba=(freq<<14)/total). Stabilité vérifiée (hit1 == hit40000).
+ * NB: les OCTETS-FICHIER @0x3d154 diffèrent (table reconstruite au startup) -> ne PAS ré-extraire du fichier.
+ * Source gravée: research/gt_scorer/0x43f154_cost_lut_runtime.log  (voir UHARC_RE_REPORT.md SS13.133/13.134)
  */
 static const unsigned short alz_score_cum[16385] = {
 0, 65520, 60840, 58102, 56160, 54653, 53422, 52381, 51480, 50684, 49973, 49329, 48742, 48201, 47701, 47235

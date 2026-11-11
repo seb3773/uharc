@@ -52,18 +52,23 @@ static const char *s_lowpfx;  /* [M269] prefixe of the dump binary some rows 0..
 uint32_t g_m265_ctxmax, g_m265_ctxarm;  /* [M265] ctx max lu by there walk + armement */
 uint32_t g_m265_out, g_m265_outarm;     /* [M267] position of output au moment of the cut */
 
+static int m265out_on(void)
+{
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("UHA_M265OUT"); v = (e && e[0] != '0') ? 1 : 0; }
+    return v;
+}
+
 void ppm_cost_set_outpos(uint32_t v)
 {
     g_m265_out = v;
-    g_m265_outarm = (v != 0xffffffffu);
+    g_m265_outarm = (m265out_on() && v != 0xffffffffu) ? 1u : 0u;
     if (v == 0xffffffffu) g_m265_out = 0u;
 }
 
 void ppm_cost_set_outarm(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_M265OUT"); v = (e && e[0] != '0') ? 1 : 0; }
-    if (v) g_m265_outarm = 1u;
+    if (m265out_on()) g_m265_outarm = 1u;
 }
 
 void ppm_cost_set_ctxband(uint32_t v)
@@ -107,10 +112,16 @@ void ppm_cost_arena_reset(ppm_cost_arena *a)
      * (= t_after  0x20), which not suivent not the `t_after` reels. Gate TOT0 conservee
      * for balayage.
      */
-    uint32_t t0 = 1u;
-    const char *e = getenv("UHA_PPM_COST_TOT0");
-    if (e && e[0])
-        t0 = (uint32_t)strtoul(e, NULL, 0);
+    static int tot0_init = 0;
+    static uint32_t s_t0 = 1u;
+    uint32_t t0;
+    if (!tot0_init) {
+        const char *e = getenv("UHA_PPM_COST_TOT0");
+        if (e && e[0])
+            s_t0 = (uint32_t)strtoul(e, NULL, 0);
+        tot0_init = 1;
+    }
+    t0 = s_t0;
     memset(a->freq, 0, sizeof a->freq);
     /* [M141] `escape` initial = **1**, NOT 0 (measured : `escape_avant` in {1, 33, 65, ...} = 1+32k).
      * with the 2e term without `+1`, the all first node tombe sure `(1<<14)/1 = 16384` => `LUT = 0`
@@ -339,7 +350,7 @@ uint32_t ppm_cost_node_cost(const ppm_cost_arena *a, uint32_t ctx, uint32_t err,
 
     if (override)
         cost = PPM_COST_OVERRIDE;
-    else if (f == 0)
+    else if (f == 0) {
         /* [M170k] NUD COLD - LAW EXACT lue in l'ASM of l'estimator 0x4221c0 :
          *   1 term (0x42242b..0x422465) : `proba = (freq_prior[err] << 14) / cum_prior[0]`
          *     with `freq_prior = master[(0x30400/0x200) + cand]` = row 772+cand and
@@ -353,12 +364,17 @@ uint32_t ppm_cost_node_cost(const ppm_cost_arena *a, uint32_t ctx, uint32_t err,
         if (a->prior && a->prior_total)
             cost = alz_score_cost((uint32_t)a->prior[err], a->prior_total)
                  + alz_score_cost((uint32_t)a->escape[ctx], t);
-        else if (getenv("UHA_PPM_COLD_LEGACY"))
-            cost = alz_score_cost(PPM_COST_PRIOR, t);
-        else
-            cost = alz_score_cost(PPM_COST_PRIOR, 2048u)
-                 + alz_score_cost((uint32_t)a->escape[ctx], t);   /* [M141] ESCAPE_AVANT, without +1 */
-    else
+        else {
+            static int cold_leg = -1;
+            if (cold_leg < 0)
+                cold_leg = getenv("UHA_PPM_COLD_LEGACY") ? 1 : 0;
+            if (cold_leg)
+                cost = alz_score_cost(PPM_COST_PRIOR, t);
+            else
+                cost = alz_score_cost(PPM_COST_PRIOR, 2048u)
+                     + alz_score_cost((uint32_t)a->escape[ctx], t);   /* [M141] ESCAPE_AVANT, without +1 */
+        }
+    } else
         cost = alz_score_cost(f, t);
 
     /* [M222, GATED UHA_PPM_ROWNOESC, default OFF] PROBE : the denominateur of the cost HOT serait
@@ -805,16 +821,19 @@ static void c08_phase(const uint8_t *d, size_t n, size_t i0, size_t i1,
      * near of `0x10000` (mask of positions) there cause is l'arithmetique of bouclage, otherwise elle
      * is in the data. no effect on there machine. */
     static long m252c08 = -2;
-    int c08trk = 0, c08tail = 0;
-    if (m252c08 == -2) { const char *e = getenv("UHA_M252C08");
-                        m252c08 = (e && e[0]) ? atol(e) : -1; }
+    static int c08tail_cfg = 0;
+    int c08trk = 0, c08tail;
+    const int no_mask = c08_no_livemask();
+    const int tie = c08tie_strict();
+    if (m252c08 == -2) {
+        const char *e = getenv("UHA_M252C08");
+        m252c08 = (e && e[0]) ? atol(e) : -1;
+        /* `UHA_M252C08` recu as chain NO numerique (ex. `tail`) : rend only l'STATE FINAL of
+         * each pass, for all cuts. */
+        c08tail_cfg = (e && e[0] && !((e[0] >= '0' && e[0] <= '9') || e[0] == '-')) ? 1 : 0;
+    }
     if (m252c08 >= 0 && (long)g_bandbase == m252c08) c08trk = 1;
-    /* `UHA_M252C08` recu as chain NO numerique (ex. `tail`) : rend only l'STATE FINAL of
-     * each pass, for all cuts - c'is there grandeur that the BP `0x422315` of the master voit
-     * (il frappe BEFORE there recopie LIVE->travail : the registres `[0x481c00/04/08]` lus are therefore
-     * those laisses by l'call previous, not l'state of the master at the frontier). */
-    { const char *e = getenv("UHA_M252C08");
-      c08tail = (e && e[0] && !((e[0] >= '0' && e[0] <= '9') || e[0] == '-')) ? 1 : 0; }
+    c08tail = c08tail_cfg;
     for (i = i0; i < i1; i++) {
         const uint32_t pos = (uint32_t)i;
         uint32_t bl = (~d[i]) & 0xffu;
@@ -826,9 +845,8 @@ static void c08_phase(const uint8_t *d, size_t n, size_t i0, size_t i1,
         if (bl == 0u || bl == 0xffu) continue;      /* 0x4226f3 / 0x4226fb : nor MRU nor lastpos */
         cand[0] = bl; cand[1] = (bl - 1u) & 0xffu; cand[2] = (bl + 1u) & 0xffu;
         for (j = 0; j < 3; j++) {
-            long x = (long)pos - (long)s->lastpos[cand[j]];
-            x &= (long)PPM_MASK;
-            if (x > 0 && x < 0x100) { dd = x; found = 1; break; }
+            uint32_t x = (pos - s->lastpos[cand[j]]) & PPM_MASK;
+            if (x > 0u && x < 0x100u) { dd = (long)x; found = 1; break; }
         }
         if (found) {
             s->cnt[dd & 0xff] += 1;                 /* 0x41907a / 0x42276c */
@@ -837,17 +855,8 @@ static void c08_phase(const uint8_t *d, size_t n, size_t i0, size_t i1,
                 /* `NB_LAW_EST` : `0x422793 jl 0x42285a` => frontier if `i - c08 < 0` (index RELATIF). */
                 if (law == NB_LAW_EST && ((long)i - (long)blk0 - (long)s->c08) >= 0)
                     q = (long)i - (long)s->c08 + 256;      /* 0x422799 : no mask */
-                else if (c08_no_livemask())
-                    /* [M254] same rule au **bord of start of block** : there branch of frontier of the
-                     * master is `0x42285a..0x42286f` =
-                     *   `edx = [esp+0x44] - c08 ; edx &= [0x4826bc] ; dl = BYTE[[0x43a21c] + edx]`
-                     * then `jmp 0x4227a1` (the `cmp dl,bl`). `[0x43a21c]` is l'ring glissant some
-                     * 65 536 last bytes of the **stream** : the slot `(pos - c08) & 0xffff` y contient
-                     * l'byte `stream[pos - c08]` **same when `pos - c08` precede the block**. The port
-                     * indexant the member en absolu, there value faithful is therefore `i - c08` without
-                     * bouclage - and no `(i - c08) & 0xffff`, which retombait au milieu of the member and
-                     * faussait exactement the `c08` first nodes of each walk (12 at the cut
-                     * `76 806` : nodes `i = 1..12` false en `err`, then `i = 13..24` false en `ctx`). */
+                else if (no_mask)
+                    /* [M254] same rule au **bord of start of block** : reading directe. */
                     q = (long)i - (long)s->c08;
                 else
                     q = ((long)i - (long)s->c08) & (long)PPM_MASK;   /* stream absolu */
@@ -859,7 +868,6 @@ static void c08_phase(const uint8_t *d, size_t n, size_t i0, size_t i1,
                     /* `UHA_M252TIE` : 0 = rule ASM lue (`>=`, promotion at the egalite) ;
                      * 1 = majorite strict (`>`) to the two passes ; 2 = majorite strict sure there
                      * single pass LIVE (`law == NB_LAW_LIVE`). */
-                    int tie = c08tie_strict();
                     int strict = (tie == 2) ? (law == NB_LAW_LIVE) : (tie != 0);
                     if (strict ? (s->cnt[s->c04] >  s->cnt[s->c08])
                                : (s->cnt[s->c04] >= s->cnt[s->c08])) {
@@ -900,8 +908,15 @@ static void c08_machine(const uint8_t *d, size_t n, uint32_t *c08_out,
     size_t i; int b; unsigned k;
     /* [GATED UHA_PPM_C08DBG, defautOFF, M139] trace internal of the machine MRU
      * (`i c08 c04 c00 d bl nb cnt_c08 cnt_d found`) - diagnostic node has node only. */
+    static int dbg_init = 0;
+    static const char *dbg_path = NULL;
     FILE *dbg = NULL;
-    { const char *p = getenv("UHA_PPM_C08DBG"); if (p && p[0]) dbg = fopen(p, "a"); }
+    if (!dbg_init) {
+        const char *p = getenv("UHA_PPM_C08DBG");
+        dbg_path = (p && p[0]) ? p : NULL;
+        dbg_init = 1;
+    }
+    if (dbg_path) dbg = fopen(dbg_path, "a");
     if (live_mode && s_c08.init) {
         memcpy(lastpos, s_c08.lastpos, sizeof lastpos);
         memcpy(cnt, s_c08.cnt, sizeof cnt);
@@ -988,39 +1003,6 @@ static void c08_machine(const uint8_t *d, size_t n, uint32_t *c08_out,
     if (dbg) fclose(dbg);
 }
 
-/* rouleau ctx_bits = 4 last ~data (orders 1..4) ; prediction cand>=1 = (roller>>shift)&0xff
- * [M130c] CONVENTION PROUVEE BY L'ASM + GT (more of shift au bord) :
- *   `0x4223dc mov eax,[esp+0x8]` (ctx_bits) ; `0x4223e0 shr eax,cl` (cl = BASE_CLS[cand]) ;
- *   `0x4223ed mov bh,al` ; `0x4223ef sub bh,bl` (bl = model_byte) => err = (ctx_bits>>shift  model) & 0xff,
- *   with the **more recent en weight faible** (shift 0 = order 1).
- * L'old `x <<= 8*(4i)` placait the bytes of the bord en WEIGHT FORT : has i=1 there prediction valait 0 au
- * lieu of model[0]. Proof GT : `eng` cand1 i=1 = 241 = (0x880x97) ; `image` c2=c3=c4 = 87 (shifts >=8
- * => prediction 0 => err = model_byte) - the three values GT are identical, this that single the weight
- * faible explique.
- */
-static uint32_t ppm_ctx_bits(const uint8_t *d, size_t n, size_t i)
-{
-    uint32_t x = 0;
-    size_t k;
-    (void)n;
-    if (i < 4) {
-        /* [M170k] BORD OF WINDOW - l'estimator INITIALISE ctx_bits since the global
-         * `[0x48269c]` (0x422392 : `mov eax,ds:0x48269c ; mov [esp+0x8],eax`), il not the
-         * reconstruit NOT since there window. The 4 bytes REELS which previous there window
-         * entrent therefore in there prediction some 4 first nodes (same convention : the more
-         * recent en weight FAIBLE, bytes complementes). Has `pos = 0` (start of stream) l'init
-         * equals 0 : c'is why all nos GT (all has `pos = 0`) validaient has bord has 0.
-         * Bord of stream partial (start < 4) : the bytes manquants restent has 0. */
-        x = g_prectx;
-        for (k = 0; k < i; k++) x = (x << 8) | ((~d[k]) & 0xffu);
-        return x;
-    }
-    for (k = i - 4; k < i; k++) x = (x << 8) | ((~d[k]) & 0xffu);
-    return x;
-}
-
-static uint32_t g_prectx;
-
 void ppm_cost_set_prectx(uint32_t v)
 {
     g_prectx = v;
@@ -1043,35 +1025,6 @@ uint32_t ppm_cost_get_flag(void)
     return g_flag_out;
 }
 
-/* err cand>=1 - LAW DECODEE in L'ASM + VERIFIED GT (M130c)
- *   0x4223d8 cl = BASE_CLS[cand] (table 0x43b2b8) ; 0x4223dc eax = ctx_bits [esp+0x8]
- *   0x4223e0 shr eax,cl ; 0x4223ed bh = al ; 0x4223ef sub bh,bl   -> pred - model
- *   0x422594 mov bh,bl ; 0x422596 sub bh,al                        -> model - pred
- *   the CHOICE depend of the flag [esp+0x50] (= BYTE[0x483932] au start, 0x422242) ;
- *   0x422500..0x42250e : `cmp bh,0x80 ; jb skip ; test ah,ah ; sete al` -> the flag TOGGLES
- *   each fois that l'err RETENU is >= 0x80.
- *   0x42254e..0x422568 : ctx_bits = (ctx_bits << 8) | model_byte (more recent en weight faible).
- * Proof GT (`m130_eng_nodes.tsv` cand1) : i=1 err=241=0x88-0x97 (flag=1) then toggles ;
- * i=2 err=3=0x9a-0x97 (flag=0). L'old " flip block-16 " (M45-F) was has approximation
- * of this basculement : il is DELETES.
- */
-static uint32_t ppm_err_cand1(const uint8_t *d, size_t n, size_t i, uint32_t cand, int *flag)
-{
-    static const uint32_t SH[5] = {0, 0, 8, 16, 24};
-    uint32_t bl = (~d[i]) & 0xffu;
-    uint32_t pred, err;
-    /* [M170k] The cas particulier `i == 0 -> err = bl` is has PROXY (il not tombe juste that
-     * parce that pred = 0 has pos = 0). There law GENERALE suffit, has condition that the flag initial
-     * i.e. 0 : has `pos = 0` (ctx_bits = 0 => pred = 0), err = bl  0 = bl (GT `m41` cand1 i=0 =
-     * 0x88), then err >= 0x80 => TOGGLES => i=1 is computes en `pred  bl` (GT 241 = 0x880x97).
-     * The flag d'input is desormais fourni by l'appelant (`m->cls_neg` = [0x483932]). */
-    pred = (ppm_ctx_bits(d, n, i) >> SH[cand]) & 0xffu;
-    err = *flag ? ((pred - bl) & 0xffu) : ((bl - pred) & 0xffu);
-    if (err >= 0x80u)
-        *flag = !*flag;                    /* 0x422500..0x42250e */
-    return err;
-}
-
 /* ---------------------------------------------------------------------------
  * [M220, GATED UHA_PPM_ROWSEL, default-OFF] THE SELECTEUR OF line OF THE NUD 0x4221c0
  * ---------------------------------------------------------------------------
@@ -1086,11 +1039,6 @@ static uint32_t ppm_err_cand1(const uint8_t *d, size_t n, size_t i, uint32_t can
  * 0x481c00/04/08, halving has 0x28. The all persiste of has candidate au next (l'arena
  * n'is never remise has plat) ; l'snapshot n'is RAFRAICHI since the live that if
  * `cand == class current == 0` (0x422315, cf. ppm_cost_rowsel_feed_live).
- *
- * This which replaces WHAT in the port : the port calculait the same delta with there
- * distance `c08` of the machine MRU and has " acc/order " approche ; here there distance is
- * `reg08` (law 0x4225a1) and the biais is the one of 0x422608/0x42266f, which REPLACES the
- * cost of the node (0x4224b2..0x4224b6) au lieu of the surcharger by has override 0x800.
  */
 #define RS_MASK 0xffffu
 
@@ -1321,6 +1269,8 @@ void ppm_cost_rowsel_feed_live(ppm_cost_arena *a, const uint8_t *mem, size_t upt
 static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t len,
                                uint32_t cand, uint64_t incumbent, int reset)
 {
+    static uint32_t *s_errs = NULL, *s_c08 = NULL, *s_ess = NULL;
+    static size_t s_errs_cap = 0, s_c08_cap = 0, s_ess_cap = 0;
     ppm_cost_arena *const arena = ap;
     { static int mc = -1;
       if (mc < 0) { const char *e = getenv("UHA_M265CTX"); mc = (e && e[0] != '0') ? 1 : 0; }
@@ -1328,15 +1278,26 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
     uint64_t cumul = 0;
     unsigned long cold_n = 0;
     size_t i;
+    const size_t need = len ? len : 1u;
     uint32_t *c08 = NULL;
     uint32_t *errs;
     uint32_t *ess = NULL;               /* [M154] err_seed by node (gate LAW256) */
-    int law = law256();
-    errs = (uint32_t *)malloc(len * sizeof *errs);
-    if (!errs) return 0;
+    const int law = law256();
+    if (need > s_errs_cap) {
+        uint32_t *p = (uint32_t *)realloc(s_errs, need * sizeof *p);
+        if (!p) return 0;
+        s_errs = p;
+        s_errs_cap = need;
+    }
+    errs = s_errs;
     if (cand == 0u) {
-        c08 = (uint32_t *)malloc(len * sizeof *c08);
-        if (!c08) { free(errs); return 0; }
+        if (need > s_c08_cap) {
+            uint32_t *p = (uint32_t *)realloc(s_c08, need * sizeof *p);
+            if (!p) return 0;
+            s_c08 = p;
+            s_c08_cap = need;
+        }
+        c08 = s_c08;
         if (c08flow() >= 2) {
             /* [M170r]  TWO PHASES - there single law measured which rende at the fois l'state d'input of the
              * block AND the nodes (`m170q` 85/85) :
@@ -1358,8 +1319,13 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
             c08_machine(win, len, c08, g_bandbase, 0, 0);
         }
         if (law) {
-            ess = (uint32_t *)malloc(len * sizeof *ess);
-            if (!ess) { free(c08); free(errs); return 0; }
+            if (need > s_ess_cap) {
+                uint32_t *p = (uint32_t *)realloc(s_ess, need * sizeof *p);
+                if (!p) return 0;
+                s_ess = p;
+                s_ess_cap = need;
+            }
+            ess = s_ess;
         }
     }
     /* 1 pass : err by symbole */
@@ -1372,66 +1338,33 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
                          env_done = 1; if (e && e[0]) g_flag_in = (e[0] != '0') ? 1u : 0u; }
     }
     int flag = g_flag_in ? 1 : 0;
-    for (i = 0; i < len; i++) {
-        if (cand == 0u) {
+    if (cand == 0u) {
+        const long soff = seed_off();
+        const int p_act = pay_active();
+        const int c08_flux = (law >= 3 && (p_act || c08_border_flux()));
+        const uint8_t *const flux = win - g_bandbase;
+        const size_t fn = (size_t)g_bandbase + len;
+        for (i = 0; i < len; i++) {
             /* [M130c] SEED (cand0), path 0x42259d..0x4225e6 :
              *   cl = ~data[posc08] (0x4225b5/0x4225b7) ; bh = ~data[pos2*c08] (0x4225d2/0x4225d4)
              *   `al = cl ; sub al,bh` (0x4225dc/0x4225e0) => err = model(posc)  model(pos2c)
-             *   = (data[pos2c]  data[posc]) & 0xff - without flag of direction.
-             * L'old `data[posc]  data[pos]` not coincidait that sure data degenerees
-             * (zeros ; pattern of periode 2) - c'is why `pattern`/`zeros` semblaient exact.
-             */
+             *   = (data[pos2c]  data[posc]) & 0xff - without flag of direction. */
             uint32_t c = c08[i] ? c08[i] : 1u;
-            long soff = seed_off();
             long p1 = (long)i + soff - (long)c;
             long p2 = (long)i + soff - 2L * (long)c;
-            /* [M132b] DECODAGE 0x422614 (path c08 < 4, MAJORITAIRE) vs 0x4225e0 (c08 >= 4) :
-             *   c08 <  4 : `0x422616 mov al,bh ; 0x422618 mov bh,bl ; 0x422621 sub bh,cl`
-             *              => err = bl  cl = model[pos]  model[posc] = data[posc]  data[pos]
-             *   c08 >= 4 : `0x4225dc mov al,cl ; 0x4225e0 sub al,bh`
-             *              => err = model[posc]  model[pos2c] = data[pos2c]  data[posc]
-             * The port appliquait there 2 formule in all the cas : false as soon as c08 < 4 (i.e. presque
-             * always). Sure `zeros` the two coincident (0), this which masquait l'error ; sure `eng`/`biased`
-             * the seed was under-facture (4,58 % / 3,28 %).
-             * Bord (posc < 0) : sentinelle no tranchee (GT 255 vs ring 0) -> err = model[pos] (= ~data[i]),
-             * single value compatible with `zeros` exact.
-             */
             if (law) {
-                /* [M154] LAW COMPLETE (cf law256) : two variables DISTINCTES au same node,
-                 * valable for all values of `c` (l'old decoupage c<4 / c>=4 was
-                 * has reading erronee of two sauts of l'ASM towards has same tail 0x422614).
-                 *   cl  = ~buf[ic+256]   (0 au bord i<c)
-                 *   b2  = ~buf[i2c+256]  (0 au bord i<2c)
-                 *   err_seed = cl  b2   -> ctx = T2CC[err_seed]
-                 *   err_cost = bl  cl   with bl = ~win[i]  -> index d'arena
-                 * level 1 : single there source of `ctx` change (index d'arena unchanged). */
+                /* [M154] LAW COMPLETE (cf law256) : two variables DISTINCTES au same node. */
                 uint32_t cl, b2;
-                /* [M170r]  BORD SLICE BY L'ASM - `0x4225a9 jl 0x422628` (bord 1) and
-                 * `0x4225c6 jl 0x422644` (bord 2) : when l'index RELATIF `i  k*c08` is negatif,
-                 * the legacy engine not takes no sentinelle, il retombe sure the STREAM ABSOLU
-                 * `stream[(wpos  k*c08) & mask]` (`0x42262c/0x42263a/0x42263c`) - the stream etant
-                 * complemente, cela equals `~data[(wpos  k*c08) & mask]`. L'old sentinelle `0`
-                 * under-facturait massivement as soon as `c08` is large devant `i` (block 3 of `mixed` :
-                 * `c08 = 102` => 102 nodes sure 256 degeneres => cost  2).
-                 * `LAW256 >= 3` : bord = stream absolu ; `<= 2` : old sentinelle (behavior fige). */
                 const uint32_t wpos = g_bandbase + (uint32_t)i;
-                const uint8_t *flux = win - g_bandbase;
-                const size_t fn = (size_t)g_bandbase + len;
-                if (law >= 3 && (pay_active() || c08_border_flux())) {
-                    /* [M254] the BORD (`i < k*c08`) is traite by the stream absolu THAT THERE GEOMETRIE
-                     * OF THE PAYLOAD I.E. ARMEE NOW NO : there law `0x4225a9/0x4225c6 jl` not depend not
-                     * of this geometrie, and there sentinelle `0` of the path `else` faussait the
-                     * `c08` first nodes of each walk (has `76 806` : nodes `i = 1..12` en
-                     * `err`, then `13..24` en `ctx`). L'interieur of the block keeps sa reading
-                     * current (`entree_byte` if payload arme, otherwise `law_byte`). */
+                if (c08_flux) {
                     cl = ((long)i - (long)c < 0)
                        ? flux_byte(flux, fn, wpos, (long)c)
-                       : ((pay_active()
+                       : ((p_act
                           ? entree_byte(flux, fn, (long)g_bandbase + (long)i - (long)c + 256L)
                           : law_byte(win, len, (long)i - (long)c + 256L)) ^ 0xffu);
                     b2 = ((long)i - 2L * (long)c < 0)
                        ? flux_byte(flux, fn, wpos, 2L * (long)c)
-                       : ((pay_active()
+                       : ((p_act
                           ? entree_byte(flux, fn, (long)g_bandbase + (long)i - 2L * (long)c + 256L)
                           : law_byte(win, len, (long)i - 2L * (long)c + 256L)) ^ 0xffu);
                 } else {
@@ -1448,12 +1381,6 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
                 else
                     errs[i] = (ring_byte(win, len, (long)i - (long)c) - win[i]) & 0xffu;
             } else if (c < 4u) {
-                /* [M146] path `c08 < 4` : formule `input[i+256c]  input[i]` TESTEE then RETRACTEE.
-                 * Elle matches to the nodes 12 of `m140_arena_eng.tsv` (255, 187) **but** :
-                 *   (has) `an_costcmp` se degrade (14/22 -> 9/22, gap max 3,57 % -> **7,97 %**) and `zeros` casse (5/5 -> 67 %) ;
-                 *   (b) the two GT se **contredisent** some l'idx 27 : `m140` col err = **248** then that `m134` (BP Has `0x4225f2`,
-                 *       validated 100 %) gives **2** for there same position. Arbitrage : M134 does foi, `m140` col err/ctx = no fiable.
-                 * Return au behavior validated by `zeros`/`pattern` and by `an_costcmp`. */
                 if ((long)i - (long)c < 0)
                     errs[i] = (~win[i]) & 0xffu;
                 else
@@ -1461,17 +1388,26 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
             } else if (p2 < 0)
                 errs[i] = 0u;
             else if (soff > 0)
-                /* [M135] order of there soustraction : `cl = ~buf[pos-c]`, `bh = ~buf[pos-2c]`,
-                 * `al = cl - bh` (0x4225dc/0x4225e0) => the two `not` s'cancel and
-                 * err = buf[pos-2c] - buf[pos-c]  (the term LOINTAIN en first).
-                 * The code historique faisait l'inverse (p1-p2) : measured false has 97 % sure `eng`. */
                 errs[i] = (seed_byte(win, len, p2, soff)
                          - seed_byte(win, len, p1, soff)) & 0xffu;
             else
                 errs[i] = (ring_byte(win, len, p1)
                          - ring_byte(win, len, p2)) & 0xffu;
-        } else {
-            errs[i] = ppm_err_cand1(win, len, i, cand, &flag);
+        }
+    } else {
+        /* err cand>=1 - LAW DECODEE in L'ASM + VERIFIED GT (M130c) : rolling 4-byte
+         * complement register initialized with g_prectx, toggling flag whenever err >= 0x80. */
+        static const uint32_t SH[5] = {0, 0, 8, 16, 24};
+        const uint32_t sh = SH[cand];
+        uint32_t ctx_bits = g_prectx;
+        for (i = 0; i < len; i++) {
+            uint32_t bl = (~(uint32_t)win[i]) & 0xffu;
+            uint32_t pred = (ctx_bits >> sh) & 0xffu;
+            uint32_t err = flag ? ((pred - bl) & 0xffu) : ((bl - pred) & 0xffu);
+            if (err >= 0x80u)
+                flag = !flag;
+            errs[i] = err;
+            ctx_bits = (ctx_bits << 8) | bl;
         }
     }
     /* [M125] l'arena n'is NOT remise has plat between candidates legacy side :
@@ -1480,257 +1416,239 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
         ppm_cost_arena_reset(arena);
     /* [M220, UHA_PPM_ROWSEL] `dctr`/`dma`/`bias` are some slots of STACK remis has 0 at each
      * call of l'estimator (0x4221e6..0x4221ee) : this n'is no l'state persistant. */
-    if (rowsel_on()) { arena->dctr = 0u; arena->dma = 0u; arena->bias = 0u; }
+    const int rs = rowsel_on();
+    if (rs) { arena->dctr = 0u; arena->dma = 0u; arena->bias = 0u; }
     {
+        static int ec = -1;
+        static long cs = -2;
+        static int ni = -1;
+        static long mn = -2;
+        static int mnc = -1;
+        static unsigned long mnn = 0;
+        static int cs_seq = -1;
+        static FILE *csf = NULL;
+        static unsigned long csn = 0;
+        static long only = -2;
+        static long rb = -2;
+        static unsigned char *bm = NULL, *be = NULL;
+        static int c5 = -1;
+        static int nc = -1;
+        static FILE *nf = NULL;
+        static int c2 = -1;
+        static int c2lim = 8;
+        static FILE *fd = NULL;
+        static int fd_ini = 0;
+        static int c6 = -1;
+        static int c3 = -1;
+
+        if (ec < 0) { const char *e = getenv("UHA_PPM_ERRCOST"); ec = (e && e[0] != '0') ? 1 : 0; }
+        if (cs == -2) {
+            const char *e = getenv("UHA_PPM_CTXSAVE");
+            const char *n2 = getenv("UHA_PPM_CTXNOINC");
+            cs = (e && e[0]) ? atol(e) : 0;
+            ni = (n2 && n2[0] != '0') ? 1 : 0;
+        }
+        if (mn == -2) {
+            const char *e = getenv("UHA_M252NODES");
+            const char *c2e = getenv("UHA_M252NODES_CAND");
+            mn = (e && e[0]) ? atol(e) : -1;
+            mnc = (c2e && c2e[0]) ? (int)atol(c2e) : 0;
+        }
+        if (cs_seq < 0) {
+            const char *e = getenv("UHA_COSTSEQ");
+            cs_seq = (e && e[0]) ? 1 : 0;
+            if (cs_seq) csf = fopen(e, "w");
+            if (cs_seq && !csf) cs_seq = 0;
+        }
+        if (cs_seq && only == -2) {
+            const char *e2 = getenv("UHA_COSTSEQ_POS");
+            only = (e2 && e2[0]) ? atol(e2) : -1;
+        }
+        if (rb == -2) { const char *e = getenv("UHA_PPM_RSDBG"); rb = (e && e[0]) ? atol(e) : -1; }
+        if (c5 < 0) { const char *e = getenv("UHA_COSTDBG5"); c5 = (e && e[0] != '0') ? 1 : 0; }
+        if (nc < 0) { const char *p = getenv("UHA_PPM_NODECOST"); nc = (p && p[0]) ? 1 : 0; if (nc) nf = fopen(p, "w"); }
+        if (c2 < 0) {
+            const char *e = getenv("UHA_COSTDBG2");
+            const char *L = getenv("UHA_COSTDBG2_N");
+            c2 = (e && e[0] != '0') ? 1 : 0;
+            if (L && atoi(L) > 0) c2lim = atoi(L);
+        }
+        if (!fd_ini) {
+            const char *p = getenv("UHA_PPM_NODEDUMP");
+            fd_ini = 1;
+            fd = (p && p[0]) ? fopen(p, "a") : NULL;
+        }
+        if (c6 < 0) { const char *e = getenv("UHA_COSTDBG6"); c6 = (e && e[0] != '0') ? 1 : 0; }
+        if (c3 < 0) { const char *e = getenv("UHA_COSTDBG3"); c3 = (e && e[0] != '0') ? 1 : 0; }
+        M252CUT_ARM();
+
+        const int cb_on = ctxband_on();
+        const int cnf = cutnofeed_on();
+        const int cnf_cut = cnf && !(nofeedhead_on() && incumbent == 0xffffffffu);
+        const int rb_hit = (rb >= 0 && (long)g_bandbase == rb);
+        const int mn_hit = (mn >= 0 && (long)g_bandbase == mn && (int)cand == mnc);
+        const int any_probe = (mn_hit || (cs_seq && csf) || rb_hit || c5 || (nc && nf)
+                               || c2 || (fd != NULL) || c6 || c3 || g_m252cut);
+        const uint32_t bi0 = cb_on ? g_ctxband : (uint32_t)((long)g_bandbase - cs);
+        const int fast_bi3 = (cand == 3u && !ni && ((uint64_t)bi0 + (uint64_t)len <= 0xffffffffULL));
+        uint32_t bi3 = fast_bi3 ? (bi0 % 3u) : 0u;
         uint32_t acc = 0, order = 0, ctx = g_initctx;
-        const int rs = rowsel_on();
+
         for (i = 0; i < len; i++) {
             uint32_t c = (cand == 0u) ? (c08[i] ? c08[i] : 1u) : 0u;
-            uint32_t bh, ctx_here = 0, err = errs[i], ov = 0u, f, t, node;
-            uint32_t bi = g_bandbase + (uint32_t)i;   /* [0x4803c0] + i : counter of BAND */
+            uint32_t bh, ctx_here = 0, err = errs[i], ov = 0u, f = 0u, t = 0u, node;
             uint32_t rs_bias = 0u;
             int      rs_use = 0;
             if (cand == 0u && rs) {
-                /* [M220, UHA_PPM_ROWSEL] path 2D EXACT (0x42259d..0x422623) : there line
-                 * n'is more `rel` but PPMS_43B2CC[delta], and l'index d'arena is
-                 * `sym - ~win[i-reg08]`. The biais eventuel REPLACES the cost of the node. */
+                /* [M220, UHA_PPM_ROWSEL] path 2D EXACT (0x42259d..0x422623). */
                 ppm_cost_rowsel(arena, win, win - g_bandbase, (size_t)g_bandbase + len,
                                 (uint32_t)i, g_bandbase, &ctx_here, &err, &rs_bias);
                 bh = errs[i];
                 ov = 0u;
                 rs_use = 1;
             } else if (cand == 0u) {
-                uint32_t e1 = ring_byte(win, len, (long)i - (long)c);
                 bh = errs[i];                                   /* = (e1  e2) & 0xff  = err_seed */
-                /* [GATED UHA_PPM_SEEDLAW, defautOFF, M147ter] Law measured 100 % (DUAL M147bisD) :
-                 *   ctx = T2CC[err_seed]  without lag          (1211/1211 vs 0x422418 ; lag 1 = 15,6 % refute)
-                 *   err d'arena = err_COUT = e1  data[i]   (12544/12544 vs m133 r[4]) ; bord i<c -> ~data[i]
-                 * L'ASM (tail 0x422614) : `mov al,bh` -> lookup T2CC -> THEN `mov bh,bl` -> `sub bh,cl`.
-                 * The cost of arena and l'index T2CC are TWO variables distinctes. */
-                /* [M153 - result NEGATIF, gate neutralisee] all variantes " without lag " DEGRADENT
-                 * (1/22 ; 60,6 %). Raison measured : `errs[i]` is decale of has cran by ratio au node
-                 * (`errs[i]` == err_seed(i+1)), therefore `ctx_here = ctx` (T2CC[errs[i-1]]) is there law
-                 * `ctx = T2CC[err_seed(i)]` without lag. The lag apparent n'en is not has.
-                 * Remainder ouvert : l'index of cost (`err` d'arena = err_cost) - essai has refaire SEPAREMENT. */
                 ctx_here = ctx;                                 /* == T2CC[err_seed(i)] (errs decale) */
                 ctx = PPM_T2CC[bh];
                 if (law && ess) {
-                    /* [M154] `ctx` and `acc`/`order` read `err_seed` au same node (ASM 0x42261a :
-                     * `mov ebp,[eax*4+0x43b2cc]` BEFORE `sub bh,cl`). The " lag " of the port was the
-                     * compensateur of the cran d'`errs[]`, not has law. */
+                    /* [M154] `ctx` and `acc`/`order` read `err_seed` au same node. */
                     bh = ess[i];
                     ctx_here = PPM_T2CC[bh];
                     ctx = ctx_here;
                 }
-                /* [GATED UHA_PPM_ERRCOST, defautOFF, M153] ESSAI ISOLE : single l'INDEX OF cost change,
-                 * `ctx` remainder strictement identical. Law measured : err d'arena = err_cost = e1  win[i]
-                 * (bord i<c : 255  win[i]). Proof `eng` 12544/12544 vs `m133` r[4]. */
-                { static int ec = -1; if (ec < 0) { const char *e = getenv("UHA_PPM_ERRCOST"); ec = (e && e[0] != '0') ? 1 : 0; }
-                  if (ec) err = (i < (size_t)c) ? ((255u - (uint32_t)win[i]) & 0xffu)
-                                               : ((e1 - (uint32_t)win[i]) & 0xffu); }
+                if (__builtin_expect(ec, 0)) {
+                    uint32_t e1 = ring_byte(win, len, (long)i - (long)c);
+                    err = (i < (size_t)c) ? ((255u - (uint32_t)win[i]) & 0xffu)
+                                          : ((e1 - (uint32_t)win[i]) & 0xffu);
+                }
                 if (c == 4u) { int32_t es = (int32_t)bh; if (es >= 128) es -= 256;
                     acc = ((uint32_t)((es < 0 ? -es : es) + acc) >> 1);
                     ov = (acc <= 3u) ? ((acc << 10) + 0x800u) : 0u; }
                 else if (c > 4u) { order = (bh == 0u) ? (order + 3u) : (order >> 1);
                     ov = (order >= 6u) ? 0x800u : 0u; }
             } else {
+                uint32_t bi = cb_on ? (g_ctxband + (uint32_t)i)
+                                    : (uint32_t)((long)g_bandbase + (ni ? 0L : (long)i) - cs);
                 ctx_here = ctx;                                /* cand>=1 : lag 1 (ctx sets au sym. i1) */
                 bh = errs[i] & 0xffu;
-                /* [M266, measured] `[esp+0x3c]` = `ctx_save + i` now `ctx_save = [0x4803c0]` at the beginning of
-                 * l'call, and NO `pos + i`. Proof by there GT M266 (pos 57 883) : with `pos + i`,
-                 * cand 3 diverge some the 2e node (ctx 60 vs 28) tandis that cand 2 (`&1`) and cand 4
-                 * (`&3`) are EXACT - signature of has gap multiple of 4 and no of 2/4 :
-                 * `ctx_save = pos - 4`. Gate `UHA_PPM_CTXSAVE=<k>` (default 0 = behavior
-                 * historique) for tester has has variable. */
-                { static long cs = -2; static int ni = -1;
-                  if (cs == -2) { const char *e = getenv("UHA_PPM_CTXSAVE"); cs = (e && e[0]) ? atol(e) : 0;
-                                  const char *n2 = getenv("UHA_PPM_CTXNOINC"); ni = (n2 && n2[0] != '0') ? 1 : 0; }
-                  bi = (uint32_t)((long)g_bandbase + (ni ? 0L : (long)i) - cs);
-                  if (ctxband_on())
-                      bi = g_ctxband + (uint32_t)i; }
                 if (cand == 1u) ctx = PPM_T6DC[bh] + ((PPM_T6CC[ctx & 0xfu] & 0xffu) << 4);
                 else if (cand == 2u) ctx = PPM_T6DC[bh] + ((bi & 1u) << 4);
-                else if (cand == 3u) ctx = PPM_T7DC[bh] + ((bi % 3u) << 5);
+                else if (cand == 3u) ctx = PPM_T7DC[bh] + ((fast_bi3 ? bi3 : (bi % 3u)) << 5);
                 else /*cand==4*/ ctx = PPM_T6DC[bh] + ((bi & 3u) << 4);
+                if (fast_bi3) {
+                    bi3++;
+                    if (bi3 == 3u) bi3 = 0u;
+                }
             }
-            ppm_cost_peek(arena, ctx_here & 0xffu, err, &f, &t);
-            /* [M252, GATED UHA_M252NODES=<pos>, default-OFF, read-only] Sequence of nodes of the
-             * walk `cand` demande at the band `pos` - pair of the BP legacy `0x422426` (GT
-             * `OUT/m252_nodes_c0_76806.tsv` : `i row err freq_lu`). Rend there row d'arena, l'index
-             * and there frequency LUE BEFORE update, exactement as `ax = WORD[esi]` en 0x42241f.
-             * Format : `i` decale of 1 as there GT (the first node frappe is `i=1`).
-             * Second argument d'environnement optionnel `UHA_M252NODES_CAND` (default 0) for there
-             * walk of has other candidate. no effect on l'arithmetique. */
-            { static long mn = -2; static int mnc = -1; static unsigned long mnn = 0;
-              if (mn == -2) { const char *e = getenv("UHA_M252NODES");
-                              mn = (e && e[0]) ? atol(e) : -1;
-                              const char *c2 = getenv("UHA_M252NODES_CAND");
-                              mnc = (c2 && c2[0]) ? (int)atol(c2) : 0; }
-              if (mn >= 0 && (long)g_bandbase == mn && (int)cand == mnc && mnn < 20000ul) {
-                  fprintf(stderr, "[M252NODES] i=%zu row=%u err=%u f=%u\n",
-                          i + 1u, (unsigned)(ctx_here & 0xffu), (unsigned)(err & 0xffu),
-                          (unsigned)f);
-                  mnn++; } }
-            /* [M170i, UHA_COSTSEQ=<file>, default-OFF] SEQUENCE (cand, i, ctx, err) by node :
-             * oracle out-line = OUT/m41_pattern_ctxerr_freq_total_delta.tsv (57 201 nodes,
-             * cand | ctx | err). Sert has juger the levels 1 (ctx) and 2 (err) without Wine. */
-            { static int cs = -1; static FILE *csf; static unsigned long csn;
-              if (cs < 0) { const char *e = getenv("UHA_COSTSEQ");
-                            cs = (e && e[0]) ? 1 : 0;
-                            if (cs) csf = fopen(e, "w");
-                            if (cs && !csf) cs = 0; }
-              if (cs && csf && csn < 4000000ul) {
-                  static long only = -2;
-                  if (only == -2) { const char *e2 = getenv("UHA_COSTSEQ_POS"); only = (e2 && e2[0]) ? atol(e2) : -1; }
-                  if (only < 0 || (long)g_bandbase == only) {
-                      fprintf(csf, "%u %u %zu %u %u %u\n", (unsigned)g_bandbase, cand, i,
-                              ctx_here & 0xffu, err & 0xffu, ov);
-                      csn++; } } }
-            /* [M234] counter of couples `(line, err)` DISTINCTS by call (gate RSDBG) */
-            { static long rb = -2; static unsigned char bm[8192]; static unsigned char be[256];
-              uint32_t nbd = 0;
-              if (rb == -2) { const char *e = getenv("UHA_PPM_RSDBG"); rb = (e && e[0]) ? atol(e) : -1; }
-              if (rb >= 0 && (long)g_bandbase == rb) {
-                  uint32_t kk = ((ctx_here & 0xffu) << 8) | (err & 0xffu);
-                  bm[kk >> 3] |= (unsigned char)(1u << (kk & 7u));
-                  be[err & 0xffu] = 1u;
-                  if (i + 1u == len) {
-                      uint32_t nb = 0, n2;
-                      for (n2 = 0; n2 < 8192u; n2++)
-                          nb += (uint32_t)__builtin_popcount(bm[n2]);
-                      for (n2 = 0; n2 < 256u; n2++)
-                          nbd += (uint32_t)be[n2];
-                      fprintf(stderr, "[RSDIST] pos=%u cand=%u pairs=%u flag_in=%u nerr=%u\n",
-                              (unsigned)g_bandbase, (unsigned)cand, (unsigned)nb,
-                              (unsigned)g_flag_in, (unsigned)nbd);
-                      memset(bm, 0, sizeof bm);
-                      memset(be, 0, sizeof be);
-                  }
-              } }
-            node = cutnofeed_on()
-                /* [M252] path SCINDEE : the cost single here, the nourrissage AFTER the test of cut
-                 * (ci-dessous, after `cumul += node`). The cost is function of `f`/`t` LUS BEFORE
-                 * all write : identical has the one of `ppm_cost_node` (auto-controle : the 5
-                 * first costs of the mono restent bit-exact with there gate ON). */
+            if (__builtin_expect(any_probe, 0)) {
+                ppm_cost_peek(arena, ctx_here & 0xffu, err, &f, &t);
+                if (mn_hit && mnn < 20000ul) {
+                    fprintf(stderr, "[M252NODES] i=%zu row=%u err=%u f=%u\n",
+                            i + 1u, (unsigned)(ctx_here & 0xffu), (unsigned)(err & 0xffu),
+                            (unsigned)f);
+                    mnn++;
+                }
+                if (cs_seq && csf && csn < 4000000ul && (only < 0 || (long)g_bandbase == only)) {
+                    fprintf(csf, "%u %u %zu %u %u %u\n", (unsigned)g_bandbase, cand, i,
+                            ctx_here & 0xffu, err & 0xffu, ov);
+                    csn++;
+                }
+                if (rb_hit) {
+                    if (!bm) bm = (unsigned char *)calloc(8192u, 1u);
+                    if (!be) be = (unsigned char *)calloc(256u, 1u);
+                    if (bm && be) {
+                        uint32_t kk = ((ctx_here & 0xffu) << 8) | (err & 0xffu);
+                        bm[kk >> 3] |= (unsigned char)(1u << (kk & 7u));
+                        be[err & 0xffu] = 1u;
+                        if (i + 1u == len) {
+                            uint32_t nb = 0, nbd = 0, n2;
+                            for (n2 = 0; n2 < 8192u; n2++)
+                                nb += (uint32_t)__builtin_popcount(bm[n2]);
+                            for (n2 = 0; n2 < 256u; n2++)
+                                nbd += (uint32_t)be[n2];
+                            fprintf(stderr, "[RSDIST] pos=%u cand=%u pairs=%u flag_in=%u nerr=%u\n",
+                                    (unsigned)g_bandbase, (unsigned)cand, (unsigned)nb,
+                                    (unsigned)g_flag_in, (unsigned)nbd);
+                            memset(bm, 0, 8192u);
+                            memset(be, 0, 256u);
+                        }
+                    }
+                }
+            }
+            node = cnf
                 ? ppm_cost_node_cost(arena, ctx_here & 0xffu, err, ov != 0u)
                 : ppm_cost_node(arena, ctx_here & 0xffu, err, ov != 0u);
-            /* [M220, UHA_PPM_ROWSEL] 0x4224b2..0x4224b6 : if the biais is no zero, il
-             * REPLACES the cost of the node (this n'is not has term additif). */
             if (rs_use && rs_bias != 0u)
                 node = rs_bias;
-            /* [M220] probe ciblee : `UHA_PPM_RSDBG=<start>` imprime the 14 first nodes
-             * of each evaluation whose there band equals <start>. */
-            { static long rdbg = -2;
-              if (rdbg == -2) { const char *e = getenv("UHA_PPM_RSDBG"); rdbg = (e && e[0]) ? atol(e) : -1; }
-              if (rdbg >= 0 && (long)g_bandbase == rdbg &&
-                  (i < 6u || i == 100u || i == 1000u || i == 6000u || i + 1u == len))
-                  fprintf(stderr, "[RSDBG] rs=%d use=%d i=%u cand=%u d=%u ctx=%u err=%u f=%u t=%u bias=%u node=%u w=%u,%u,%u,%u\n",
-                          rs, rs_use,
-                          (unsigned)i, (unsigned)cand, (unsigned)arena->reg08,
-                          (unsigned)(ctx_here & 0xffu), (unsigned)(err & 0xffu),
-                          (unsigned)f, (unsigned)t, (unsigned)rs_bias, (unsigned)node,
-                          (unsigned)win[0], (unsigned)win[1], (unsigned)win[2], (unsigned)win[3]); }
+            if (__builtin_expect(any_probe, 0)) {
+                if (rb_hit &&
+                    (i < 6u || i == 100u || i == 1000u || i == 6000u || i + 1u == len))
+                    fprintf(stderr, "[RSDBG] rs=%d use=%d i=%u cand=%u d=%u ctx=%u err=%u f=%u t=%u bias=%u node=%u w=%u,%u,%u,%u\n",
+                            rs, rs_use,
+                            (unsigned)i, (unsigned)cand, (unsigned)arena->reg08,
+                            (unsigned)(ctx_here & 0xffu), (unsigned)(err & 0xffu),
+                            (unsigned)f, (unsigned)t, (unsigned)rs_bias, (unsigned)node,
+                            (unsigned)win[0], (unsigned)win[1], (unsigned)win[2], (unsigned)win[3]);
+            }
             if (cand == 0u && rs)
                 ppm_cost_rowsel_step(arena, win, win - g_bandbase, (size_t)g_bandbase + len,
                                      (uint32_t)i, g_bandbase);
-            /* [GATED UHA_COSTDBG5, defautOFF, M130] trajectoire d'arena (stride 1024). */
-            { static int c5 = -1; if (c5 < 0) { const char *e = getenv("UHA_COSTDBG5"); c5 = (e && e[0] != '0') ? 1 : 0; }
-              if (c5 && ((i % 1024u) == 0u || i + 24u >= len))
-                  fprintf(stderr, "[C5] cand=%u i=%zu ctx=%u err=%u f=%u t=%u node=%u cum=%llu"
-                                  " tot0=%u esc0=%u\n",
-                          cand, i, ctx_here & 0xffu, err, f, t, node,
-                          (unsigned long long)cumul, arena->total[0], arena->escape[0]); }
+            if (__builtin_expect(any_probe, 0)) {
+                if (c5 && ((i % 1024u) == 0u || i + 24u >= len))
+                    fprintf(stderr, "[C5] cand=%u i=%zu ctx=%u err=%u f=%u t=%u node=%u cum=%llu"
+                                    " tot0=%u esc0=%u\n",
+                            cand, i, ctx_here & 0xffu, err, f, t, node,
+                            (unsigned long long)cumul, arena->total[0], arena->escape[0]);
+            }
             if (ov != 0u) node = ov;                           /* cost node = override otherwise LUT */
-            /* [GATED UHA_PPM_NODECOST, defautOFF, M140] dump `i ctx err ov node cumul_avant cand f t`
-             * by node - enables of to compares the cost BY NUD au cumul of the GT M133.
-             * [M176] `f`/`t` (columns 89) = the values LUES BEFORE update, c'isadire
-             * exactement this that the BP legacy `0x422426` expose (`freq = WORD[esi]`, `total = WORD[edx]`
-             * all two loaded before the `add ... ,0x20`) : comparaison directe with there GT M175,
-             * nodes froids (`freq == 0`) compris, without passer by there table of cost. */
-            { static int nc = -1; static FILE *nf = NULL;
-              if (nc < 0) { const char *p = getenv("UHA_PPM_NODECOST"); nc = (p && p[0]) ? 1 : 0; if (nc) nf = fopen(p, "w"); }
-              /* [M176] 7e column = `cand` : without elle the passes of the SCAN and of l'STAGE 1 not are not
-               * dissociables in the dump, and l'appariement with has GT by node devient false. */
-              if (nc && nf) fprintf(nf, "%zu\t%u\t%u\t%u\t%u\t%llu\t%u\t%u\t%u\n", i,
-                                    ctx_here & 0xffu, err, ov, node,
-                                    (unsigned long long)cumul, cand, f, t); }
-            /* [GATED UHA_COSTDBG2, default-OFF, M123] first nodes by candidate.
-             * Diagnostic of l'gap legacy : sure zeros the legacy engine gives seed==c1. */
-            { static int c2 = -1; static int c2lim = 8; if (c2 < 0) { const char *e = getenv("UHA_COSTDBG2"); c2 = (e && e[0] != '0') ? 1 : 0;
-                const char *L = getenv("UHA_COSTDBG2_N"); if (L && atoi(L) > 0) c2lim = atoi(L); }
-              if (c2 && i < (size_t)c2lim) fprintf(stderr, "[C2] cand=%u i=%zu ctx=%u err=%u ov=%u f=%u t=%u node=%u"
-                                       " win=%u bh=%u c=%u nz=%u\n",
-                                       cand, i, ctx_here & 0xffu, err, ov, f, t, node,
-                                       win[i], bh, (cand == 0u) ? (c08 && c08[i] ? c08[i] : 1u) : 0u,
-                                       (unsigned)(win[0] | win[1] | win[2] | win[3])); }
+            if (__builtin_expect(any_probe, 0)) {
+                if (nc && nf)
+                    fprintf(nf, "%zu\t%u\t%u\t%u\t%u\t%llu\t%u\t%u\t%u\n", i,
+                            ctx_here & 0xffu, err, ov, node,
+                            (unsigned long long)cumul, cand, f, t);
+                if (c2 && i < (size_t)c2lim)
+                    fprintf(stderr, "[C2] cand=%u i=%zu ctx=%u err=%u ov=%u f=%u t=%u node=%u"
+                                    " win=%u bh=%u c=%u nz=%u\n",
+                            cand, i, ctx_here & 0xffu, err, ov, f, t, node,
+                            win[i], bh, (cand == 0u) ? (c08 && c08[i] ? c08[i] : 1u) : 0u,
+                            (unsigned)(win[0] | win[1] | win[2] | win[3]));
+            }
             cumul += node;
-            /* [M252, GATED UHA_PPM_CUTNOFEED, default-OFF] the node which FRANCHIT l'incumbent n'is
-             * NOT NOURRI : on rend the cost cumule (unchanged, otherwise the 5 costs not seraient more
-             * exact) but l'arena remainder at the state d'before-this-node. without ca, each walk tronquee
-             * leaves +32 sure there row `ctx` of the last node - l'unique exces measured to the cuts
-             * saines (M249/M250/M252).  The probes `[C5]`/`[C6]` read then l'arena BEFORE the
-             * feed of the last iteration : probe contre probe, not contre there GT.
-             * En gate OFF, this block not s'execute not and the test historique ci-dessous remainder single. */
-            if (cutnofeed_on() && !(nofeedhead_on() && incumbent == 0xffffffffu)) {
+            if (cnf_cut) {
                 if (cumul > incumbent) {
-                    /* [M252] LAW FINE, measured node by node (`UHA_M252CUT`, 25 walks some 5
-                     * first cuts of the mono) : the node which franchit l'incumbent n'is NOT
-                     * nourri if it is HOT (`f != 0`) ; if it is COLD (`f == 0`), single there part
-                     * " escape " of the update pass (`ppm_cost_feed_esc`).
-                     * Correlation 25/25 : the cuts hot rendaient +32 of too (row `ctx`
-                     * of the last node, M249/M250) ; the feed complete of the cold rendait +32 of too
-                     * sure `total` ; the skip total rendait 32 sure `total` AND sure `escape`.
-                     * The cost remainder adds au cumul in the two cas (the 5 costs bit-exact of the
-                     * mono are the judge of this conservation). */
+                    if (!any_probe)
+                        ppm_cost_peek(arena, ctx_here & 0xffu, err, &f, &t);
                     if (f == 0u)
                         ppm_cost_feed_esc(arena, ctx_here & 0xffu, PPM_COST_STEP);
                     M252CUT(cand, ctx_here, err, f, t, node, cumul, incumbent, i, 'c');
                     g_flag_out = (uint32_t)flag;
-                    free(errs); free(c08); free(ess);
                     return cumul;
                 }
                 ppm_cost_node_feed(arena, ctx_here & 0xffu, err, PPM_COST_STEP);
             }
-            /* [GATED UHA_PPM_NODEDUMP, defautOFF, M130] dump complete `idx ctx err` (autocontrole
-             * NO circulaire contre the captures legacy m41/m45/m50 : there suite (ctx,err) doit
-             * to be identical node has node, independamment of l'arena).
-             * NB : name distinct of UHA_COSTDUMP (already pris by there validation d'arena CM 2D in uha_c.c). */
-            { static FILE *fd = NULL; static int ini = 0;
-              if (!ini) { const char *p = getenv("UHA_PPM_NODEDUMP"); ini = 1;
-                          fd = (p && p[0]) ? fopen(p, "a") : NULL; }
-              if (fd) fprintf(fd, "%zu\t%u\t%u\n", i, ctx_here & 0xffu, err); }
-            if (f == 0u) {
-                cold_n++;
-                /* [GATED UHA_COSTDBG6, defautOFF, M130] nodes FROIDS reels : (escape, total)
-                 * before the node - matiere for decoder the SECOND term LUT of legacy
-                 * (measured 42016 = 37440 + 4576 sure zeros cand0, +4288 sure cand1). */
-                { static int c6 = -1; if (c6 < 0) { const char *e = getenv("UHA_COSTDBG6"); c6 = (e && e[0] != '0') ? 1 : 0; }
-                  if (c6) fprintf(stderr, "[C6] cand=%u i=%zu ctx=%u err=%u f=%u t=%u esc=%u node=%u\n",
-                                  cand, i, ctx_here & 0xffu, err, f, t,
-                                  arena->escape[ctx_here & 0xffu], node); }
+            if (__builtin_expect(any_probe, 0)) {
+                if (fd) fprintf(fd, "%zu\t%u\t%u\n", i, ctx_here & 0xffu, err);
+                if (f == 0u) {
+                    cold_n++;
+                    if (c6)
+                        fprintf(stderr, "[C6] cand=%u i=%zu ctx=%u err=%u f=%u t=%u esc=%u node=%u\n",
+                                cand, i, ctx_here & 0xffu, err, f, t,
+                                arena->escape[ctx_here & 0xffu], node);
+                }
             }
             if (cumul > incumbent) {
                 M252CUT(cand, ctx_here, err, f, t, node, cumul, incumbent, i, 'e');
                 g_flag_out = (uint32_t)flag;
-                free(errs); free(c08); free(ess);
                 return cumul;
             }
         }
     }
     g_flag_out = (uint32_t)flag;
     M252CUT_END(cand, cumul, incumbent);
-    free(errs); free(c08); free(ess);
-    /* [GATED UHA_COSTDBG3, defautOFF, M122p] number of visites COLD of the candidate.
-     * Contrainte measured : sure `zeros`, the legacy engine totalise 250 781 with has cost cold of
-     * 37 440 => **6 visites cold** only for 12 544 symboles. C'is the judge of the
-     * realisme of notre generation `(ctx,err)`. */
+    /* [GATED UHA_COSTDBG3, defautOFF, M122p] number of visites COLD of the candidate. */
     { static int c3 = -1; if (c3 < 0) { const char *e = getenv("UHA_COSTDBG3"); c3 = (e && e[0] != '0') ? 1 : 0; }
       if (c3) fprintf(stderr, "[C3] cand=%u len=%zu cold=%lu cumul=%llu\n",
                       cand, len, cold_n, (unsigned long long)cumul); }
-    /* [M222] bilan by call of the block target by `UHA_PPM_RSDBG` : number of nodes FROIDS (those which
-     * portent the term `prior + escape`) and cost cumule, for separer " term cold " and " queue ".
-     * The residu *2,70 of `937 696` is 848 447 en GT : 22,66 " froids equivalents " - this
-     * line dit if l'gap is in the froids now in there queue hot. */
     {
         static long rdbg2 = -2;
         if (rdbg2 == -2) { const char *e = getenv("UHA_PPM_RSDBG"); rdbg2 = (e && e[0]) ? atol(e) : -1; }
@@ -2088,8 +2006,9 @@ uint32_t ppm_legacy_cost_select_class(const uint8_t *win, size_t len, uint32_t c
          * `OUT/m41_pattern_ctxerr_freq_total_delta.tsv`. Out dump, l'elagage is faithful. */
         static int noprune = -1;
         if (noprune < 0) { const char *e = getenv("UHA_PPM_NOPRUNE"); noprune = (e && e[0] != '0') ? 1 : 0; }
-        const char *sh = getenv("UHA_PPM_COST_SHARED");
-        if (sh && sh[0] != '0') {
+        static int sh_on = -1;
+        if (sh_on < 0) { const char *sh = getenv("UHA_PPM_COST_SHARED"); sh_on = (sh && sh[0] != '0') ? 1 : 0; }
+        if (sh_on) {
             /* [GATED UHA_PPM_COST_SHARED, defautOFF, M125] Has SINGLE arena for the 5
              * candidates (reset au first only) : the legacy engine HERITE l'state of has
              * candidate at the other (no reset intermediaire observe). */

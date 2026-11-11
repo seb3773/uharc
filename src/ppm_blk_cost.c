@@ -171,7 +171,7 @@ static void cb_node(cb_state *s, uint32_t bh, uint32_t bl, int cls, uint8_t *ctx
     int32_t symb = (cls == 7) ? ((int32_t)bh - 0x80)        /* 0x423e2b sub eax,0x80      */
                               : ((int32_t)(int8_t)(uint8_t)bh); /* 0x423bc7 movsx          */
     uint8_t ctx  = (uint8_t)s->pred;                        /* 0x423bd2 mov al,[0x4630ec]  */
-    int32_t i0r  = (int32_t)(int8_t)(uint8_t)(ctx - (uint8_t)symb) << 4; /* movsx then shl4 */
+    int32_t i0r  = (int32_t)(int8_t)(uint8_t)(ctx - (uint8_t)symb) * 16; /* movsx then shl4 */
     uint32_t acc;
     int k;
 
@@ -242,10 +242,10 @@ static void cb_node(cb_state *s, uint32_t bh, uint32_t bl, int cls, uint8_t *ctx
         s->C[3] = c2;                    /* S[0x0c] <- S[0x08] old (0x4234b9) */
         s->C[1] = d - c0;                /* S[0x04] <- S[0x2c]-S[0x00](0x4234be) */
         s->C[0] = d;                     /* S[0x00] <- S[0x2c]        (0x4234ca) */
-        acc = (uint32_t)(s->S28 << 4) + (uint32_t)(s->tap[0] * d)
+        acc = (uint32_t)(s->S28 * 16) + (uint32_t)(s->tap[0] * d)
             + (uint32_t)(s->tap[1] * s->C[1]) + (uint32_t)(s->tap[2] * s->C[2])
             + (uint32_t)(s->tap[3] * s->C[3]) + (uint32_t)(s->tap[4] * s->carry);
-        acc -= (uint32_t)((int32_t)acc >> 31) << 4;                   /* sbb edx (=0 now -16) */
+        acc -= ((uint32_t)((int32_t)acc >> 31)) << 4;                   /* sbb edx (=0 now -16) */
         s->pred = (int32_t)acc >> 4;                                  /* sar eax,4           */
     }
     /* arbitrage 0x423515 : S[0x5c] > S[0x60] -> symbole reel, otherwise prediction */
@@ -342,7 +342,7 @@ static uint8_t sel_step(sel_state *s, uint32_t pos, uint8_t raw, int cls)
     int32_t diff = sym - s->CDC;                  /* [esp+0x20] = sym - [0x462CDC] (unique ecrivain 0x42369b) */
     /* error e = movsbl(byte[0x4630F8] - byte[esp+0x24]) ; [0x4630F8] = cell3 of the nceud previous */
     int32_t e    = (int32_t)(int8_t)((uint8_t)s->cells[3] - (uint8_t)sym);
-    int32_t E16  = e << 4;                         /* eax = 16*e (0x4236ab) */
+    int32_t E16  = e * 16;                         /* eax = 16*e (0x4236ab) */
     int32_t A0 = s->A, B0 = s->B, C0 = s->C, D0 = s->D, E0 = s->E;
     /* biais S = sym, input H = diff (0x4237e3 / 0x4237d9 ; compares M315 : biais=sym, H=diff 170/170) */
     s->S = sym; s->H = diff;

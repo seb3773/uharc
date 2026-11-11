@@ -27,7 +27,7 @@ void ppm_mm6_update(ppm_mm6 *s, uint8_t out_byte, uint8_t delta_byte, uint32_t p
     gcnt = (int)position;
     out_s = ppm_sext8(out_byte);
     ring_delta = out_s - s->cand_cur;
-    base_val = ppm_sext8((uint8_t)(s->cand_score[3] - out_s)) << 4;
+    base_val = ppm_sext8((uint8_t)(s->cand_score[3] - out_s)) * 16;
 
     s->mm_acc[0][0]  += alz_mmw(base_val);
     s->mm_acc[0][1]  += alz_mmw(base_val - s->mm_hist[0][0]);
@@ -141,7 +141,7 @@ void ppm_mm6_predict(ppm_mm6 *s, uint32_t position, uint8_t *base_byte, uint32_t
     s->mm_hist[0][1] = new_h1;
     s->mm_hist[0][0] = s->mm_delta[0];
 
-    score = (s->mm_last[0] << 4)
+    score = (s->mm_last[0] * 16)
           + s->mm_coef[0][0] * s->mm_delta[0]
           + s->mm_coef[0][1] * new_h1
           + s->mm_coef[0][2] * old_h1
@@ -200,7 +200,7 @@ void ppm_mm7_update(ppm_mm7 *s, uint32_t slot, uint8_t out_byte, uint8_t delta_b
         out_s = (int)out_byte - 0x80;
     else
         out_s = ppm_sext8(out_byte);
-    base_val = ppm_sext8((uint8_t)(s->prev_score - out_s)) << 4;
+    base_val = ppm_sext8((uint8_t)(s->prev_score - out_s)) * 16;
     s->acc[sl][0] += mm7_distance(base_val);
     for (i = 0; i <= 4; i++) {
         h = (i == 4) ? s->global_delta : s->hist[sl][i];
@@ -263,7 +263,7 @@ void ppm_mm7_predict(ppm_mm7 *s, uint32_t slot, uint8_t *base_byte, uint8_t *neg
     h1 = s->hist[sl][1];
     h2 = s->hist[sl][2];
     new_h1 = s->delta[sl] - s->hist[sl][0];
-    score = (s->last[sl] << 4) + s->coef[sl][0] * s->delta[sl]
+    score = (s->last[sl] * 16) + s->coef[sl][0] * s->delta[sl]
           + s->coef[sl][1] * new_h1 + s->coef[sl][2] * h1 + s->coef[sl][3] * h2
           + s->coef[sl][4] * s->global_delta;
     s->hist[sl][3] = h2;

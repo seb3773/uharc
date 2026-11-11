@@ -157,21 +157,21 @@ static const uint8_t AlzS3Tab[256] = {
 };
 
 /* ---------------------------------------------------------------------------
- * tables of BORNAGE OF THE FINDER LEGACY (UHARC 0.6b 0x4136a0) - extracted of the
- * .data DGROUP (objdump -s -j DGROUP + dd|od croises, concordants) ; cf.
- * UHARC_RE_REPORT.md 13.469/13.470. Index = diff_len*4 + group, with
- * group = AlzOrderGroup[order]. Semantique : bound of DISTANCE (age) toleree
- * according to l'gap of length and the groupe d'order of the match. NO-REFERENCEE
- * for l'instant (pre-requis of the port faithful of the walk bounded + finaliseur
- * d'acceptation ; no incidence sure the behavior default).
+ * TABLES DE BORNAGE DU FINDER LEGACY (UHARC 0.6b 0x4136a0) — extraites du
+ * .data DGROUP (objdump -s -j DGROUP + dd|od croisés, concordants) ; cf.
+ * UHARC_RE_REPORT.md §13.469/§13.470. Index = diff_len*4 + group, avec
+ * group = AlzOrderGroup[ordre]. Sémantique : borne de DISTANCE (âge) tolérée
+ * selon l'écart de longueur et le groupe d'ordre du match. NON-RÉFÉRENCÉÉ
+ * pour l'instant (pré-requis du port fidèle de la marche bornée + finaliseur
+ * d'acceptation ; aucune incidence sur le comportement défaut).
  * ------------------------------------------------------------------------- */
 
-/* 0x439794 : level/order -> groupe (0..3). */
+/* 0x439794 : level/ordre -> groupe (0..3). */
 static const uint32_t AlzOrderGroup[16] = {
     0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 };
 
-/* 0x4397d4 : bound d'AGE of the walk profonde 0x4137a0 [diff][group]. */
+/* 0x4397d4 : borne d'ÂGE de la marche profonde 0x4137a0 [diff][group]. */
 static const uint32_t AlzChainAgeBound[4][4] = {
     {          0u,           0u,           0u,           0u },
     {          4u,           8u,         128u,        1024u },
@@ -179,7 +179,7 @@ static const uint32_t AlzChainAgeBound[4][4] = {
     {         64u,         256u,        8192u, 0xFFFFFFFFu },
 };
 
-/* 0x439834 : threshold d'ACCEPTATION 0x413530 (branch principale, diff cap 4). */
+/* 0x439834 : seuil d'ACCEPTATION 0x413530 (branche principale, diff cap 4). */
 static const uint32_t AlzAcceptThreshold[5][4] = {
     {          1u,           8u,          32u,         128u },
     {         32u,         256u,        1024u,        4096u },
@@ -188,8 +188,8 @@ static const uint32_t AlzAcceptThreshold[5][4] = {
     { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu },
 };
 
-/* 0x439884 : threshold d'ACCEPTATION (branch d'extension 0x413625, diff cap 7).
- * values GENEREES directement since the binary (od -t u4), authoritative. */
+/* 0x439884 : seuil d'ACCEPTATION (branche d'extension 0x413625, diff cap 7).
+ * Valeurs GÉNÉRÉES directement depuis le binaire (od -t u4), authoritative. */
 static const uint32_t AlzAcceptThresholdExt[8][4] = {
     {          1u,           1u,           1u,           1u },
     {          4u,          32u,         128u,         512u },

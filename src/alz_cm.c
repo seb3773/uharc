@@ -1,12 +1,12 @@
 /*
- * alz_cm.c - primitives faithful of the CM delta-2D of legacy UHARC ALZ.
- * Voir alz_cm.h for the context RE (13.55/56/57/61/62). Module NO-WIRED.
+ * alz_cm.c — primitives fidèles du CM delta-2D du legacy UHARC ALZ.
+ * Voir alz_cm.h pour le contexte RE (§13.55/56/57/61/62). Module NON-WIRED.
  */
 #include <stdint.h>
 #include <stdio.h>
 #include "alz_cm.h"
 
-/* 13.55 - table of deltas en ring, deterministe.
+/* §13.55 — table de deltas en anneau, déterministe.
  * TABLE[i] = (i < 2048) ? i : (4096 - i). */
 void alz_cm_init_table(uint16_t table[ALZ_CM_RING])
 {
@@ -15,8 +15,8 @@ void alz_cm_init_table(uint16_t table[ALZ_CM_RING])
         table[i] = (uint16_t)((i < ALZ_CM_RING_HALF) ? i : (ALZ_CM_RING - i));
 }
 
-/* 13.61 - rotation d'history (chain of differences) + sets of the delta.
- * Order exact lu in 0x415700 (captures BEFORE ecrasement) :
+/* §13.61 — rotation d'history (chaîne de différences) + pose du delta.
+ * Ordre exact lu dans 0x415700 (capture AVANT écrasement) :
  *   h2 = h1_old ; h1 = delta - h0_old ; h3 = h2_old ; h0 = delta. */
 void alz_cm_advance(alz_cm_record *rec, uint32_t base_octet, int32_t delta)
 {
@@ -32,10 +32,10 @@ void alz_cm_advance(alz_cm_record *rec, uint32_t base_octet, int32_t delta)
     rec->delta = delta;
 }
 
-/* 13.61 - hash context->line.
+/* §13.61 — hash contexte→ligne.
  * dot = (base<<4) + w0*delta + w1*h1 + w2*h2 + w3*h3 + w4*w4glob   (arith 32-bit wrap)
- * row = dot / 16  with troncature towards zero (l'idiome sar0x1f/shl4/sbb/sar4 of legacy).
- * Accumulation en uint32_t (wrap 2-complement), then division signee. */
+ * row = dot / 16  avec troncature vers zéro (l'idiome sar0x1f/shl4/sbb/sar4 du legacy).
+ * Accumulation en uint32_t (wrap 2-complément), puis division signée. */
 uint32_t alz_cm_hash(const alz_cm_record *rec, uint32_t w4glob)
 {
     uint32_t dot = 0;
@@ -50,7 +50,7 @@ uint32_t alz_cm_hash(const alz_cm_record *rec, uint32_t w4glob)
     return (uint32_t)((int32_t)dot / 16);
 }
 
-/* 13.56 - clamp of has weight in [-32, +32]. */
+/* §13.56 — clamp d'un poids dans [-32, +32]. */
 int32_t alz_cm_clamp_w(int32_t w)
 {
     if (w > ALZ_CM_WMAX)
@@ -60,18 +60,18 @@ int32_t alz_cm_clamp_w(int32_t w)
     return w;
 }
 
-/* 13.100 - min-scan some 11 accumulateurs + nudge of weight via there table of SAUTS
- * reelle 0x415a5c (validated by desassembly + croisee with there trajectoire 13.99).
- * The winner is l'accu of value MIN (comparaison SIGNEE, `jbe`) ; all the 11
- * accu are remis has 0 (not only the winner) ; then dispatch :
- *   winner==0  (accu central `ring[err]`, rec+0x30)  -> NO nudge (table[>9] skips)
- *   winner 1..10 (pos k-1)                            -> weight w=(k-1)/2, direction=(k-1)%2
- *     direction pair -> -1 (side err - h),  direction impair -> +1 (side err + h) ; clamp +/-32.
- * Autrement dit there table 0x415a5c[0..9] =
+/* §13.100 — min-scan des 11 accumulateurs + nudge de poids via la TABLE DE SAUTS
+ * réelle 0x415a5c (validée par désassembly + croisée avec la trajectoire §13.99).
+ * Le gagnant est l'accu de VALEUR MIN (comparaison SIGNÉE, `jbe`) ; TOUS les 11
+ * accu sont remis à 0 (pas seulement le gagnant) ; puis dispatch :
+ *   winner==0  (accu central `ring[err]`, rec+0x30)  -> AUCUN nudge (table[>9] sauté)
+ *   winner 1..10 (pos k-1)                            -> poids w=(k-1)/2, sens=(k-1)%2
+ *     sens pair -> -1 (côté err - h),  sens impair -> +1 (côté err + h) ; clamp ±32.
+ * Autrement dit la table 0x415a5c[0..9] =
  *   [ w0-1, w0+1, w1-1, w1+1, w2-1, w2+1, w3-1, w3+1, w4-1, w4+1 ].
- *  subtilite no still reproduite : the two nudges of w4 (idx8/9) are gardes by
- *   there bound of w3 (rec[0x20]) in the legacy engine, no of w4 ; without effet sure l'amorce
- *   image.raw (w3=0). Has reviser during of the rejeu complete (d8b). */
+ * ⚠ subtilité non encore reproduite : les deux nudges de w4 (idx8/9) sont gardés par
+ *   la borne de w3 (rec[0x20]) dans le legacy, non de w4 ; sans effet sur l'amorce
+ *   image.raw (w3=0). À réviser lors du rejeu complet (d8b). */
 static int cm_minscan_core(uint32_t acc[ALZ_CM_NACC], int32_t w[ALZ_CM_NWEIGHT])
 {
     int mini = -1, i;
@@ -86,17 +86,17 @@ static int cm_minscan_core(uint32_t acc[ALZ_CM_NACC], int32_t w[ALZ_CM_NWEIGHT])
     if (mini < 0)
         return -1;
 
-    /* Reset some 11 accumulateurs (the legacy engine resets has 0 the 11, not the single winner). */
+    /* Reset des 11 accumulateurs (le legacy remet à 0 les 11, pas le seul gagnant). */
     for (i = 0; i < ALZ_CM_NACC; i++)
         acc[i] = 0;
 
-    /* winner 0 = accu central -> no nudge. winner 1..10 -> table of sauts. */
+    /* winner 0 = accu central -> pas de nudge. winner 1..10 -> table de sauts. */
     if (mini == 0)
         return mini;
     {
         int k = mini - 1;                 /* index table 0x415a5c : 0..9 */
         int widx = k / 2;                 /* w0..w4 */
-        int dir  = (k & 1) ? +1 : -1;     /* pair: err-h (1) ; impair: err+h (+1) */
+        int dir  = (k & 1) ? +1 : -1;     /* pair: err-h (−1) ; impair: err+h (+1) */
         if (widx < ALZ_CM_NWEIGHT)
             w[widx] = alz_cm_clamp_w(w[widx] + dir);
     }
@@ -108,8 +108,8 @@ int alz_cm_minscan_nudge(alz_cm_record *rec)
     return cm_minscan_core(rec->acc, rec->w);
 }
 
-/* MaJ some 11 accumulateurs via l'ring triangulaire, sure err and the 5 histoires.
- * validated 165/165 (window) then 583/616 sure 60 pos (out artefacts of reset) - 13.100/101. */
+/* MàJ des 11 accumulateurs via l'anneau triangulaire, sur err et les 5 histoires.
+ * Validée 165/165 (fenêtre) puis 583/616 sur 60 pos (hors artefacts de reset) — §13.100/101. */
 static void cm_ring_update(uint32_t acc[ALZ_CM_NACC], int32_t err, const uint32_t h[ALZ_CM_LHIST])
 {
     acc[0]  += alz_cm_ring_value((uint32_t)(err));
@@ -125,29 +125,29 @@ static void cm_ring_update(uint32_t acc[ALZ_CM_NACC], int32_t err, const uint32_
     acc[10] += alz_cm_ring_value((uint32_t)(err + (int32_t)h[4]));
 }
 
-/* 16 signe towards zero, idiom x86 (sar0x1f/shl4/sbb/sar4) ; validated 38/38 13.102. */
+/* ÷16 signé vers zéro, idiom x86 (sar0x1f/shl4/sbb/sar4) ; validé 38/38 §13.102. */
 static uint32_t cm_div16_signed(int32_t v)
 {
     return (uint32_t)((v >= 0) ? (v / 16) : (-((-v) / 16)));
 }
 
 /*
- * alz_cm_learn_step - no learning of the finder legacy (0x415ab0), FAITHFUL
- * 13.100. Formule validated bit-exact contre there captures GT `learnstate` :
- *   - increments d'ring some 11 accu : 165/165 (window pos1..15)
- *   - declenchement + winner + nudge at the frontier counter=16 : w0 0->1
- * Conventions exact lues in the desassemblage :
- *   err = movsbl( (row_hash_byte - (v_cur & 0xff)) ) << 4      (arith 8-bit then <<4)
- *   acc[0]     += ring[ (err)          & 0xfff ]               ; term central
+ * alz_cm_learn_step — pas d'apprentissage du finder legacy (0x415ab0), FIDÈLE
+ * §13.100. Formule VALIDÉE bit-exact contre la capture GT `learnstate` :
+ *   - incréments d'anneau des 11 accu : 165/165 (window pos1..15)
+ *   - déclenchement + gagnant + nudge à la frontière counter=16 : w0 0->1
+ * Conventions exactes lues dans le désassemblage :
+ *   err = movsbl( (row_hash_byte - (v_cur & 0xff)) ) << 4      (arith 8-bit puis <<4)
+ *   acc[0]     += ring[ (err)          & 0xfff ]               ; terme central
  *   acc[1+2k]  += ring[ (err - hist[k])& 0xfff ] ; acc[2+2k] += ring[(err + hist[k])&0xfff]
- *   delta = v_cur - v ; v = v_cur ; counter++ ; if (counter & 0xf)==0 : min-scan.
- *  L'appelant (selecteur/cablage d8c) doit to set L->hist[0..4] = rec[0x00..0x10]
- *   legacy BEFORE this call (chain d'histoires). Here no-wired, therefore no effet.
+ *   delta = v_cur - v ; v = v_cur ; counter++ ; si (counter & 0xf)==0 : min-scan.
+ * ⚠ L'appelant (selecteur/câblage d8c) doit poser L->hist[0..4] = rec[0x00..0x10]
+ *   legacy AVANT cet appel (chaîne d'histoires). Ici non-wired, donc pas d'effet.
  */
 void alz_cm_learn_step(alz_cm_learner *L, uint32_t row_hash_byte, uint32_t v_cur)
 {
     uint8_t sub8 = (uint8_t)(row_hash_byte - (v_cur & 0xffu));
-    int32_t err  = (int32_t)(int8_t)sub8 * 16;   /* movsbl of the result 8-bit, then shl 4 */
+    int32_t err  = (int32_t)(int8_t)sub8 * 16;   /* movsbl du résultat 8-bit, puis shl 4 */
 
     cm_ring_update(L->acc, err, L->hist);
 
@@ -159,9 +159,9 @@ void alz_cm_learn_step(alz_cm_learner *L, uint32_t row_hash_byte, uint32_t v_cur
 }
 
 /*
- * alz_cm_rotate_hist - rotation EXACT some 5 operandes of the dot legacy (13.113).
- * To read the old values before write (FIFO of differences 2d + lookup arena).
- *   hist[4] = dr_ref = DR[(line-ref)&127]  (operande w4 ; COUPLAGE arena->CM).
+ * alz_cm_rotate_hist — rotation EXACTE des 5 opérandes du dot legacy (§13.113).
+ * Lire les anciennes valeurs avant écriture (FIFO de différences 2d + lookup arène).
+ *   hist[4] = dr_ref = DR[(line-ref)&127]  (opérande w4 ; COUPLAGE arène->CM).
  */
 void alz_cm_rotate_hist(alz_cm_learner *L, int32_t d_cur, int32_t dr_ref)
 {
@@ -174,40 +174,40 @@ void alz_cm_rotate_hist(alz_cm_learner *L, int32_t d_cur, int32_t dr_ref)
 }
 
 /*
- * alz_cm_learn_byte - composite validated GT 13.115 (rejeu cold 0..83 : row_hash
- * 83/83 + weight 84/84 contre captures BP 0x415804). PHASE SPLIT intra-line epinglee :
- * the path d'learning reads l'hist has phase RETARDEE, the dot has phase current.
- *   - err = movsbl(prev_dot - v_cur) ; prev_dot = row_hash@{i-1} = dot NOT previous ;
- *   - MaJ ring (acc->minscan) sure hist entrante (delta_{i-1}) ;
- *   - minscan (counter&0xf==0) : nudge some weight ;
- *   - rotate hist towards delta current D = byte_i - byte_{i-1} ;
- *   - dot = (v<<4) + Sigma w_postnudge * hist_courant -> prev_dot_full = row_hash@i.
- * 13.103/13.113 had modelise the dot by DELTA RETARDE and WEIGHT PRE-SCAN : there
- * captures au moment of sets of the dot revele there correction of phase (13.115).
- * L'initialisation (acc/w/hist/prev_dot to the bounds of reset) and dr_ref (arena) are
- * there loads of l'appelant ; here no-wired, therefore no effect d'encoding.
+ * alz_cm_learn_byte — composite VALIDÉE GT §13.115 (rejeu froid 0..83 : row_hash
+ * 83/83 + poids 84/84 contre capture BP 0x415804). PHASE SPLIT intra-ligne épinglée :
+ * le chemin d'apprentissage lit l'hist à phase RETARDÉE, le dot à phase COURANTE.
+ *   - err = movsbl(prev_dot - v_cur) ; prev_dot = row_hash@{i-1} = dot PAS PRÉCÉDENT ;
+ *   - MàJ anneau (acc->minscan) sur hist entrante (delta_{i-1}) ;
+ *   - minscan (counter&0xf==0) : nudge des poids ;
+ *   - rotate hist vers delta COURANT D = byte_i - byte_{i-1} ;
+ *   - dot = (v<<4) + Σ w_postnudge · hist_courant -> prev_dot_full = row_hash@i.
+ * §13.103/§13.113 avait modélisé le dot par DELTA RETARDÉ et POIDS PRÉ-SCAN : la
+ * capture au moment de pose du dot révèle la correction de phase (§13.115).
+ * L'initialisation (acc/w/hist/prev_dot aux bornes de reset) et dr_ref (arène) sont
+ * la charge de l'appelant ; ici non-wired, donc aucun effet d'encodage.
  */
 void alz_cm_learn_byte(alz_cm_learner *L, uint8_t byte_cur, uint8_t byte_prev1, uint8_t byte_prev2, int32_t dr_ref)
 {
-    int32_t  d = (int32_t)byte_cur - (int32_t)byte_prev1;     /* delta current (rotation->dot, 13.115) */
-    int32_t  v = (int32_t)byte_cur - 0x80;                    /* base current */
+    int32_t  d = (int32_t)byte_cur - (int32_t)byte_prev1;     /* delta COURANT (rotation->dot, §13.115) */
+    int32_t  v = (int32_t)byte_cur - 0x80;                    /* base courante */
     uint8_t  sub8 = (uint8_t)((uint8_t)L->prev_dot - (uint8_t)v);
     int32_t  err  = (int32_t)(int8_t)sub8 * 16;
     int32_t  dot;
     int      k;
 
-    (void)byte_prev2;  /* no requis : there string d'histoires porte the crans passes */
+    (void)byte_prev2;  /* non requis : la chaine d'histoires porte les crans passes */
 
-    /* ORDER LEGACY intra-line, epingle by captures BP 0x415804 (13.115) :
-     *   (has) finder maj some 11 accu sure l'hist ENTRANTE (delta_{i-1}, phase RETARDEE)
+    /* ORDRE LEGACY intra-ligne, epingle par capture BP 0x415804 (§13.115) :
+     *   (a) finder maj des 11 accu sur l'hist ENTRANTE (delta_{i-1}, phase RETARDEE)
      *       via err = movsbl(row_hash@{i-1} - v_cur) ;
-     *   (b) minscan (all the 16) sure these accu -> nudge some weight + reset accu :
-     *       the SELECTEUR reads the weight POST-nudge (verified : w change @15/31/47/79) ;
-     *   (c) rotation of l'hist towards the delta current (hist0<-d_i, hist1<-d_i-d_{i-1}) ;
-     *   (d) dot = (v<<4) + sum(w_postnudge * hist_courant) -> 0x44d8d8 (row_hash@i).
-     * The path acc->minscan remainder therefore has phase RETARDEE (pos31/pos47) tandis that the
-     * dot/row_hash is has phase current : fixes the +/-1 some there 1ere transition of
-     * delta no-zero (i=71). */
+     *   (b) minscan (tous les 16) sur ces accu -> nudge des poids + reset accu :
+     *       le SELECTEUR lit les poids POST-nudge (verifie : w change @15/31/47/79) ;
+     *   (c) rotation de l'hist vers le delta COURANT (hist0<-d_i, hist1<-d_i-d_{i-1}) ;
+     *   (d) dot = (v<<4) + somme(w_postnudge * hist_courant) -> 0x44d8d8 (row_hash@i).
+     * Le chemin acc->minscan reste donc a phase RETARDEE (pos31/pos47) tandis que le
+     * dot/row_hash est a phase COURANTE : corrige le +/-1 des la 1ere transition de
+     * delta non-nul (i=71). */
     cm_ring_update(L->acc, err, L->hist);
     L->counter++;
     if ((L->counter & 0xfu) == 0u)
@@ -215,11 +215,11 @@ void alz_cm_learn_byte(alz_cm_learner *L, uint8_t byte_cur, uint8_t byte_prev1, 
 
     alz_cm_rotate_hist(L, d, dr_ref);
 
-    /* prev_dot for the NOT next : weight AFTER scan of this not (13.115).
-     * prev_dot_full = dot/16 SIGNE complete (= 0x44d8d8 legacy ; requis by the
-     * predicteur p3 of l'arbitre, which peut to be <0 now >255 out window cold).
-     * prev_dot = low-byte ( full when |dot/16|<256) : sert at the err 8-bit 13.100. */
-    dot = (v << 4);
+    /* prev_dot pour le PAS SUIVANT : poids APRES scan de ce pas (§13.115).
+     * prev_dot_full = dot/16 SIGNÉ complet (= 0x44d8d8 legacy ; requis par le
+     * prédicteur p3 de l'arbitre, qui peut être <0 ou >255 hors fenêtre froide).
+     * prev_dot = bas-octet (≡ full quand |dot/16|<256) : sert à l'err 8-bit §13.100. */
+    dot = v * 16;
     for (k = 0; k < ALZ_CM_NWEIGHT; k++)
         dot += L->w[k] * (int32_t)L->hist[k];
     L->prev_dot_full = cm_div16_signed(dot);
@@ -229,8 +229,8 @@ void alz_cm_learn_byte(alz_cm_learner *L, uint8_t byte_cur, uint8_t byte_prev1, 
     L->v = (uint32_t)v;
 }
 
-/* 13.57 - rescale by halving of counters 16-bit packes.
- * v &= 0xfffefffe ; v >>= 1  (moitiene each demi-counter without deborder sure l'other). */
+/* §13.57 — rescale par halving de compteurs 16-bit packés.
+ * v &= 0xfffefffe ; v >>= 1  (moitiéne chaque demi-compteur sans déborder sur l'autre). */
 void alz_cm_rescale_halving(uint32_t *arena, uint32_t ndwords)
 {
     uint32_t i;
@@ -240,8 +240,8 @@ void alz_cm_rescale_halving(uint32_t *arena, uint32_t ndwords)
     }
 }
 
-/* ---- Self-test deterministe (validation some primitives ; n'affecte not l'encoding) ---- */
-/* ===== arena of score multi-candidates (13.108, validated bit-exact, no-wired) ===== */
+/* ---- Self-test déterministe (validation des primitives ; n'affecte pas l'encodage) ---- */
+/* ===== Arène de score multi-candidats (§13.108, VALIDÉE bit-exact, non-wired) ===== */
 void alz_arena_init(alz_arena *A)
 {
     uint32_t i;
@@ -256,7 +256,7 @@ void alz_arena_step(alz_arena *A, uint8_t byte_cur, uint8_t byte_prev, int enter
 {
     uint32_t line   = A->line;
     int32_t  delta  = (int32_t)byte_cur - (int32_t)byte_prev;
-    A->dr[line & 0x7fu] = (uint32_t)delta;      /* sets of the delta in l'ring */
+    A->dr[line & 0x7fu] = (uint32_t)delta;      /* pose du delta dans l'anneau */
     if (entered) {
         uint32_t ref = 2u, b8 = 2u, edi = 0xffffu;
         uint32_t eax;
@@ -267,10 +267,10 @@ void alz_arena_step(alz_arena *A, uint8_t byte_cur, uint8_t byte_prev, int enter
             uint32_t cn = alz_cm_ring_value((uint32_t)d0)
                         + alz_cm_ring_value((uint32_t)d1)
                         + alz_cm_ring_value((uint32_t)d2);
-            uint32_t nc = ((13u * A->cost[eax]) >> 4) + cn;   /* cn adds AFTER shift */
+            uint32_t nc = ((13u * A->cost[eax]) >> 4) + cn;   /* cn ajouté APRÈS shift */
             A->cost[eax] = nc;
             if (nc < A->cost[ref]) ref = eax;                 /* argmin cost (strict) */
-            if (cn < edi)         { edi = cn; b8 = eax; }     /* argmin cn raw (strict) */
+            if (cn < edi)         { edi = cn; b8 = eax; }     /* argmin cn brut (strict) */
         }
         A->ref = ref;
         A->b8  = b8;
@@ -278,9 +278,9 @@ void alz_arena_step(alz_arena *A, uint8_t byte_cur, uint8_t byte_prev, int enter
     A->line++;
 }
 
-/* ===== Arbitre of classes (13.109, validated, no-wired) ===== */
-/* Table bucket 0x437b10[0..0x1ff] : magnitude circulaire (tente symetrique).
- * Extract bit-exact of legacy ; 0/420 conflit vs paires empiriques (13.109). */
+/* ===== Arbitre de classes (§13.109, VALIDÉ, non-wired) ===== */
+/* Table bucket 0x437b10[0..0x1ff] : magnitude circulaire (tente symétrique).
+ * Extract bit-exact du legacy ; 0/420 conflit vs paires empiriques (§13.109). */
 static const uint16_t alz_arb_bucket[512] = {
     0,1,2,2,2,3,3,3,3,3,4,4,4,4,4,4,
     4,5,5,5,5,5,5,5,5,5,6,6,6,6,6,6,
@@ -333,10 +333,10 @@ void alz_arb_step(alz_arb *R, const int32_t diff[ALZ_ARB_NCLASS])
     uint32_t c, idx = 0u;
     for (c = 0; c < ALZ_ARB_NCLASS; c++) {
         uint32_t b = alz_arb_bucket[(uint32_t)diff[c] & 0x1ffu];
-        R->total[c] = R->total[c] - R->ring[c][slot] + b;   /* window 256 */
+        R->total[c] = R->total[c] - R->ring[c][slot] + b;   /* fenêtre 256 */
         R->ring[c][slot] = b;
     }
-    for (c = 1; c < ALZ_ARB_NCLASS; c++)                    /* argmin strict, first-min */
+    for (c = 1; c < ALZ_ARB_NCLASS; c++)                    /* argmin strict, premier-min */
         if (R->total[c] < R->total[idx]) idx = c;
     R->idx = idx;
     R->line++;
@@ -370,7 +370,7 @@ int alz_cm_selftest(void)
     alz_cm_record rec;
     int i;
 
-    /* TABLE ring (13.55) */
+    /* TABLE anneau (§13.55) */
     alz_cm_init_table(table);
     bad += st_check(table[0] == 0, "TABLE[0]==0");
     bad += st_check(table[2047] == 2047, "TABLE[2047]==2047");
@@ -379,66 +379,66 @@ int alz_cm_selftest(void)
     bad += st_check(alz_cm_ring_index(1) == 16u, "ring_index(1)==16");
     bad += st_check(alz_cm_ring_index(255) == (uint32_t)((255 << 4) & 0xfff), "ring_index(255)");
 
-    /* clamp +/-32 (13.56) */
+    /* clamp ±32 (§13.56) */
     bad += st_check(alz_cm_clamp_w(100) == ALZ_CM_WMAX, "clamp(100)==32");
     bad += st_check(alz_cm_clamp_w(-100) == ALZ_CM_WMIN, "clamp(-100)==-32");
     bad += st_check(alz_cm_clamp_w(-5) == -5, "clamp(-5)==-5");
 
-    /* halving (13.57) : 0x00020004 -> two demi (0x0002,0x0004) moities (0x0001,0x0002) */
+    /* halving (§13.57) : 0x00020004 -> deux demi (0x0002,0x0004) moitiés (0x0001,0x0002) */
     arena[0] = 0x00020004u;
-    arena[1] = 0x00010003u;   /* demi-high 0x0001 perd son LSB -> 0 ; demi-low 0x0003 -> 0x0002 */
+    arena[1] = 0x00010003u;   /* demi-haut 0x0001 perd son LSB -> 0 ; demi-bas 0x0003 -> 0x0002 */
     arena[2] = 0x00000000u;
-    arena[3] = 0xFFFFFFFFu;   /* after &0xfffefffe (0xfffefffe) then >>1 = 0x7fff7fff */
+    arena[3] = 0xFFFFFFFFu;   /* après &0xfffefffe (0xfffefffe) puis >>1 = 0x7fff7fff */
     alz_cm_rescale_halving(arena, 4);
     bad += st_check(arena[0] == 0x00010002u, "halving 0x00020004");
     bad += st_check(arena[1] == 0x00000001u, "halving 0x00010003");
     bad += st_check(arena[2] == 0x00000000u, "halving 0");
     bad += st_check(arena[3] == 0x7fff7fffu, "halving 0xffffffff");
 
-    /* rotation d'history + hash (13.61), cas simple deterministic */
+    /* rotation d'history + hash (§13.61), cas simple deterministic */
     for (i = 0; i < ALZ_CM_NHIST; i++) rec.h[i] = 0;
     for (i = 0; i < ALZ_CM_NWEIGHT; i++) rec.w[i] = 0;
     for (i = 0; i < ALZ_CM_NACC; i++) rec.acc[i] = 0;
     rec.base = 0; rec.delta = 0; rec.counter = 0;
 
-    /* weight zero -> dot = base<<4 ; row = base<<4 /16 = base (troncat). Test base=5. */
+    /* poids nuls → dot = base<<4 ; row = base<<4 /16 = base (troncat). Test base=5. */
     alz_cm_advance(&rec, 5u, 0);
     bad += st_check(alz_cm_hash(&rec, 0) == 5u, "hash(w=0,base=5)==5");
 
-    /* advances : h0=delta=3, h1=3-0=3 (delta - h0_old=0). w0=16 -> dot += 16*3=48 ; base<<4=0. */
+    /* avancé : h0=delta=3, h1=3-0=3 (delta - h0_old=0). w0=16 → dot += 16*3=48 ; base<<4=0. */
     rec.w[0] = 16;
     alz_cm_advance(&rec, 0u, 3);       /* h0=3, h1=3-3(prev h0? prev h0=0 from above? rec.h0 was 0) */
-    /* to score : h0_old was 0 (initial), delta=3 -> h1=3, h0=3, delta field=3 */
-    /* dot = 0<<4 + 16*3(delta) + 0 + 0 + 0 + 0 = 48 -> 48/16 = 3 */
+    /* noter : h0_old était 0 (initial), delta=3 → h1=3, h0=3, delta champ=3 */
+    /* dot = 0<<4 + 16*3(delta) + 0 + 0 + 0 + 0 = 48 → 48/16 = 3 */
     bad += st_check(alz_cm_hash(&rec, 0) == 3u, "hash(w0=16,delta=3)==3");
 
-    /* min-scan + nudge via table of SAUTS (13.100). Scenarios deterministes. */
-    /* (i) winner = accu central (index 0) -> NO nudge, all the accu has 0. */
+    /* min-scan + nudge via TABLE DE SAUTS (§13.100). Scenarios deterministes. */
+    /* (i) gagnant = accu central (index 0) -> AUCUN nudge, tous les accu a 0. */
     for (i = 0; i < ALZ_CM_NWEIGHT; i++) rec.w[i] = 0;
     for (i = 0; i < ALZ_CM_NACC; i++) rec.acc[i] = 100 + (uint32_t)i;
     {
         int m = alz_cm_minscan_nudge(&rec);
         bad += st_check(m == 0, "minscan winner==0 (acc[0]=100 min)");
         bad += st_check(rec.acc[0] == 0, "minscan reset acc[0]");
-        bad += st_check(rec.acc[5] == 0, "minscan reset ALL accu[5]");
+        bad += st_check(rec.acc[5] == 0, "minscan reset TOUS accu[5]");
         bad += st_check(rec.w[0] == 0 && rec.w[4] == 0, "winner0 => aucun nudge");
     }
-    /* (ii) winner = acc[1] (k=0) -> w0 -1. */
+    /* (ii) gagnant = acc[1] (k=0) -> w0 -1. */
     for (i = 0; i < ALZ_CM_NWEIGHT; i++) rec.w[i] = 0;
     for (i = 0; i < ALZ_CM_NACC; i++) rec.acc[i] = 100;
-    rec.acc[0] = 50; rec.acc[1] = 1;      /* min = acc[1] (ignores acc[0] no min) */
-    rec.acc[0] = 999;                     /* central no winner */
+    rec.acc[0] = 50; rec.acc[1] = 1;      /* min = acc[1] (ignore acc[0] non min) */
+    rec.acc[0] = 999;                     /* central non gagnant */
     { int m = alz_cm_minscan_nudge(&rec);
       bad += st_check(m == 1, "minscan winner==1");
       bad += st_check(rec.w[0] == -1, "winner1 (k0 pair) => w0-1"); }
-    /* (iii) winner = acc[2] (k=1) -> w0 +1. */
+    /* (iii) gagnant = acc[2] (k=1) -> w0 +1. */
     for (i = 0; i < ALZ_CM_NWEIGHT; i++) rec.w[i] = 0;
     for (i = 0; i < ALZ_CM_NACC; i++) rec.acc[i] = 100;
     rec.acc[0] = 999; rec.acc[2] = 1;
     { int m = alz_cm_minscan_nudge(&rec);
       bad += st_check(m == 2, "minscan winner==2");
       bad += st_check(rec.w[0] == 1, "winner2 (k1 impair) => w0+1"); }
-    /* (iv) winner = acc[9] (k=8) -> w4-1 ; (v) acc[10] (k=9) -> w4+1. */
+    /* (iv) gagnant = acc[9] (k=8) -> w4-1 ; (v) acc[10] (k=9) -> w4+1. */
     for (i = 0; i < ALZ_CM_NWEIGHT; i++) rec.w[i] = 0;
     for (i = 0; i < ALZ_CM_NACC; i++) rec.acc[i] = 100;
     rec.acc[0] = 999; rec.acc[9] = 1;
@@ -452,16 +452,16 @@ int alz_cm_selftest(void)
       bad += st_check(m == 10, "minscan winner==10");
       bad += st_check(rec.w[4] == 1, "winner10 (k9) => w4+1"); }
 
-    /* nudge bound : w already has -32, winner-> w0-1 doit rester -32 (clamp). */
+    /* nudge borne : w deja a -32, winner-> w0-1 doit rester -32 (clamp). */
     rec.w[0] = ALZ_CM_WMIN;
     for (i = 0; i < ALZ_CM_NACC; i++) rec.acc[i] = 500;
     rec.acc[0] = 999; rec.acc[1] = 1;   /* winner=acc[1] (k0 pair) => w0-1 clamp */
     (void)alz_cm_minscan_nudge(&rec);
     bad += st_check(rec.w[0] == ALZ_CM_WMIN, "nudge clamp bas ==-32");
 
-    /* --- alz_cm_learn_step : rejeu contre GT `learnstate` (13.100) ---
-     *  (has) increments d'ring pos1 (165/165 validated out-line)
-     *  (b) frontier counter=16 : rejeu pos15 since state pos14 -> minscan w0 0->1 */
+    /* --- alz_cm_learn_step : rejeu contre GT `learnstate` (§13.100) ---
+     *  (a) increments d'anneau pos1 (165/165 validé hors-ligne)
+     *  (b) frontière counter=16 : rejeu pos15 depuis état pos14 -> minscan w0 0->1 */
     {
         static const uint32_t GT_HIST1[ALZ_CM_LHIST]  = { 39u, 39u, 0u, 0u, 0u };
         static const uint32_t GT_ACC14[ALZ_CM_NACC]   = { 944u,1002u,932u,990u,988u,957u,989u,990u,956u,1000u,934u };
@@ -470,7 +470,7 @@ int alz_cm_selftest(void)
         alz_cm_learner L;
         int k, ok;
 
-        /* (has) not isolement-ring : acc=0, counter=0 (->1, no scan). */
+        /* (a) pas isolement-anneau : acc=0, counter=0 (->1, pas de scan). */
         for (k = 0; k < ALZ_CM_NACC; k++) L.acc[k] = 0;
         for (k = 0; k < ALZ_CM_NWEIGHT; k++) L.w[k] = 0;
         for (k = 0; k < ALZ_CM_LHIST; k++) L.hist[k] = GT_HIST1[k];
@@ -480,7 +480,7 @@ int alz_cm_selftest(void)
         for (k = 0; k < ALZ_CM_NACC; k++) if (L.acc[k] != EXP_INCR1[k]) ok = 0;
         bad += st_check(ok, "learn_step ring-increment pos1 == GT");
 
-        /* (b) frontier : pre-loads acc=state pos14, counter=15, replays pos15. */
+        /* (b) frontière : pré-charge acc=etat pos14, counter=15, rejoue pos15. */
         for (k = 0; k < ALZ_CM_NACC; k++) L.acc[k] = GT_ACC14[k];
         for (k = 0; k < ALZ_CM_NWEIGHT; k++) L.w[k] = 0;
         for (k = 0; k < ALZ_CM_LHIST; k++) L.hist[k] = GT_HIST15[k];
@@ -493,8 +493,8 @@ int alz_cm_selftest(void)
         bad += st_check(ok, "learn_step minscan reset 11 accu");
 
         /* (c) rotation : amorce pos1 [39,39,0,0,0], D pos2..4 = 1,1,2. dr_ref =
-         *   rec3 = DR[(line-ref)&127] ; sure this front cold ref=2 const ->
-         *   DR[0]=base_0=39, DR[1]=1, DR[2]=1 (== old D_prev asserts). 13.113 */
+         *   rec3 = DR[(line-ref)&127] ; sur ce front froid ref=2 const ->
+         *   DR[0]=base_0=39, DR[1]=1, DR[2]=1 (== anciens D_prev asserts). §13.113 */
         for (k = 0; k < ALZ_CM_LHIST; k++) L.hist[k] = (uint32_t)(int32_t)GT_HIST1[k]; /* [39,39,0,0,0] */
         alz_cm_rotate_hist(&L, 1, 39);
         bad += st_check(L.hist[0]==1u && (int32_t)L.hist[1]==-38 && L.hist[2]==39u
@@ -506,19 +506,19 @@ int alz_cm_selftest(void)
         bad += st_check(L.hist[0]==2u && L.hist[1]==1u && L.hist[2]==0u
                         && (int32_t)L.hist[3]==-38 && L.hist[4]==1u, "rotate_hist pos4 == GT");
 
-        /* (d) supersession : the verrou composite hand-seeded (approx. dr_ref=D_prev,
-         *     old order rotate->ring->dot->minscan) is REPLACES by the rejeu GT
-         *     cold complete 13.115 ci-dessous (dr_ref = arena reelle, order correle). */
+        /* (d) supersession : le verrou composite hand-seeded (approx. dr_ref=D_prev,
+         *     ancien ordre rotate->ring->dot->minscan) est REMPLACE par le rejeu GT
+         *     froid complet §13.115 ci-dessous (dr_ref = arene reelle, ordre correle). */
     }
 
-    /* --- 13.115 verrou GT " phase split " : rejeu COLD complete image.raw[0..83]
-    *     via alz_cm_learn_byte, dr_ref = trajectoire d'arena capturee (hist4 au dot,
-    *     BP 0x415804). Epingle l'order intra-line legacy correle :
-    *       (has) ring sure hist entrant (retarde) -> (b) minscan/nudge weight
-    *       -> (c) rotate towards delta current -> (d) dot with weight POST-nudge.
-    *   - prev_dot_full(step i) == 0x44d8d8@(i+1)  (row_hash CM, predicteur p3) ;
-    *   - w0/w4@(i) == trajectoire legacy post-minscan (nudges pos15/31/47/79, whose
-    *     the tie pos47 idx10->w4+1). validated 83/83 row_hash + 84/84 weight (harnais GT). */
+    /* --- §13.115 verrou GT « phase split » : rejeu FROID complet image.raw[0..83]
+    *     via alz_cm_learn_byte, dr_ref = trajectoire d'arène capturée (hist4 au dot,
+    *     BP 0x415804). Épingle l'ordre intra-ligne legacy corrélé :
+    *       (a) ring sur hist entrant (retardé) -> (b) minscan/nudge poids
+    *       -> (c) rotate vers delta COURANT -> (d) dot avec poids POST-nudge.
+    *   - prev_dot_full(etape i) == 0x44d8d8@(i+1)  (row_hash CM, prédicteur p3) ;
+    *   - w0/w4@(i) == trajectoire legacy post-minscan (nudges pos15/31/47/79, dont
+    *     le tie pos47 idx10->w4+1). Validé 83/83 row_hash + 84/84 poids (harnais GT). */
     {
         static const uint8_t GT_BYTES[84] = {   /* image.raw[0..83] */
             167, 168, 169, 171, 172, 174, 175, 177, 178, 180, 181, 183, 184, 186, 187,
@@ -539,12 +539,12 @@ int alz_cm_selftest(void)
             90, 91, 91, 92, 93, 93, 94, 94, 95, 95, 96, 96, 97, 97,
             97, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98, 98,
             98, 98, 96, 97, 97, 95, 95, 94, 95, 93, 94, 92, 91, 91 };
-        static const int32_t GT_W0[84] = {      /* weight w0 post-minscan */
+        static const int32_t GT_W0[84] = {      /* poids w0 post-minscan */
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
             2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
             2, 2, 2, 2, 1, 1, 1, 1, 1 };
-        static const int32_t GT_W4[84] = {      /* weight w4 post-minscan (tie pos47) */
+        static const int32_t GT_W4[84] = {      /* poids w4 post-minscan (tie pos47) */
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -562,13 +562,13 @@ int alz_cm_selftest(void)
             if (L.w[0] != GT_W0[i] || L.w[4] != GT_W4[i]) okw = 0;   /* post-minscan(i) */
             if (i + 1 < 84 && (int32_t)L.prev_dot_full != GT_RH[i + 1]) okrh = 0;
         }
-        bad += st_check(okrh, "cm 13.115 row_hash prev_dot_full == GT 0x44d8d8 (83/83)");
-        bad += st_check(okw,  "cm 13.115 poids w0/w4 == GT post-minscan (84/84, tie pos47)");
+        bad += st_check(okrh, "cm §13.115 row_hash prev_dot_full == GT 0x44d8d8 (83/83)");
+        bad += st_check(okw,  "cm §13.115 poids w0/w4 == GT post-minscan (84/84, tie pos47)");
     }
 
-    /* --- 13.108 arena of score : rejeu bit-exact vs GT (ref/b8 70/70, cost checkpoints).
-     *     Verrou of regression of the scorer d'arena (no-wired). Schedule d'input observe
-     *     sure the 1er block image.raw : line=0 (idx0/masque127) then idx4/masque7 -> (line&7)==0. */
+    /* --- §13.108 arène de score : rejeu bit-exact vs GT (ref/b8 70/70, cost checkpoints).
+     *     Verrou de régression du scoreur d'arène (non-wired). Schedule d'entrée observé
+     *     sur le 1er bloc image.raw : line=0 (idx0/masque127) puis idx4/masque7 -> (line&7)==0. */
     {
         static const uint8_t AB[70] = {   /* image.raw[0..69] */
             167,168,169,171,172,174,175,177,178,180,181,183,184,186,187,188,190,191,193,194,
@@ -600,14 +600,14 @@ int alz_cm_selftest(void)
                 if (gc) for (k = 0; k < 6; k++) if (A.cost[2 + k] != gc[k]) okc++;
             }
         }
-        bad += st_check(okr == 0, "arena ref 70/70 == GT (13.108)");
-        bad += st_check(okb == 0, "arena b8  70/70 == GT (13.108)");
-        bad += st_check(okc == 0, "arena cost[2..7] checkpoints pos0/8/16/24 == GT (13.108)");
+        bad += st_check(okr == 0, "arena ref 70/70 == GT (§13.108)");
+        bad += st_check(okb == 0, "arena b8  70/70 == GT (§13.108)");
+        bad += st_check(okc == 0, "arena cost[2..7] checkpoints pos0/8/16/24 == GT (§13.108)");
 
-        /* --- 13.110 chain byte-only : bytes + refs arena (line prev) +
-         *     row_hash (CM) -> assemble the 6 diff -> arbitre -> idx. Verrouille
-         *     there reformulation byte-only some predicteurs (no-wired). */
-        static const int32_t PROWH[70] = {   /* p3 = row_hash legacy (injecte ; single between model) */
+        /* --- §13.110 chaîne byte-only : octets + refs arène (ligne prev) +
+         *     row_hash (CM) -> assemble les 6 diff -> arbitre -> idx. Verrouille
+         *     la reformulation byte-only des prédicteurs (non-wired). */
+        static const int32_t PROWH[70] = {   /* p3 = row_hash legacy (injecté ; seul entré modèle) */
             0,39,40,41,43,44,46,47,49,50,52,53,55,56,
             58,59,60,62,63,65,66,67,69,70,71,72,74,75,
             76,77,78,79,80,82,83,84,85,85,86,87,88,89,
@@ -637,12 +637,12 @@ int alz_cm_selftest(void)
             alz_arb_predict(&R2, b_i, b_p1, b_p2, dl, dr_ref, dr_b8, PROWH[i]);
             if (R2.idx != GIDX[i]) okp++;
         }
-        bad += st_check(okp == 0, "arb byte-only predict idx 70/70 == GT (13.110)");
+        bad += st_check(okp == 0, "arb byte-only predict idx 70/70 == GT (§13.110)");
     }
 
-    /* --- 13.109 arbitre of classes : rejeu idx vs GT (6 diff captures -> argmin).
-     *     Verrou of regression of l'arbitre (no-wired). The 6 diff are fournis
-     *     (predicteurs out module) ; on validates window-256 + bucket + argmin. */
+    /* --- §13.109 arbitre de classes : rejeu idx vs GT (6 diff capturés -> argmin).
+     *     Verrou de régression de l'arbitre (non-wired). Les 6 diff sont fournis
+     *     (prédicteurs hors module) ; on valide fenetre-256 + bucket + argmin. */
     {
         static const int32_t GT_DIFF[70][6] = {
             {39,39,39,39,39,39},{40,1,-38,1,1,1},{41,1,0,1,-38,-38},{43,2,1,2,1,1},
@@ -677,7 +677,7 @@ int alz_cm_selftest(void)
             alz_arb_step(&R, GT_DIFF[i]);
             if (R.idx != GT_IDX[i]) oki++;
         }
-        bad += st_check(oki == 0, "arb idx 70/70 == GT (13.109)");
+        bad += st_check(oki == 0, "arb idx 70/70 == GT (§13.109)");
     }
 
     if (bad == 0)

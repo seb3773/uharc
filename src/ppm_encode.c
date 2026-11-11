@@ -1035,7 +1035,7 @@ static int ppm_frontier_class(ppm_model *m, uint32_t p,
          * the one of the geometrie of class : `remainder = min(usize-p, 0x3200)` then `len-0x100`
          * (ppm_blk_node_encode l.~413), and GT `ebp_len = 0x3100` to the 7 frontiers (acquis 17).
          * if 0x422890 rend has length more short, on there suit (`ret` = `ebp` of the master). */
-        static ppm_blocklen_ctx F;
+        static ppm_blocklen_ctx *s_fbt_F = NULL;
         static int fbt = -1;
         uint32_t ft[5], f5[5], lrest, lret;
         const uint32_t *r5;
@@ -1044,14 +1044,17 @@ static int ppm_frontier_class(ppm_model *m, uint32_t p,
             fbt = e ? ((e[0] != '0') ? 1 : 0) : ppm_clsfull_on(); }
         r5 = g_blc.t5;
         if (fbt && g_blk_usize > p) {
+            if (!s_fbt_F)
+                s_fbt_F = (ppm_blocklen_ctx *)malloc(sizeof *s_fbt_F);
+            if (!s_fbt_F) return 0;
             lrest = g_blk_usize - p;
             if (lrest >= 0x4b00u)
                 lrest = 0x3200u;
-            F = g_blc;                        /* copie : `cur` herite, `g_blc` intact */
-            ppm_blocklen_roll(&F);
-            lret = (lrest > 0x100u) ? ppm_blocklen(&F, g_blk_raw + p, lrest - 0x100u) : lrest;
-            memcpy(ft, F.t, sizeof ft);
-            memcpy(f5, F.t5, sizeof f5);
+            *s_fbt_F = g_blc;                 /* copie : `cur` herite, `g_blc` intact */
+            ppm_blocklen_roll(s_fbt_F);
+            lret = (lrest > 0x100u) ? ppm_blocklen(s_fbt_F, g_blk_raw + p, lrest - 0x100u) : lrest;
+            memcpy(ft, s_fbt_F->t, sizeof ft);
+            memcpy(f5, s_fbt_F->t5, sizeof f5);
             r5 = f5;
             len = lret;                       /* ebp of the master = return of 0x422890 */
             if (etrace_on >= 1)

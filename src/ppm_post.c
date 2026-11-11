@@ -9,18 +9,18 @@ extern int g_upd_route;
 /* [GATED UHA_ROWAUD, defautOFF, M207] histogramme some rows REELLEMENT updates
  * (entry_dec = row of the update principal, shadow_ctx = row of the update shadow), bounded
  * has out_count < 305441 for couvrir l'instant GT pos = 305 440. No emissif by default. */
-static uint32_t s_rowaud[1024][2];
+static uint32_t (*s_rowaud)[2] = NULL;
 static int s_rowaud_on = -1;
 static uint32_t s_rowaud_wpf[2];
-static uint32_t s_braud[512];
+static uint32_t *s_braud = NULL;
 static uint32_t s_rank[8];
 static uint32_t s_rank2[8];
-static uint32_t s_brf0[512];
+static uint32_t *s_brf0 = NULL;
 static void s_rowaud_dump(void)
 {
     int i;
     uint32_t band = 0, bandn = 0;
-    if (s_rowaud_on <= 0)
+    if (s_rowaud_on <= 0 || !s_rowaud || !s_braud || !s_brf0)
         return;
     for (i = 0; i < 1024; i++) {
         if (!s_rowaud[i][0] && !s_rowaud[i][1])
@@ -461,8 +461,15 @@ void ppm_c550_post(ppm_model *m, int ctx, int sym, int kctx,
     if (s_rowaud_on < 0) {
         const char *e = getenv("UHA_ROWAUD");
         s_rowaud_on = (e && e[0] != '0') ? 1 : 0;
-        if (s_rowaud_on)
-            atexit(s_rowaud_dump);
+        if (s_rowaud_on) {
+            s_rowaud = (uint32_t (*)[2])calloc(1024u * 2u, sizeof(uint32_t));
+            s_braud = (uint32_t *)calloc(512u, sizeof(uint32_t));
+            s_brf0 = (uint32_t *)calloc(512u, sizeof(uint32_t));
+            if (!s_rowaud || !s_braud || !s_brf0)
+                s_rowaud_on = 0;
+            else
+                atexit(s_rowaud_dump);
+        }
     }
     if (s_rowaud_on > 0 && m->out_count < 305441) {
         s_rowaud[entry_dec & 1023][0]++;

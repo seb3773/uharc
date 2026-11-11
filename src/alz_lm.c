@@ -1,48 +1,48 @@
 /*
- * alz_lm.c - Transcription C faithful of the decider of flush legacy 0x412c30.
+ * alz_lm.c — Transcription C fidèle du décideur de flush legacy 0x412c30.
  *
- * Copie EXACT (arithmetique entiere, wraps 32-bit, divisions tronquees, tables)
- * of the noyau validated by rejeu 6059/6059 in `_scratch/a5c2f/lm412c30_replay.c`
- * (function `lm_decide`). The knobs of diagnostic of the harnais (LMDBG_POS, LMVFORCE)
- * are retires : ils n'appartiennent only to the  banc of test, not au port.
+ * Copie EXACTE (arithmétique entière, wraps 32-bit, divisions tronquées, tables)
+ * du noyau validé par rejeu 6059/6059 dans `_scratch/a5c2f/lm412c30_replay.c`
+ * (fonction `lm_decide`). Les knobs de diagnostic du harnais (LMDBG_POS, LMVFORCE)
+ * sont retirés : ils n'appartiennent qu'au banc de test, pas au port.
  *
- * Module PUREMENT ADDITIF (voir alz_lm.h) : no effect on l'emission as long as
- * no branch (gated UHA_LMCOST default-OFF).
+ * Module PUREMENT ADDITIF (voir alz_lm.h) : aucun effet sur l'émission tant que
+ * non branché (gated UHA_LMCOST défaut-OFF).
  */
 #include <stdint.h>
-#include <stdlib.h>
+#include <stdio.h>
 #include "alz_lm.h"
 
 #define M32 0xFFFFFFFFu
 
-/* Tables static DGROUP of the decider (dumpees au runtime ; 13.237-240).
- * The primitif of cost symbole (alz_score_cost) intervient in the computation amont
- * some fields cx/this (stream by byte), fournis already resolus au decider pur. */
+/* Tables statiques DGROUP du decideur (dumpées au runtime ; §13.237-240).
+ * Le primitif de coût symbole (alz_score_cost) intervient dans le calcul amont
+ * des champs cx/ce (flux par octet), fournis déjà résolus au décideur pur. */
 #include "alz_lm_tables.inc"
 
-/* [a5c2f-c-govern-loop] Accesseur additif : expose there table mapcls (byte->class,
- * 0x437464) for that l'encoder genere there string differee loop[] from-clone
- * (walker 0x412ded) BEFORE d'to call alz_lm_decide. without effet sure the decider. */
+/* [a5c2f-c-govern-loop] Accesseur additif : expose la table mapcls (byte->classe,
+ * 0x437464) pour que l'encodeur genere la chaine differee loop[] from-clone
+ * (walker 0x412ded) AVANT d'appeler alz_lm_decide. Sans effet sur le decideur. */
 const uint8_t *alz_lm_mapcls_table(void)
 {
     return lm_mapcls;
 }
 
 /*
- * ecx : cost-match ; esi : cost-literal ; al : decision.
- * Paths and constantes transcrits of 0x412c30..0x412f65 (spec 0x412c30_port.md).
+ * ecx : coût-match ; esi : coût-littéral ; al : décision.
+ * Chemins et constantes transcrits de 0x412c30..0x412f65 (spec 0x412c30_port.md).
  */
 void alz_lm_decide(const lm_in *in, lm_out *o)
 {
     uint32_t ecx, esi, accum = 0, q, d, e, mean, v, k, fac;
     int edi;
 
-    /* ---- ecx : cost-match (0x412c3f..0x412d40) ---- */
+    /* ---- ecx : coût-match (0x412c3f..0x412d40) ---- */
     ecx = 4;
     if ((in->pend == 0 || in->dh == 1) && in->S8c > 1) {
-        /* Index legacy ebx = w16 + (dh!=1 ? 0x10000 : 0) in *[0x4373e8] ; the
-         * byte lu (`v`) is fourni already resolu by the walker (table primaire). */
-        if (in->v == in->DL)             /* BYTE[*[0x4373e8]+ebx] == length current */
+        /* Index legacy ebx = w16 + (dh!=1 ? 0x10000 : 0) dans *[0x4373e8] ; le
+         * byte lu (`v`) est fourni déjà résolu par le walker (table primaire). */
+        if (in->v == in->DL)             /* BYTE[*[0x4373e8]+ebx] == longueur courante */
             ecx = (ecx - 1) & M32;
     }
     if (in->dh == 1) {
@@ -75,8 +75,8 @@ void alz_lm_decide(const lm_in *in, lm_out *o)
     }
     ecx = (ecx * 4680u) & M32;
 
-    /* ---- esi : cost-literal (0x412d56 / 0x412e5e) ---- */
-    if (in->bud >= 0x91ADC0u) {          /* budget full (never sure block0) */
+    /* ---- esi : coût-littéral (0x412d56 / 0x412e5e) ---- */
+    if (in->bud >= 0x91ADC0u) {          /* budget plein (jamais sur block0) */
         e = (in->DL * 8u) & M32;
         e = (e + in->DL) & M32;
         e = (e << 6) & M32;
@@ -84,7 +84,7 @@ void alz_lm_decide(const lm_in *in, lm_out *o)
     } else if (in->shortcut) {
         esi = (((in->bud >> 8) * in->DL) & M32);
     } else {
-        uint32_t n = in->key - in->off;
+        uint32_t n = (in->key > in->off) ? (in->key - in->off) : 0u;
         if (n == 0) {
             esi = (((in->bud >> 8) * in->DL) & M32);
         } else {
@@ -100,38 +100,16 @@ void alz_lm_decide(const lm_in *in, lm_out *o)
         }
     }
 
-    /* ---- costs model fournis + decision (0x412d70..0x412dd9) ---- */
+    /* ---- coûts modèle fournis + décision (0x412d70..0x412dd9) ---- */
     ecx = (ecx + in->cx) & M32;
     esi = (esi + in->ce) & M32;
-    {
-        static int s_lmbias = -1;
-        static int s_bias_val = 0;
-        static int s_bias_lim = -1;
-        static int s_bias_dl = 0;
-        if (s_lmbias < 0) {
-            const char *b = getenv("UHA_LM_BIAS");
-            s_lmbias = b ? 1 : 0;
-            if (s_lmbias) s_bias_val = atoi(b);
-            const char *bl = getenv("UHA_LM_BIAS_LIM");
-            s_bias_lim = bl ? atoi(bl) : -1;
-            const char *bdl = getenv("UHA_LM_BIAS_DL");
-            s_bias_dl = bdl ? atoi(bdl) : 0;
-        }
-        if (s_lmbias) {
-            if (s_bias_lim < 0 || (int)in->off < s_bias_lim) {
-                uint32_t bval = (uint32_t)s_bias_val;
-                if (s_bias_dl) bval = (uint32_t)(s_bias_val * (int)in->DL);
-                esi = (esi + bval) & M32;
-            }
-        }
-    }
     o->ecx = ecx;
     o->esi = esi;
     if (ecx < esi) {
         o->al = 1;
         return;
     }
-    /* ---- loop differee sure the remainder of the run (0x412ded) ---- */
+    /* ---- boucle différée sur le reste du run (0x412ded) ---- */
     edi = (int)in->DL - 1;
     {
         int i;
@@ -147,8 +125,8 @@ void alz_lm_decide(const lm_in *in, lm_out *o)
                 o->al = 1;
                 return;
             }
-            if (--edi == 0)
-                break;
+            edi--;
+            if (edi <= 0) break;
         }
         o->al = (ecx < esiD) ? 1 : 0;    /* 0x412e4f : setb */
     }

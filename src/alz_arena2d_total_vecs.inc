@@ -1,4 +1,4 @@
-/* relrow, delta, exp_total  (image.raw, legacy GT total-evolution couvrant the rescale) */
+/* relrow, delta, exp_total  (image.raw, legacy GT total-evolution couvrant le rescale) */
     { 0u, 167u, 1u },
     { 0u, 216u, 65u },
     { 0u, 1u, 129u },

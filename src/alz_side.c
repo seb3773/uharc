@@ -72,10 +72,10 @@ uint8_t alz_side_decode_literal(alz_dec *d)
     return (uint8_t)(bias - decoded);
 }
 
-/* Mirror encoder d'alz_side_decode_literal (t15a) : the byte b is rendu
- * by the delta code (dir 0 : b-bias ; dir 1 : bias-b), mod 256. L'ajustement
- * of bm_predb is identical (state partage) ; bm_side_active doitetre sets
- * before l'call bm as side decodeur. */
+/* Miroir encodeur d'alz_side_decode_literal (t15a) : le byte b est rendu
+ * par le delta code (dir 0 : b-bias ; dir 1 : bias-b), mod 256. L'ajustement
+ * de bm_predb est identique (etat partage) ; bm_side_active doitetre pose
+ * avant l'appel bm comme cote decodeur. */
 int alz_side_encode_literal(alz_dec *d, uint8_t b)
 {
     int ctx, ctx2;
@@ -106,7 +106,7 @@ static void mm_slot_update(alz_dec *d, int s, uint8_t out_byte, uint8_t delta_by
 
     st->slot_dir[s] = st->side_dir;
     out_s = alz_sext8(out_byte);
-    base_val = alz_sext8((uint8_t)(st->mm_prev_score - out_s)) << 4;
+    base_val = alz_sext8((uint8_t)(st->mm_prev_score - out_s)) * 16;
 
     st->mm_acc[s][0]  += alz_mmw(base_val);
     st->mm_acc[s][1]  += alz_mmw(base_val - st->mm_hist[s][0]);
@@ -179,7 +179,7 @@ static void mm_score(alz_dec *d, int s)
     h1_old = st->mm_hist[s][1];
     h2_old = st->mm_hist[s][2];
     new_h1 = st->mm_delta[s] - st->mm_hist[s][0];
-    score = (st->mm_last[s] << 4)
+    score = (st->mm_last[s] * 16)
           + st->mm_coef[s][0] * st->mm_delta[s]
           + st->mm_coef[s][1] * new_h1
           + st->mm_coef[s][2] * h1_old
@@ -207,7 +207,7 @@ static void mm_slot_update6(alz_dec *d, uint8_t out_byte, uint8_t delta_byte)
     gcnt = (int)st->output_pos - 1;
     out_s = alz_sext8(out_byte);
     ring_delta = out_s - st->cand_cur;
-    base_val = alz_sext8((uint8_t)(st->cand_score[3] - out_s)) << 4;
+    base_val = alz_sext8((uint8_t)(st->cand_score[3] - out_s)) * 16;
 
     st->mm_acc[0][0]  += alz_mmw(base_val);
     st->mm_acc[0][1]  += alz_mmw(base_val - st->mm_hist[0][0]);
@@ -315,7 +315,7 @@ static void mm_score6(alz_dec *d, int sel)
     st->mm_hist[0][2] = old_h1;
     st->mm_hist[0][1] = new_h1;
     st->mm_hist[0][0] = st->mm_delta[0];
-    score = (st->mm_last[0] << 4)
+    score = (st->mm_last[0] * 16)
           + st->mm_coef[0][0] * st->mm_delta[0]
           + st->mm_coef[0][1] * new_h1
           + st->mm_coef[0][2] * old_h1

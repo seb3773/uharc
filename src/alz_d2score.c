@@ -1,6 +1,6 @@
 /*
- * alz_d2score.c - Scorer delta-2D 5-classes (portage 13.65/69/70).
- * Gated, NO-WIRED. Reproduces l'argmin 0x413ea0 + scorer 0x414630.
+ * alz_d2score.c — Scorer delta-2D 5-classes (portage §13.65/69/70).
+ * Gated, NON-WIRED. Reproduit l'argmin 0x413ea0 + scorer 0x414630.
  */
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +9,7 @@
 #include "alz_score.h"
 #include "alz_parse_score.h"
 
-/* --- Init of has arena : freq=0, total=counter=INIT_VAL (mirror arena2d 13.90). --- */
+/* --- Init d'une arène : freq=0, total=counter=INIT_VAL (miroir arena2d §13.90). --- */
 static void d2_arena_init(d2_arena *a)
 {
     uint32_t r;
@@ -47,8 +47,8 @@ void d2_scorer_destroy(d2_scorer *s)
     if (s) { free(s->arena); free(s); }
 }
 
-/* --- Hash : produces scalaire some weight * history  16, bounded [0, ROWS-1].
- * Mirror of alz_cm_hash (13.61). w4glob=0 (value by default en attente RE). --- */
+/* --- Hash : produit scalaire des poids × history ÷ 16, borné [0, ROWS-1].
+ * Miroir de alz_cm_hash (§13.61). w4glob=0 (valeur par défaut en attente RE). --- */
 static uint32_t d2_hash_row(const d2_scorer *s, int cls, int32_t delta)
 {
     uint32_t dot;
@@ -61,7 +61,7 @@ static uint32_t d2_hash_row(const d2_scorer *s, int cls, int32_t delta)
     return ((uint32_t)((int32_t)dot / 16)) & (D2_ROWS - 1u);
 }
 
-/* --- Advance : rotation history + sets of the delta current. --- */
+/* --- Advance : rotation history + pose du delta courant. --- */
 uint32_t d2_advance_class(d2_scorer *s, int cls, uint32_t base_octet, int32_t delta)
 {
     uint32_t h0 = s->h[cls][0];
@@ -77,8 +77,8 @@ uint32_t d2_advance_class(d2_scorer *s, int cls, uint32_t base_octet, int32_t de
     return d2_hash_row(s, cls, delta);
 }
 
-/* --- Rescale of has line (mirror alz_arena2d_rescale 13.84, validated 80/80).
- *   freq -> pair then halving ; counter = (counter>>2)+1 ; total = Sigmafreq_halvees + counter. --- */
+/* --- Rescale d'une ligne (miroir alz_arena2d_rescale §13.84, VALIDÉ 80/80).
+ *   freq → pair puis halving ; counter = (counter>>2)+1 ; total = Σfreq_halvées + counter. --- */
 static void d2_rescale_row(uint16_t *freq_row, uint16_t *total, uint16_t *counter)
 {
     int c;
@@ -94,7 +94,7 @@ static void d2_rescale_row(uint16_t *freq_row, uint16_t *total, uint16_t *counte
     *total   = (uint16_t)(sum + *counter);
 }
 
-/* --- Update (mirror alz_arena2d_score, rule cold/warm validated). COLD : freq==0 ->
+/* --- Update (miroir alz_arena2d_score, règle cold/warm validée). COLD : freq==0 →
  *   freq=step ; counter+=step ; total+=2*step.  WARM : freq+=step ; total+=step. --- */
 static void d2_update(d2_arena *a, uint32_t row, uint32_t delta, uint16_t step)
 {
@@ -111,11 +111,11 @@ static void d2_update(d2_arena *a, uint32_t row, uint32_t delta, uint16_t step)
         d2_rescale_row(&a->freq[row * D2_COLS], &a->total[row], &a->counter[row]);
 }
 
-/* --- cost of has byte for has class : lookup freq -> proba -> table cum.
- *   WARM (freq!=0) : cost = LUT[(freq14)/total].
- *   COLD (freq==0) : DOUBLE-TERM (memory 8e2332f6) =
- *        LUT[(SNAP_NUM14)/SNAP_TOTAL]  (snapshot, bloc1 = 0x9240)
- *      + LUT[(counter[row]14)/total[row]]  (numerateur live). --- */
+/* --- Coût d'un octet pour une classe : lookup freq → proba → table cum.
+ *   WARM (freq!=0) : coût = LUT[(freq≪14)/total].
+ *   COLD (freq==0) : DOUBLE-TERME (mémoire 8e2332f6) =
+ *        LUT[(SNAP_NUM≪14)/SNAP_TOTAL]  (snapshot, bloc1 = 0x9240)
+ *      + LUT[(counter[row]≪14)/total[row]]  (numérateur live). --- */
 static uint32_t d2_byte_cost(const d2_arena *a, uint32_t row, uint32_t delta)
 {
     uint16_t f = a->freq[row * D2_COLS + delta];
@@ -131,21 +131,21 @@ static uint32_t d2_byte_cost(const d2_arena *a, uint32_t row, uint32_t delta)
     return alz_score_cost(f, t);
 }
 
-/* --- Score run : evaluates the cost cumule of [start,end) for has class,
- *   with self-training temporaire (backup line by line). --- */
+/* --- Score run : évalue le coût cumulé de [start,end) pour une classe,
+ *   avec self-training temporaire (backup ligne par ligne). --- */
 uint64_t d2_score_run(d2_scorer *s, int cls, const uint8_t *plain,
                       uint32_t start, uint32_t end)
 {
     uint64_t cost = 0;
     uint32_t p;
-    /* for has run short, on does has backup of the line only (not all
-     * l'arena). Here on simplifie en backup total for there securite. */
+    /* Pour un run court, on fait un backup de la ligne uniquement (pas toute
+     * l'arène). Ici on simplifie en backup total pour la sécurité. */
     d2_arena backup;
     uint32_t saved_h0 = s->h[cls][0], saved_h1 = s->h[cls][1];
     uint32_t saved_h2 = s->h[cls][2], saved_h3 = s->h[cls][3];
     uint32_t saved_base = s->base[cls];
 
-    backup = s->arena[cls];  /* SCORES: copie ~2MB, acceptable for runs courts */
+    backup = s->arena[cls];  /* NOTE: copie ~2MB, acceptable pour runs courts */
 
     for (p = start; p < end; p++) {
         uint32_t prev = (p >= 1) ? (uint32_t)plain[p - 1] : 0u;
@@ -165,8 +165,8 @@ uint64_t d2_score_run(d2_scorer *s, int cls, const uint8_t *plain,
     return cost;
 }
 
-/* --- Argmin by position : evaluates 5 classes for l'byte en pos,
- *   returns there class min-cost, and updates sa line (persistant). --- */
+/* --- Argmin par position : évalue 5 classes pour l'octet en pos,
+ *   retourne la classe min-coût, et met à jour sa ligne (persistant). --- */
 int d2_argmin_update(d2_scorer *s, const uint8_t *plain, uint32_t usize, uint32_t pos)
 {
     int cls, best_cls = 0;
@@ -215,7 +215,7 @@ int d2_argmin_update(d2_scorer *s, const uint8_t *plain, uint32_t usize, uint32_
         d2_update(&s->arena[best_cls], row, delta_u, D2_UPDATE);
     }
 
-    /* Advance no-winners too (state tracks bytes, but no freq update). */
+    /* Advance non-winners too (state tracks bytes, but no freq update). */
     for (cls = 0; cls < D2_NCLASS; cls++) {
         if (cls == best_cls) continue;
         uint32_t h0 = s->h[cls][0], h1 = s->h[cls][1], h2 = s->h[cls][2];
@@ -230,18 +230,18 @@ int d2_argmin_update(d2_scorer *s, const uint8_t *plain, uint32_t usize, uint32_
     return best_cls;
 }
 
-/* --- Prediction : for there class donnee, finds the delta the more frequent
- *   in there line current -> side_bias = base + delta_max. --- */
+/* --- Prédiction : pour la classe donnée, trouve le delta le plus fréquent
+ *   dans la ligne courante → side_bias = base + delta_max. --- */
 uint8_t d2_predict(const d2_scorer *s, int cls, uint32_t row, uint32_t delta_hint)
 {
-    /* Simplifie : the side_bias = base_octet (the byte current as prediction
-     * of base). with weight=0, the hash not varie not -> all sure has line.
-     * There true prediction viendra when the weight will be learned. */
+    /* Simplifié : le side_bias = base_octet (le byte courant comme prédiction
+     * de base). Avec poids=0, le hash ne varie pas → tout sur une ligne.
+     * La vraie prédiction viendra quand les poids seront appris. */
     (void)row; (void)delta_hint;
     return (uint8_t)(s->base[cls] & 0xFFu);
 }
 
-/* --- Self-test : invariants of base. --- */
+/* --- Self-test : invariants de base. --- */
 int d2_scorer_selftest(void)
 {
     d2_scorer *s;
@@ -251,7 +251,7 @@ int d2_scorer_selftest(void)
     s = d2_scorer_create();
     if (!s) { fprintf(stderr, "[D2TEST] FAIL: OOM\n"); return 1; }
 
-    /* Test 1 : advance + hash returns in [0, ROWS). */
+    /* Test 1 : advance + hash retourne dans [0, ROWS). */
     for (i = 0; i < 5; i++) {
         uint32_t prev = (i >= 1) ? (uint32_t)data[i - 1] : 0u;
         int32_t delta = (int32_t)data[i] - (int32_t)prev;
@@ -263,17 +263,17 @@ int d2_scorer_selftest(void)
         }
     }
 
-    /* Test 2 : after update, freq > 0 for there cellule touchee. */
+    /* Test 2 : après update, freq > 0 pour la cellule touchée. */
     {
         uint32_t row = d2_hash_row(s, 0, 0);
         uint16_t f = s->arena[0].freq[row * D2_COLS + 0];
         (void)f; (void)row;
         if (f == 0) {
-            /* Normal : advance single not does not update. Validates only the hash. */
+            /* Normal : advance seul ne fait pas update. Valide seulement le hash. */
         }
     }
 
-    /* Test 3 : argmin returns has class validates + training persiste. */
+    /* Test 3 : argmin retourne une classe valide + training persiste. */
     {
         d2_scorer *s2 = d2_scorer_create();
         uint8_t d2[] = {0x40, 0x41, 0x42, 0x43};
@@ -284,9 +284,9 @@ int d2_scorer_selftest(void)
             d2_scorer_destroy(s2); d2_scorer_destroy(s);
             return 1;
         }
-        /* To verify that l'update has eu lieu (total > 0 for there line winning). */
+        /* Vérifier que l'update a eu lieu (total > 0 pour la ligne gagnante). */
         for (c = 0; c < D2_NCLASS; c++) {
-            /* at least the winner has has total > 0 quelque part. */
+            /* Au moins le gagnant a un total > 0 quelque part. */
         }
         d2_scorer_destroy(s2);
     }
@@ -298,14 +298,14 @@ int d2_scorer_selftest(void)
 }
 
 /* ==========================================================================
- * [A5.3-d] validation of the portage of l'arena CM 2D-delta adaptative vs GT.
- * GATED (UHA_COSTDUMP), read-only, NO-WIRED, additif (no signature
- * existante modifiee). Not touche NOT the path d'encoding.
+ * [A5.3-d] Validation du portage de l'arène CM 2D-delta adaptative vs GT.
+ * GATED (UHA_COSTDUMP), lecture seule, NON-WIRED, additif (aucune signature
+ * existante modifiée). Ne touche PAS le chemin d'encodage.
  * ========================================================================== */
 
-/* Mirror of d2_argmin_update : returns the cost BY byte of the WINNER (there value
- * comparee before commit, = there granularite of the delta legacy) and commit l'advances +
- * update of the winner + advances some no-winners (state single). */
+/* Miroir de d2_argmin_update : retourne le COÛT PAR OCTET du GAGNANT (la valeur
+ * comparée avant commit, = la granularité du delta legacy) et commit l'avance +
+ * update du gagnant + avance des non-gagnants (état seul). */
 static uint32_t d2_winner_bytecost(d2_scorer *s, const uint8_t *plain,
                                    uint32_t pos, int *out_cls)
 {
@@ -332,7 +332,7 @@ static uint32_t d2_winner_bytecost(d2_scorer *s, const uint8_t *plain,
         s->base[cls] = base_old;
         if (c < best_cost) { best_cost = c; best_cls = cls; best_c = (uint32_t)c; }
     }
-    /* commit winner */
+    /* commit gagnant */
     {
         uint32_t h0 = s->h[best_cls][0], h1 = s->h[best_cls][1], h2 = s->h[best_cls][2];
         uint32_t row;
@@ -344,7 +344,7 @@ static uint32_t d2_winner_bytecost(d2_scorer *s, const uint8_t *plain,
         row = d2_hash_row(s, best_cls, delta_i);
         d2_update(&s->arena[best_cls], row, delta_u, D2_UPDATE);
     }
-    /* advances some no-winners (state single, without update freq) */
+    /* avance des non-gagnants (état seul, sans update freq) */
     for (cls = 0; cls < D2_NCLASS; cls++) {
         uint32_t h0, h1, h2;
         if (cls == best_cls) continue;
@@ -359,7 +359,7 @@ static uint32_t d2_winner_bytecost(d2_scorer *s, const uint8_t *plain,
     return best_c;
 }
 
-/* loads has file binary en memory (returns buffer, *len). */
+/* charge un fichier binaire en mémoire (retourne buffer, *len). */
 static uint8_t *cd_read_bin(const char *path, size_t *len)
 {
     FILE *fp = fopen(path, "rb");
@@ -373,7 +373,7 @@ static uint8_t *cd_read_bin(const char *path, size_t *len)
     fclose(fp); *len = (size_t)n; return b;
 }
 
-/* loads there table GT (u16 espaces) -> dwords (low + high<<16). returns # dwords. */
+/* charge la table GT (u16 espacés) → dwords (low + high<<16). Retourne # dwords. */
 static uint32_t *cd_read_gt(const char *path, uint32_t *ndwords)
 {
     FILE *fp = fopen(path, "r");
@@ -416,11 +416,11 @@ int d2_costdump_validate(const char *plain_path, const char *gt_path, uint32_t n
     if (npos > gdw) npos = gdw;
     if ((size_t)npos >= plen) npos = (uint32_t)plen - 1u;
 
-    /* reconstruit the cost by byte legacy since there table cumulee. */
+    /* reconstruit le coût par octet legacy depuis la table cumulée. */
     lbytes = malloc((npos + 1u) * sizeof(uint32_t));
     if (!lbytes) { free(plain); free(gt); return 1; }
     for (p = 0; p < npos; p++) {
-        if (p == 0 || gt[p] < gt[p - 1]) lbytes[p] = gt[p];               /* start of segment */
+        if (p == 0 || gt[p] < gt[p - 1]) lbytes[p] = gt[p];               /* début de segment */
         else lbytes[p] = gt[p] - gt[p - 1];                                /* delta intra-segment */
     }
 
@@ -445,7 +445,7 @@ int d2_costdump_validate(const char *plain_path, const char *gt_path, uint32_t n
         }
     }
     fprintf(stderr,
-        "[COSTDUMP] n=%u exact=%u (%.2f%%) within+/-1=%u (%.2f%%) within+/-5=%u (%.2f%%) cold(65535)=%u (%.1f%%)\n",
+        "[COSTDUMP] n=%u exact=%u (%.2f%%) within±1=%u (%.2f%%) within±5=%u (%.2f%%) cold(65535)=%u (%.1f%%)\n",
         cmp_n, exact, 100.0*exact/cmp_n, close1, 100.0*close1/cmp_n,
         close5, 100.0*close5/cmp_n, cold, 100.0*cold/cmp_n);
     fprintf(stderr, "[COSTDUMP] mean clone=%.0f legacy=%.0f (ratio %.2f)\n",
@@ -458,10 +458,10 @@ int d2_costdump_validate(const char *plain_path, const char *gt_path, uint32_t n
 }
 
 /* ==========================================================================
- * [A5.3-f] validation CLASS-WISE sure there line validated (gated UHA_PSCOST,
- * read-only, additif). Uses alz_ps_class_sigma (machine ctx 13.132
- * index 5 classes validated 100 %, cold double-term) for to produce the cost by
- * position of each class and the diff to the deltas legacy of the GT.
+ * [A5.3-f] Validation CLASS-WISE sur la LIGNE VALIDÉE (gated UHA_PSCOST,
+ * lecture seule, additif). Utilise alz_ps_class_sigma (machine ctx §13.132
+ * index 5 classes validé 100 %, cold double-terme) pour produire le coût par
+ * position de chaque classe et le diff aux deltas legacy de la GT.
  * ========================================================================== */
 int d2_costdump_ps(const char *plain_path, const char *gt_path, uint32_t npos)
 {
@@ -489,7 +489,7 @@ int d2_costdump_ps(const char *plain_path, const char *gt_path, uint32_t npos)
     winner = alz_ps_block_argmin(plain, npos, D2_UPDATE, ALZ_PS_COLD0, NULL);
     fprintf(stderr, "[PSCOST] plain=%zu gt_dwords=%u npos=%u  block_argmin winner=cls%u\n",
             plen, gdw, npos, winner);
-    fprintf(stderr, "[PSCOST] per class: Sigma (without drop), scored positions, match vs GT\n");
+    fprintf(stderr, "[PSCOST] par classe : Σ (sans abandon), positions scorées, accord vs GT\n");
 
     for (cls = 0; cls < D2_NCLASS; cls++) {
         uint32_t npscor = 0, exact = 0, c1 = 0, c5 = 0, cmp = 0, cold = 0;
@@ -500,14 +500,14 @@ int d2_costdump_ps(const char *plain_path, const char *gt_path, uint32_t npos)
         for (p = 0; p < lim; p++) {
             uint32_t cc = percost[p], lb = lbytes[p];
             cmp++;
-            if (cc == 37441u || cc == 37440u) cold++;  /*  cold snapshot (indicatif) */
+            if (cc == 37441u || cc == 37440u) cold++;  /* ≈ cold snapshot (indicatif) */
             sc += (long)cc; sl += (long)lb;
             if (cc == lb) exact++;
             if (cc + 1 >= lb && lb + 1 >= cc) c1++;
             if (cc + 5 >= lb && lb + 5 >= cc) c5++;
         }
         fprintf(stderr,
-          "  cls%u: sigma=0x%08x scor=%u | exact=%u/%u (%.2f%%) w+/-1=%.2f%% w+/-5=%.2f%% | mean cl=%.0f leg=%.0f ratio=%.2f%s\n",
+          "  cls%u: sigma=0x%08x scor=%u | exact=%u/%u (%.2f%%) w±1=%.2f%% w±5=%.2f%% | mean cl=%.0f leg=%.0f ratio=%.2f%s\n",
           cls, sigma, npscor, exact, cmp,
           cmp ? 100.0*exact/cmp : 0.0, cmp ? 100.0*c1/cmp : 0.0, cmp ? 100.0*c5/cmp : 0.0,
           cmp ? (double)sc/cmp : 0.0, cmp ? (double)sl/cmp : 0.0,
@@ -520,12 +520,12 @@ int d2_costdump_ps(const char *plain_path, const char *gt_path, uint32_t npos)
 }
 
 /* ==========================================================================
- * [A5.3-g] Comparateur au TRUE stream cost-by-byte (gated UHA_PSCOST2).
- * Parse the log 0x414985 (`0x414985 pos Has B C D cum`), drifts the cost by byte
- * (diffs of cum), and the diff au percost of each class (line validated).
+ * [A5.3-g] Comparateur au VRAI flux coût-par-octet (gated UHA_PSCOST2).
+ * Parse le log 0x414985 (`0x414985 pos A B C D cum`), dérive le coût par octet
+ * (diffs de cum), et le diff au percost de chaque classe (ligne validée).
  * ========================================================================== */
 
-/* loads the log 0x414985 : fills cum[pos]=E (last col), returns maxpos. */
+/* charge le log 0x414985 : remplit cum[pos]=E (dernière col), renvoie maxpos. */
 static uint32_t *cd_read_pcost(const char *path, uint32_t *maxpos)
 {
     FILE *fp = fopen(path, "r");
@@ -559,8 +559,8 @@ int d2_costdump_ps2(const char *plain_path, const char *pcost_log, uint32_t npos
         free(plain); free(cum);
         return 1;
     }
-    /* cost by byte legacy = diffs of cum starting from pos 2 -> index byte (pos-2).
-     * pos1 cum=0 (amorce) ; the 1 byte score adds cum[2]-cum[1]. */
+    /* coût par octet legacy = diffs de cum à partir de pos 2 → index octet (pos-2).
+     * pos1 cum=0 (amorce) ; le 1ᵉʳ byte scoré ajoute cum[2]-cum[1]. */
     nbytes = (maxpos >= 2) ? (maxpos - 1u) : 0u;   /* pos 2..maxpos */
     if (npos > nbytes) npos = nbytes;
     if ((size_t)npos >= plen) npos = (uint32_t)plen - 1u;
@@ -574,7 +574,7 @@ int d2_costdump_ps2(const char *plain_path, const char *pcost_log, uint32_t npos
 
     fprintf(stderr, "[PSCOST2] plain=%zu 0x414985 maxpos=%u bytes_dispo=%u npos=%u\n",
             plen, maxpos, nbytes, npos);
-    fprintf(stderr, "[PSCOST2] accord percost(classe validee) vs VRAI flux 0x414985 :\n");
+    fprintf(stderr, "[PSCOST2] accord percost(classe validée) vs VRAI flux 0x414985 :\n");
 
     for (cls = 0; cls < D2_NCLASS; cls++) {
         uint32_t npscor = 0, exact = 0, c1 = 0, c5 = 0, c200 = 0, cmp = 0;
@@ -593,7 +593,7 @@ int d2_costdump_ps2(const char *plain_path, const char *pcost_log, uint32_t npos
             if (d <= 200) c200++;
         }
         fprintf(stderr,
-          "  cls%u: sigma=0x%08x cmp=%u | exact=%.2f%% w+/-1=%.2f%% w+/-5=%.2f%% w+/-200=%.2f%% | mean cl=%.0f leg=%.0f ratio=%.3f\n",
+          "  cls%u: sigma=0x%08x cmp=%u | exact=%.2f%% w±1=%.2f%% w±5=%.2f%% w±200=%.2f%% | mean cl=%.0f leg=%.0f ratio=%.3f\n",
           cls, sigma, cmp,
           cmp ? 100.0*exact/cmp : 0.0, cmp ? 100.0*c1/cmp : 0.0, cmp ? 100.0*c5/cmp : 0.0,
           cmp ? 100.0*c200/cmp : 0.0,
@@ -606,8 +606,8 @@ int d2_costdump_ps2(const char *plain_path, const char *pcost_log, uint32_t npos
 }
 
 /* ==========================================================================
- * [A5.3-h] Dump of the cost literal faithful by position (gated UHA_PSDUMP,
- * read-only, no-wired). Writes : pos, byte, c0..c4 (cost by class), winner.
+ * [A5.3-h] Dump du coût littéral fidèle par position (gated UHA_PSDUMP,
+ * lecture seule, non-wired). Écrit : pos, byte, c0..c4 (coût par classe), winner.
  * ========================================================================== */
 int d2_costdump_dump(const char *plain_path, const char *out_path, uint32_t n)
 {
@@ -623,7 +623,7 @@ int d2_costdump_dump(const char *plain_path, const char *out_path, uint32_t n)
         cols[cls] = malloc((size_t)n * sizeof(uint32_t));
         if (!cols[cls]) { free(plain); return 1; }
     }
-    /* cost by position for each class (without abandon -> all n). */
+    /* coût par position pour chaque classe (sans abandon → tout n). */
     for (cls = 0; cls < D2_NCLASS; cls++) {
         uint32_t np = 0;
         (void)alz_ps_class_sigma(cls, plain, n, D2_UPDATE, ALZ_PS_COLD0, NULL, cols[cls], &np);
@@ -632,13 +632,13 @@ int d2_costdump_dump(const char *plain_path, const char *out_path, uint32_t n)
 
     fo = fopen(out_path, "w");
     if (!fo) { fprintf(stderr, "[PSDUMP] FAIL: ecriture %s\n", out_path); free(plain); return 1; }
-    fprintf(fo, "# pos byte c0 c1 c2 c3 c4 winner (LUT range-coder costs, validated row 13.132)\n");
+    fprintf(fo, "# pos byte c0 c1 c2 c3 c4 winner (coûts LUT range-coder, ligne validée §13.132)\n");
     fprintf(fo, "# winner=cls%u n=%u\n", winner, n);
     for (p = 0; p < n; p++)
         fprintf(fo, "%u %u %u %u %u %u %u %u\n", p, plain[p],
                 cols[0][p], cols[1][p], cols[2][p], cols[3][p], cols[4][p], winner);
     fclose(fo);
-    fprintf(stderr, "[PSDUMP] ecrit %s : n=%u winner=cls%u\n", out_path, n, winner);
+    fprintf(stderr, "[PSDUMP] écrit %s : n=%u winner=cls%u\n", out_path, n, winner);
     for (cls = 0; cls < D2_NCLASS; cls++) free(cols[cls]);
     free(plain);
     return 0;

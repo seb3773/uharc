@@ -12,12 +12,12 @@ void alz_state_reset(alz_state *s)
         s->slot_hash[i] = 0xFFFFFFFFu;
         s->slot_dir[i] = 0;
     }
-    /* t15d - fidelite strict UHARC (cause root t14f) : the stream reels
-     * initialisent recent_distance[] has 0 ; all gap (ex. init has 1 +
-     * normalisations 0->1) does diverger enc/dec sure has slot never tourne.
-     * Has slot has 0 n'is never candidate (alz_find_match) and not peut therefore
-     * never to be emits ; the decodeur not rencontrera 0 that if the stream en
-     * emits has (the notre n'en emettra never). */
+    /* t15d — fidelite stricte UHARC (cause racine t14f) : les flux reels
+     * initialisent recent_distance[] a 0 ; tout ecart (ex. init a 1 +
+     * normalisations 0->1) fait diverger enc/dec sur un slot jamais tourne.
+     * Un slot a 0 n'est jamais candidate (alz_find_match) et ne peut donc
+     * jamais etre emet ; le decodeur ne rencontrera 0 que si le flux en
+     * emet un (le notre n'en emettra jamais). */
     for (i = 0; i < ALZ_MAX_RECENT; i++)
         s->recent_distance[i] = 0;
 }
