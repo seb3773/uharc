@@ -226,6 +226,7 @@ void ppm_read_block_header(ppm_model *m, uha_rc *r);
 void ppm_write_block_header(ppm_model *m, uha_rcw *w);
 int  ppm_block_reset(ppm_model *m, uha_rc *r);
 int  ppm_block_reset_encode(ppm_model *m);
+void ppm_block_reset_tables(ppm_model *m);
 void ppm_promote_to_bc1(ppm_model *m);
 int  ppm_select_class(ppm_model *m, int cls);
 

@@ -143,14 +143,8 @@ static void token_class_update(alz_dec *d, int class_index, int result,
      * le symbole 0 n'est PAS un cas « sans mise a jour » (C[1] reste fixe = 1).
      * Defaut-OFF = comportement historique (retour anticipe sur 0). */
     first = result + 1;
-    if (result == 0) {
-        static int s_tcup0 = -1;
-        if (s_tcup0 < 0)
-            s_tcup0 = getenv("UHA_A3_TCUP0") ? 1 : 0;
-        if (!s_tcup0)
-            return;
-        first = 2;
-    }
+    if (result == 0)
+        return;
     for (i = first; i <= 4; i++)
         d->token_class[class_index][i] =
             (uint16_t)((uint32_t)d->token_class[class_index][i] + 88);
@@ -173,27 +167,6 @@ static void token_class_update(alz_dec *d, int class_index, int result,
             (uint16_t)((uint32_t)d->token_class[class_index][3] + freq[3]);
         d->token_class[class_index][5] =
             (uint16_t)((uint32_t)d->token_class[class_index][4] + freq[4]);
-    }
-    /* [A3 TCDUMP, GATED `UHA_A3_TCDUMP=<fichier>`, DEFAUT-OFF, LECTURE SEULE]
-     * Journalise CHAQUE mise a jour du modele de classe (pos, contexte, symbole,
-     * total, rescale) pour comparer deux chemins d'encodage (oracle vs reel) et
-     * localiser la premiere divergence de l'etat du modele. Aucun effet sinon. */
-    {
-        static FILE *s_tcd = NULL;
-        static int s_tcd_init = -1;
-        if (s_tcd_init < 0) {
-            const char *e = getenv("UHA_A3_TCDUMP");
-            s_tcd_init = 0;
-            if (e && *e) {
-                s_tcd = fopen(e, "w");
-                if (s_tcd)
-                    fprintf(s_tcd, "pos\tctx\tresult\tC5\n");
-            }
-        }
-        if (s_tcd)
-            fprintf(s_tcd, "%u\t%d\t%d\t%u\n",
-                    (unsigned)d->st.output_pos, class_index, result,
-                    (unsigned)d->token_class[class_index][5]);
     }
     if (probed)
         update_token_history(d, hist_key, result);
@@ -322,48 +295,7 @@ void alz_handle_escape(alz_dec *d)
     selector = (int)uha_rc_uniform(&d->rc, 11);
     if (d->rc.corrupt)
         return;
-    /* [A3 ESCDBG, gated UHA_A3_ESCDBG, lecture seule] Etat AVANT application du
-     * nouveau selecteur : le decodeur est bit-exact sur le legacy, donc cet
-     * etat est celui de l'encodeur legacy a l'instant ou il a EMIS l'escape.
-     * Sert a identifier la quantite qui declenche un escape hors frontiere. */
-    static int s_escdbg = -1;
-    if (s_escdbg < 0)
-        s_escdbg = getenv("UHA_A3_ESCDBG") ? 1 : 0;
-    if (s_escdbg) {
-        int c;
-        uint64_t s300 = 0, sx = 0;
-        uint32_t mx = 0;
-        for (c = 0; c < 0x300; c++) {
-            s300 += d->bm_tree[c][0];
-            if (d->bm_tree[c][0] > mx) mx = d->bm_tree[c][0];
-        }
-        for (c = 0x300; c < 0x420; c++) sx += d->bm_tree[c][0];
-        extern int g_a3_esc_src;
-        fprintf(stderr, "[ESCDBG] src=%d pos=%u prev_sel=%u req=%d rcpos=%zu bm300=%llu bmx=%llu bmmax=%u litmode=%u emf=%u | 3E1=%u 3E5=%u 3E0=%u 3E8=%u\n",
-                g_a3_esc_src,
-                (unsigned)d->st.output_pos, (unsigned)d->st.escape_selector, selector,
-                (size_t)d->rc.rd.pos, (unsigned long long)s300, (unsigned long long)sx,
-                mx, (unsigned)d->st.literal_mode, (unsigned)d->st.escape_model_flag,
-                (unsigned)d->bm_tree[0x3E1][0], (unsigned)d->bm_tree[0x3E5][0],
-                (unsigned)d->bm_tree[0x3E0][0], (unsigned)d->bm_tree[0x3E8][0]);
-        fflush(stderr);
-    }
     alz_apply_escape(d, selector);
-    /* [RE A cm-map] Sonde gated lecture-seule : en decodant une archive LEGACY
-     * (notre decodeur est bit-exact), releve le VERITABLE escape_selector et
-     * les parametres side que le legacy a choisis (ground-truth sans oracle
-     * runtime). Gated UHA_SIDEDBG, aucun effet sur l'emission. */
-    static int s_sidedbg = -1;
-    if (s_sidedbg < 0)
-        s_sidedbg = getenv("UHA_SIDEDBG") ? 1 : 0;
-    if (s_sidedbg) {
-        fprintf(stderr,
-            "[SIDE] pos=%u req_sel=%d -> sel=%u prim=%u secbase=0x%X litbias=%d chg=%d\n",
-            d->st.output_pos, selector, (unsigned)d->st.escape_selector,
-            (unsigned)d->st.side_primary, (unsigned)d->st.side_secondary,
-            (int)d->st.escape_literal_bias, (int)d->st.escape_changed);
-        fflush(stderr);
-    }
 }
 
 int alz_encode_escape(alz_dec *d, int selector)

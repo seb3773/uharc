@@ -6,50 +6,6 @@
 /* [M90] tag of route of the learn (defini in ppm_update.c) ; set at the input of each post. */
 extern int g_upd_route;
 
-/* [GATED UHA_ROWAUD, defautOFF, M207] histogramme some rows REELLEMENT updates
- * (entry_dec = row of the update principal, shadow_ctx = row of the update shadow), bounded
- * has out_count < 305441 for couvrir l'instant GT pos = 305 440. No emissif by default. */
-static uint32_t (*s_rowaud)[2] = NULL;
-static int s_rowaud_on = -1;
-static uint32_t s_rowaud_wpf[2];
-static uint32_t *s_braud = NULL;
-static uint32_t s_rank[8];
-static uint32_t s_rank2[8];
-static uint32_t *s_brf0 = NULL;
-static void s_rowaud_dump(void)
-{
-    int i;
-    uint32_t band = 0, bandn = 0;
-    if (s_rowaud_on <= 0 || !s_rowaud || !s_braud || !s_brf0)
-        return;
-    for (i = 0; i < 1024; i++) {
-        if (!s_rowaud[i][0] && !s_rowaud[i][1])
-            continue;
-        if (i <= 0x1FF) {
-            band += s_rowaud[i][0];
-            bandn++;
-            continue;
-        }
-        fprintf(stderr, "[ROWAUD] row=%d (0x%x) entry=%u shadow=%u\n",
-                i, i, s_rowaud[i][0], s_rowaud[i][1]);
-    }
-    fprintf(stderr, "[ROWAUD] band0..0x1FF: entry=%u over %u rows | wp_fired=0:%u 1:%u\n",
-            band, bandn, s_rowaud_wpf[0], s_rowaud_wpf[1]);
-    fprintf(stderr, "[ROWAUD] br18: ");
-    for (i = 0; i < 512; i++)
-        if (s_braud[i])
-            fprintf(stderr, "%d:%u ", i, s_braud[i]);
-    fprintf(stderr, "\n[ROWAUD] brf0: ");
-    for (i = 0; i < 512; i++)
-        if (s_brf0[i])
-            fprintf(stderr, "%d:%u ", i, s_brf0[i]);
-    fprintf(stderr, "\n[ROWAUD] rang: 0:%u 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u 7:%u\n",
-            s_rank[0], s_rank[1], s_rank[2], s_rank[3],
-            s_rank[4], s_rank[5], s_rank[6], s_rank[7]);
-    fprintf(stderr, "[ROWAUD] rang BLOC2 (45337..305696): 0:%u 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u 7:%u\n",
-            s_rank2[0], s_rank2[1], s_rank2[2], s_rank2[3],
-            s_rank2[4], s_rank2[5], s_rank2[6], s_rank2[7]);
-}
 
 int ppm_ctx_resolution(const ppm_model *m)
 {
@@ -107,17 +63,7 @@ static void put_window(ppm_model *m, int sym)
     m->window[wp] = (uint8_t)(sym & 0xFF);
     if (wp < 0x100)
         m->window[wp + m->win_wrap] = (uint8_t)(sym & 0xFF);
-    /* [M208b GATED UHA_SYMFILE, default-OFF] dump of the stream of SYMBOLES reellement writes in there
-     * window (decoder = stream legacy, encoder = syms) : cmp binary some two = judge of the stream
-     * transforme, independant some decisions of parse. */
-    { static FILE *sf = NULL; static int sfi = -1;
-      if (sfi < 0) {
-          const char *e = getenv("UHA_SYMFILE");
-          sfi = 0;
-          if (e && e[0] != '0') { sf = fopen(e, "wb"); sfi = sf ? 1 : 0; }
-      }
-      if (sfi == 1 && sf)
-          fputc(sym & 0xFF, sf); } }
+}
 
 static void advance_win(ppm_model *m)
 {
@@ -141,17 +87,8 @@ static void cls_delta_update(ppm_model *m, int sym)
     delta = (uint8_t)((uint8_t)sym - m->cls_base);
     if (m->cls_neg != 0)
         delta = (uint8_t)(-(int8_t)delta);
-    /* [M279, UHA_NODELTANEG, PROMU default 1, SCAN ONLY] RE-TOGGLES OF THE FLAG. The port
-     * basculait `cls_neg` has SECONDE fois here when `delta >= 0x80`, then that the flag has already
-     * ete toggles by the scan (`0x42306e`) and that l'ASM `0x4232a0` the RECHARGE since there liste
-     * predite (`0x42346c mov [0x483932],cl`) without the re-tester. Effet measures : the port rendait
-     * `flag_entrant(89) = 1` and `sym(89) = 169` au lieu of `0` and `87` (GT M279 :
-     * `flag_sortant[83..92] = [1,1,1,1,1,0,0,0,0,1]`).  Not s'applies THAT in the scan :
-     * appliquee au codec reel, elle does tomber `firstdiv` has 1291. `=0` restores l'historique. */
-    { static int nd = -1;
-      if (nd < 0) { const char *e = getenv("UHA_NODELTANEG"); nd = (e && e[0] == '0') ? 0 : 1; }
-      if (!(nd && ppm_scan_ctx) && delta >= 0x80)
-          m->cls_neg = (uint8_t)(m->cls_neg == 0); }
+    if (!ppm_scan_ctx && delta >= 0x80)
+        m->cls_neg = (uint8_t)(m->cls_neg == 0);
     switch (m->flag3934) {
     case 1:
         m->cls_ctx = 0x209 + ((uint32_t)CLS_T6CC[(m->cls_ctx - 0x209) & 0xF] << 4)
@@ -290,12 +227,6 @@ void ppm_match_maintain(ppm_model *m, int sym, int dl, uint8_t *outp, int *outle
 {
     emit_detransformed(m, sym, outp, outlen);
     ppm_post_symbol_maintenance(m, sym, dl);
-    /* [M216 GATED UHA_MATCHREC, default-OFF] the legacy engine calls-t-il `rec_globals` (jumeau B) sure there
-     * END of has match (`dl != 0`) ? gap measured : B=655 vs nos 372 `rec2` + 176 light = 548 ;
-     * il manque ~107  the number of matches of the range (113). */
-    { static int mr = -1;
-      if (mr < 0) { const char *e = getenv("UHA_MATCHREC"); mr = (e && e[0] != '0') ? 1 : 0; }
-      if (mr && dl) ppm_rec_globals_pub(m); }
     put_window(m, sym);
     advance_win(m);
 }
@@ -339,9 +270,6 @@ void ppm_emit_and_maintain(ppm_model *m, int sym, uint8_t *outp, int *outlen,
     s47 = record_s47;
     if (s47 < 0)
         s47 = 0;
-    { static int f2 = -1;
-      if (f2 < 0) { const char *e = getenv("UHA_REC2FORCE"); f2 = (e && e[0] != '0') ? 1 : 0; }
-      if (f2) rec2_update = 1; }
     if (rec2_update && rec2_before) {
         if (light)
             ppm_rec2_apply_light(m, sym);
@@ -458,70 +386,12 @@ void ppm_c550_post(ppm_model *m, int ctx, int sym, int kctx,
     (void)eb;
     (void)kctx;
 
-    if (s_rowaud_on < 0) {
-        const char *e = getenv("UHA_ROWAUD");
-        s_rowaud_on = (e && e[0] != '0') ? 1 : 0;
-        if (s_rowaud_on) {
-            s_rowaud = (uint32_t (*)[2])calloc(1024u * 2u, sizeof(uint32_t));
-            s_braud = (uint32_t *)calloc(512u, sizeof(uint32_t));
-            s_brf0 = (uint32_t *)calloc(512u, sizeof(uint32_t));
-            if (!s_rowaud || !s_braud || !s_brf0)
-                s_rowaud_on = 0;
-            else
-                atexit(s_rowaud_dump);
-        }
-    }
-    if (s_rowaud_on > 0 && m->out_count < 305441) {
-        s_rowaud[entry_dec & 1023][0]++;
-        s_rowaud[shadow_ctx & 1023][1]++;
-        s_rowaud_wpf[wp_fired ? 1 : 0]++;
-        if (m->br18 < 512)
-            s_braud[m->br18]++;
-        if (m->brf0 < 512)
-            s_brf0[m->brf0]++;
-        {
-            int dl = ((int)m->window[(m->win_pos - m->br18) & m->win_mask]
-                - (int)m->window[(m->win_pos - 2 * m->br18) & m->win_mask]) & 0xFF;
-            s_rank[PPMS_43B2CC[dl] & 7]++;
-            if (m->out_count >= 45337u && m->out_count < 305696u)
-                s_rank2[PPMS_43B2CC[dl] & 7]++;
-        }
-        /* [GATED UHA_ROWAUD, M207] controle byte has byte of the window to the 8 frontiers GT.
-         * Declenchement sure `win_pos` (key robuste : identical au master), not sure `out_count`
-         * (has match peut enjamber there position exact). */
-        {
-            static const uint32_t bw[8] = { 0u, 83778u, 344137u, 544137u,
-                                            736137u, 856137u, 976137u, 1109444u };
-            int bi;
-            for (bi = 0; bi < 8; bi++) {
-                if (m->win_pos != bw[bi])
-                    continue;
-                fprintf(stderr, "[WINCHK] k=%d pos=%u winpos=%u s=%u brf0=%u br14=%u bc=%u cls=%u clsctx=%d"
-                        " w1=%u w2=%u w4=%u w12=%u w24=%u w48=%u\n",
-                        bi, m->out_count, m->win_pos, m->br18, m->brf0, m->br14,
-                        (unsigned)m->byte_class, (unsigned)m->flag3934, m->cls_ctx,
-                        (unsigned)m->window[(m->win_pos - 1) & m->win_mask],
-                        (unsigned)m->window[(m->win_pos - 2) & m->win_mask],
-                        (unsigned)m->window[(m->win_pos - 4) & m->win_mask],
-                        (unsigned)m->window[(m->win_pos - 12) & m->win_mask],
-                        (unsigned)m->window[(m->win_pos - 24) & m->win_mask],
-                        (unsigned)m->window[(m->win_pos - 48) & m->win_mask]);
-            }
-        }
-    }
-
     if (sse2_up_idx >= 0) {
         v = m->sse2[sse2_up_idx];
         m->sse2[sse2_up_idx] = (v + ((0x2000 - v) >> 6)) & PPM_M32;
     }
 
     path = c550_select_path(m);
-    /* [GATED UHA_BECDBG, default-OFF, M162] bec/path by node : date l'gap of
-     * `m->age` (mixed.bin) which does to toggle there path Has of the c550. */
-    { static int bd = -1;
-      if (bd < 0) { const char *e = getenv("UHA_BECDBG"); bd = (e && e[0] != '0') ? 1 : 0; }
-      if (bd) fprintf(stderr, "[BEC] pos=%u sym=%d path=%c entry=%d age=%u bec=%u\n",
-                      m->out_count, sym, path, entry_dec, m->age, m->bec); }
 
     if (m->flag3943 != 0) {
         if (path == 'A')
@@ -534,16 +404,6 @@ void ppm_c550_post(ppm_model *m, int ctx, int sym, int kctx,
         m->work_ctx = taken_wc;
         d_entry = ppm_d390_update(m, entry_dec, taken_sym);
         apply_sse_write(m, &d_entry);
-        /* [GATED UHA_D390DBG, default-OFF, M163] decomposition of the `bec` en path Has sure has
-         * window of positions (the `bec` commite pilote l'ring d'age -> path Has c550). */
-        { static int dd = -1; static long lo = -1, hi = -1;
-          if (dd < 0) { const char *e = getenv("UHA_D390DBG"); dd = (e && e[0] != '0') ? 1 : 0;
-                        if (e) { const char *p = strchr(e, ':'); if (p) { lo = atol(p + 1); hi = (strchr(p + 1, '-')) ? atol(strchr(p + 1, '-') + 1) : lo + 1; } } }
-          if (dd && (lo < 0 || ((long)m->out_count >= lo && (long)m->out_count <= hi)))
-              fprintf(stderr, "[D390] pos=%u ctx=%d sym=%d acc=%u wt=%u tot=%u fsym=%u pb=%u\n",
-                      m->out_count, entry_dec, taken_sym, d_entry.acc_add,
-                      m->ent_wt[entry_dec], m->cum[entry_dec][0],
-                      m->freq[entry_dec][taken_sym & 0xFF], m->pred_byte[entry_dec]); }
         m->bec = d_entry.acc_add;
         ppm_recency_update(m->rec_b, flag, d_entry.acc_add);
         ppm_recency_update(m->rec_a, flag, d_entry.acc_add);
@@ -602,11 +462,6 @@ void ppm_c550_post(ppm_model *m, int ctx, int sym, int kctx,
     }
 
     ppm_agering_commit(m, age_idx, bec_age);
-    /* [GATED UHA_BECDBG, default-OFF, M162] bec COMMITE and age resultant by node. */
-    { static int bd2 = -1;
-      if (bd2 < 0) { const char *e = getenv("UHA_BECDBG"); bd2 = (e && e[0] != '0') ? 1 : 0; }
-      if (bd2) fprintf(stderr, "[BEC2] pos=%u idx=%d bec=%u age=%u\n",
-                      m->out_count, age_idx, bec_age, m->age); }
 
     if (wp_fired) {
         for (wp_i = 0; wp_i < m->nexcl; wp_i++) {
@@ -653,22 +508,6 @@ void ppm_c550_post(ppm_model *m, int ctx, int sym, int kctx,
         if (old_s49 == 0)
             m->s49 = old_s49;
     }
-
-    /* [GATED UHA_RANKD, defautOFF, M207] diagnostic : now vont the literals of rank 1/2/3/5/6
-     * of the block 2 (ils existent - 918 measurements - but n'atteignent no row 0x202..0x207).
-     * 20 occurrences max, no emissif by default. */
-    { static int rd = -1; static int nrd = 0;
-      if (rd < 0) { const char *e = getenv("UHA_RANKD"); rd = (e && e[0] != '0') ? 1 : 0; }
-      if (rd && nrd < 24 && m->br18 > 4u && m->out_count >= 45337u && m->out_count < 150000u) {
-          int rk = (int)(PPMS_43B2CC[wp_delta & 0xFF] & 7);
-          if (rk != 0 && rk != 4 && rk != 7) {
-              fprintf(stderr, "[RANKD] pos=%u rk=%d wpfired=%d classsel=%d path=%c"
-                      " entry=%d shadow=%d taken_wc=%d sym=%d\n",
-                      m->out_count, rk, wp_fired, (int)m->wp_class_selected, path,
-                      entry_dec, shadow_ctx, taken_wc, taken_sym);
-              nrd++;
-          }
-      } }
 
     if (path == 'C' || path == 'A') {
         m->work_ctx = taken_wc;

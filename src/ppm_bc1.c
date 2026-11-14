@@ -191,15 +191,6 @@ void ppm_bc1_ring_masses(const uint32_t *w, const uint8_t *y, uint32_t *m0, uint
         else
             *m0 += w[i];
     }
-    /* [GATED UHA_BC1DBG, default-OFF, M164] masses of the ring bc1 by call : the 2 lectures
-     * `(x,x+1)` sure total 256 of l'archive legacy @pos=34748 are has ring bc1 (m0+m1=256).
-     * `n` = numero d'call (1 by node literal) : has correler with there trace `[TR2 dec]`.
-     * (no `m` here : there function not recoit that w/y). */
-    { static int b1 = -1; static unsigned long n = 0;
-      if (b1 < 0) { const char *e = getenv("UHA_BC1DBG"); b1 = (e && e[0] != '0') ? 1 : 0; }
-      if (b1) fprintf(stderr, "[BC1] n=%lu rp=%d c0=%u c1=%u m0=%u m1=%u tot=%u\n",
-                      n++, ppm_bc1_st.ring_ptr, ppm_bc1_st.best_c0,
-                      ppm_bc1_st.best_c1, *m0, *m1, *m0 + *m1); }
 }
 
 int ppm_bc1_ring_decode(uha_rc *r, uint32_t m0, uint32_t m1)

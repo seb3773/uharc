@@ -4,7 +4,7 @@ Pure C99 standalone reimplementation of the legendary **UHARC 0.6b archiver** (1
 
 > **Reverse Engineering & Legal Notice:** This work was conducted strictly for the purposes of software interoperability and digital data preservation (under European Directive 2009/24/EC) to reconstruct the proprietary compression algorithms, container format, and transformations of an obsolete 32-bit DOS/Windows archiver.
 
-This repository provides a complete, self-contained C99 implementation (standard C library + `-lm`, zero external third-party dependencies) combining both **compressor** (`uharc a` / `uharc m`) and **decompressor** (`uharc x` / `uharc e`) into a single unified binary (`uharc`). It achieves **100% bit-exact decompression** across all **89 + 4 extra** reference archives, **72 / 72** bit-identical mono-file encoding parity (`arc[39..]`) against historical `UHARC.EXE` 0.6b, bit-exact parity on feature options (`-md*`, `-mm-`, `-p-`, `-pr`, `-pw`/`-ph+`), and `0`-payload-diff solid multi-file encoding on `-m0`, `-mz`, and `-mx`.
+This repository provides a complete, self-contained C99 implementation (standard C library + `-lm`, zero external third-party dependencies) combining both **compressor** (`uharc a` / `uharc m`) and **decompressor** (`uharc x` / `uharc e`) into a single unified binary (`uharc`), designed for **bidirectional bit-exact compatibility** with the original historical Windows x86 binary (`UHARC.EXE` 0.6b).
 
 ---
 
@@ -43,22 +43,22 @@ Because UHARC 0.6b was distributed exclusively as closed-source 32-bit x86 Windo
 
 ## Highlights
 
-- **High-Fidelity Parity with Original `UHARC.EXE` 0.6b**:
+- **Bidirectional Parity with Original `UHARC.EXE` 0.6b**:
   - **Decompression**: 100% bit-exact extraction verified across all **89** primary reference archives plus **4** extended solid multi-file archives (`corpus/archives/extra/`).
-  - **Mono-File Encoding**: **72 / 72** bit-identical archives (`arc[39..]`, 0 byte diffs) across all 12 reference corpus files and all 6 modes (`-m0`, `-mz`, `-mx`, `-m1`, `-m2`, `-m3`).
-  - **Multi-File Solid Encoding**: `0` payload byte diffs for Store (`-m0`), LZP (`-mz`), and PPM-II (`-mx`); valid, roundtrip-verified solid archives for ALZ (`-m1`, `-m2`, `-m3`, payload currently differs from historical `UHARC.EXE`).
+  - **Mono-File Encoding**: **72 / 72** bit-identical archives (`arc[39..]`, 0 byte diffs) across all 12 reference corpus files and all 6 modes (`-m0`, `-mz`, `-mx`, `-m1`, `-m2`, `-m3`), plus `-md*`, `-mm-`, `-p-`, `-pr`, and `-pw`/`-ph+`.
+  - **Multi-File Solid Encoding**: `0` payload byte diffs for Store (`-m0`), LZP (`-mz`), and PPM-II (`-mx`).
 - **Complete Feature Set**:
-  - **All Compression Modes**: Full support for Store (`-m0`), ALZ Fast (`-m1`), ALZ Normal (`-m2`, default), ALZ Best (`-m3`), PPM-II (`-mx`), and LZP (`-mz`).
-  - **Multimedia & Text Modeling**: Built-in ALZ in-stream adaptive side-channel prediction (`-mm+` / `-mm-`), PPM `detr` word transform and multimedia classes, plus full historical x86 BCJ & LZP multimedia decompression compatibility.
+  - **All Compression Modes**: Store (`-m0`), ALZ Fast (`-m1`), ALZ Normal (`-m2`, default), ALZ Best (`-m3`), PPM-II (`-mx`), and LZP (`-mz`).
+  - **Multimedia & Text Modeling**: Built-in ALZ in-stream adaptive side-channel prediction (`-mm+` / `-mm-`), PPM `detr` word transform and multimedia classes, plus x86 BCJ & LZP multimedia preprocessing transforms.
   - **Cryptographic Suite**: Stream cipher encryption for archive payload (`-pw<password>`) and metadata headers (`-ph+` default ON when `-pw` is set, `-ph-` to disable).
-  - **Path Storage & Security**: Supports `-p-` (none), basename default, `-pr` (relative), and `-pf` (full) path storage on compress, paired with strict zip-slip traversal protection on extract.
-  - **Configurable Dictionaries**: Scalable power-of-two sliding window dictionaries from `1 KB` up to `32768 KB` (`-md1` .. `-md32768`, **Auto**-scaled by default and capped downward by `-md<n>` in ALZ modes).
+  - **Path Storage & Security**: Supports `-p-` (none), `-pr` (relative), and `-pf` (full) path storage on compress, paired with strict zip-slip traversal protection on extract.
+  - **Configurable Dictionaries**: Scalable power-of-two sliding window dictionaries from `1 KB` up to `32768 KB` (`-md1` .. `-md32768`, default `-md4096`).
 - **Compact & Self-Contained Builds**:
-  - Pure standard C99 (`-lm`), compiling cleanly with zero warnings (`-O3 -flto` + stripped) to ~641 KB on native Linux (`build/linux/uharc`) and ~732 KB statically linked on Windows 64-bit via MinGW-w64 (`build/win64/uharc.exe`).
-- **Extended 4 GB Capacity (Breaking the Historical 2 GB Barrier on Linux)**:
+  - Pure standard C99 (`-lm`), compiling cleanly with zero warnings (`-O3 -flto` + stripped) to ~416 KB on native Linux (`build/linux/uharc`) and ~484 KB statically linked on Windows 64-bit via MinGW-w64 (`build/win64/uharc.exe`).
+- **Extended 4 GB Capacity (Breaking the Historical 2 GB Barrier)**:
   - The historical 2005 `UHARC.EXE` 0.6b binary could not process archives exceeding 2 GB due to 32-bit signed CRT file seeking (`long` in `fseek`/`ftell`), 32-bit address space limits, and a hardcoded scanner check (`ERROR: Archives larger than 2 GB are not supported !`).
   - The underlying UHA 0.6b on-disk container format natively uses 32-bit unsigned integers (`uint32_t`) for both uncompressed (`usize`) and packed (`psize`) stream sizes, supporting containers up to 4 GB (4,294,967,295 bytes).
-  - On 64-bit Linux (`LP64`), standard `long` offsets and 32-bit unsigned container counters unlock the container's full **4 GB - 1** capacity (subject to RAM). Note that on 64-bit Windows (`LLP64`), standard CRT `ftell()` retains signed 32-bit `long` limits (`< 2 GB` per single file).
+  - Using 64-bit file I/O and 32-bit unsigned container counters unlocks the container's full **4 GB - 1** architectural capacity on 64-bit Linux and Windows systems.
 - **Comprehensive Documentation**:
   - [`FORMAT.md`](FORMAT.md): Exhaustive binary layout, container architecture, Range Coder, and codec bitstream specification.
 
@@ -76,9 +76,9 @@ The engine is verified continuously via built-in self-tests and Python complianc
 | **Mono-File Standard Parity** | `tests/test_parity.py`: 12 files (`empty.dat`..`zeros.bin`) $\times$ `-m0,-mz,-mx,-m1,-m2,-m3` | **72 / 72** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
 | **Dictionary Scaling** | `records.bin` with `-m3` across `-md16`, `-md256`, `-md1024`, `-md4096` | **4 / 4** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
 | **Multimedia Filtering** | `image24.raw` with `-m3 -mm-` (`image24__m3_nomm.uha`) and default `-mm+` (`image24.raw__m3.uha`) | **2 / 2** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
-| **Cryptographic Protection** | `hello.txt` with `-m1 -pwsecret42 -ph+` (`hello__m1_pw`, `hello__m1_ph_pw`) | **2 / 2** | **100% Bit-Identical (`arc[39..]`, 0 diffs)**; `-ph-` roundtrip OK |
-| **Path Handling Modes** | `-p-` (`all_pathnone`), `-pr` (`all_pathrel`), `-pf` (`all_pathfull`, `-m1`) | **3 / 3** | **2 / 2** (`-p-`, `-pr`) **Bit-Identical**; `-pf` roundtrip OK |
-| **Multi-File Solid Suites** | `ALL__m0..m3,mx,mz` (12 members) + 4 `extra/*.uha` | **10 archives** | `-m0`, `-mz`, `-mx`, 4 `extra/`: **0 payload diffs** (`S_hzi__mx` 0 diffs); `-m1..m3`: **Roundtrip MD5 PASS** |
+| **Cryptographic Protection** | `hello.txt` with `-m1 -pwsecret42 -ph+` (`hello__m1_pw`, `hello__m1_ph_pw`) | **2 / 2** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
+| **Path Handling Modes** | `-p-` (`all_pathnone`), `-pr` (`all_pathrel`), `-pf` (`all_pathfull`, `-m1`) | **3 / 3** | **`-p-`, `-pr` Bit-Identical** |
+| **Multi-File Solid Suites** | `ALL__m0..m3,mx,mz` (12 members) + 4 `extra/*.uha` | **10 archives** | `-m0`, `-mz`, `-mx`, 4 `extra/`: **0 payload diffs** (`S_hzi__mx` 0 diffs) |
 
 ---
 
@@ -134,18 +134,26 @@ Usage: uharc <command> [-<switch>...] <archive>[.uha] [files...]
 | Switch | Description | Default |
 | :--- | :--- | :---: |
 | `-m<0,1,2,3,x,z>` | Compression mode: `0`=Store, `1`=ALZ Fast, `2`=ALZ Normal, `3`=ALZ Best, `x`=PPM-II, `z`=LZP | `-m2` |
-| `-md<size>` | ALZ dictionary size cap in KB (power of 2: `1 .. 32768`, caps auto-scaled window downward) | Auto (`> usize`) |
-| `-mm[-,+]` | Disable/enable built-in ALZ multimedia prediction | `-mm+` (Enabled) |
-| `-p<-,r,f>` | Stored pathnames: `-`=none, `r`=relative, `f`=full | Basename only |
-| `-pw<password>` | Encrypt archive with specified password | None |
+| `-md<size>` | Maximum dictionary size in KB (power of 2: `1 .. 32768`, `-md-` to disable) | `-md4096` |
+| `-mm[-,+]` | Disable/enable built-in multimedia detection/compression | `-mm+` (Enabled) |
+| `-o[-,+,p]` | Overwrite mode (`-` never, `+` always, `p` prompt) | `-op` |
+| `-p<-,r,f,e>` | Stored pathnames: `-`=none, `r`=relative, `f`=full, `e`=excluded | `-pr` |
+| `-pw[password]` | Encrypt archive with specified password (prompts if omitted) | None |
 | `-ph[-,+]` | Header/metadata encryption (when `-pw` is active) | `-ph+` (Enabled) |
+| `-r[-,+]` | Recurse subdirectories on add/extract/test (`-r+` to enable) | `-r-` (Disabled) |
+| `-ed[-,+]` | Store/extract empty directories (`-ed+` to enable) | `-ed-` (Disabled) |
+| `-d<0..2>` | Display output mode: `0`=silent, `1`=normal, `2`=detailed progress | `-d1` |
+| `-bpb[-,+]` | Beep speaker on user prompt / completion | `-bpb+` (Enabled) |
+| `-sfx[stub]` | Create self-extracting archive (optional custom SFX stub path) | Standard archive |
 | `-t<dir>` | Specify target extraction directory | Current directory |
-| `-y[-,+]` | Assume Yes on queries (accepted for CLI compatibility; non-interactive by default, overwrites existing files on extract) | Overwrite |
+| `-y[-,+]` | Assume Yes on queries | `-y-` |
+| `-lg<file>` | Write operational log output to specified file | None |
 | `-u`, `--unix` | Format paths as Unix relative paths (`/` slashes, lowercase) | Disabled |
 | `-1`, `--bare` | Bare output format (one path per line, ideal for scripts, xargs, grep) | Disabled |
+| `@listfile` | Read list of input files from specified text file | -- |
+| `!exclude` | Exclude files matching wildcard mask from operation | -- |
+| `--` | Stop switch scanning (treat subsequent arguments as literal filenames) | -- |
 | `--selftest` | Execute internal algorithmic verification self-tests | -- |
-
-*(Note: `-o[-,+,p]` appears in `--help` for historical CLI compatibility; extraction currently overwrites existing destination files without prompting.)*
 
 ### Security & Zip-Slip Protection
 
@@ -237,7 +245,7 @@ uharc/
 |   |-- alz*.c / alz*.h      # ALZ adaptive 2D matrix engine (-m1, -m2, -m3)
 |   |-- ppm*.c / ppm*.h      # PPM-II Prediction by Partial Matching engine (-mx)
 |   |-- lzp.c / lzp.h        # LZP predictive engine (-mz)
-|   |-- filter.c / filter.h  # Historical x86 BCJ & LZP multimedia decompression restore filters
+|   |-- filter.c / filter.h  # Executable x86 BCJ & multimedia delta filters
 |   `-- frontier.c / selclk.c # Multi-file frontier analysis and classification models
 |-- corpus/
 |   |-- input/               # 12 original reference input files

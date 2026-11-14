@@ -16,12 +16,6 @@ int ppm_c550_decode(ppm_model *m, uha_rc *r, int ctx, int next_ctx, ppm_c550 *re
 
     idx = (m->age_ctr + 1) & 0xFF;
     age = (m->age - m->age_ring[idx]) & PPM_M32;
-    /* [GATED UHA_AGEDBG, default-OFF, M162] state of l'ring d'age au site c550 :
-     * date there divergence of the path Has (age >= 0x91ADC0 -> literal uniforme 256). */
-    { static int agd = -1;
-      if (agd < 0) { const char *e = getenv("UHA_AGEDBG"); agd = (e && e[0] != '0') ? 1 : 0; }
-      if (agd) fprintf(stderr, "[AGED] pos=%u ctr=%u idx=%u age=%u ring=%u\n",
-                       m->out_count, m->age_ctr, idx, age, m->age_ring[idx]); }
     flag = (next_ctx == 0x301) ? 1 : 0;
 
     if (age < 0x6D4250 || age >= 0xFEFF01) {

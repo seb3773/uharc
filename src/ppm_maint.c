@@ -60,13 +60,6 @@ void ppm_rank_machinery(ppm_model *m, int sym)
     uint32_t mask, winpos, eax, ebp, edx, edx2, ecx, a;
     int i;
 
-    /* [GATED UHA_LASTCTX, defautOFF, M207] `m->last_ctx` n'had NO ecrivain then that the
-     * legacy en pulls `[0x4803c0] % k` (0x41a30a) for `rank_ptr_small` (0x41a340) - therefore there
-     * cellule lue by `[[0x481c30]] <= 0x3FE` (0x41a3a0). ON : `last_ctx` = position d'bytes.
-     * No emissif by default. */
-    { static int lc = -1; if (lc < 0) { const char *e = getenv("UHA_LASTCTX"); lc = (e && e[0] != '0') ? 1 : 0; }
-      if (lc) m->last_ctx = m->out_count + 1u; }
-
     mask = m->win_mask;
     winpos = m->win_pos;
 

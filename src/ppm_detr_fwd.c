@@ -50,19 +50,11 @@ int ppm_detr_forward(const uint8_t *in, uint32_t len, uint32_t thr2,
         if (reuse)
             pending = -1;
 
-        /* [M208b, PROMU 2026-10-28] M209 : au last byte of has regime `detr` (pos = end-1,
-         * `count = pos+1 = thr2`), the legacy engine emits `~b` (window lue au BP 0x42151b : `df d5 d0 f5`)
-         * then that l'old `count > thr2` restait en dictionnaire and emettait `0x06`. The threshold
-         * legacy se triggers has `count == thr2`. Measurements : parse of the member 1 4 033/4 033 identical,
-         * firstdiv `ALL__mx` 1 319 -> 2 913, `an_m162` 618 873/618 873, `an_costcmp` 22/22,
-         * 9 juges inchanges. `UHA_DETRTHR=0` retablit l'old behavior (isolation). */
-        { static int dt = -1;
-          if (dt < 0) { const char *e = getenv("UHA_DETRTHR"); dt = (e && e[0] == '0') ? 0 : 1; }
-          if (dt ? (count >= thr2) : (count > thr2)) {
-              out[n++] = (uint8_t)~b;
-              pos += 1;
-              continue;
-          } }
+        if (count >= thr2) {
+            out[n++] = (uint8_t)~b;
+            pos += 1;
+            continue;
+        }
 
         if (b == 0x20) {
             uint32_t nsp = 1;

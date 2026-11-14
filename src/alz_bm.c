@@ -225,33 +225,10 @@ static uint32_t bm_known_map(alz_dec *d, int c, int sym, int exclude_ctx)
         && (exclude_ctx < 0 || d->bm_freq[exclude_ctx][d->bm_predb] == 0))
         t = (t - d->bm_freq[c][d->bm_predb]) & 0xFFFF;
     if (t == 0) {
-        /* [GATED UHA_BMDUMP=path, RE 13.531, read-only, default-OFF,
-         * NO-MECANISME] dump cost litterel PRIMARY (exclude_ctx<0) : empty t==0. */
-        { static FILE *s_bmf = NULL; static int s_bmfinit = -1;
-          if (s_bmfinit < 0) { const char *e = getenv("UHA_BMFREQ");
-              s_bmfinit = e ? 1 : 0;
-              if (s_bmfinit && e) { s_bmf = fopen(e, "w");
-                  if (s_bmf) fprintf(s_bmf, "pos\tctx\tsym\tfreq\ttotal\tp\tcost\n"); } } }
         return 0;
     }
     {
         uint32_t bmidx = ((uint32_t)d->bm_freq[c][sym] << 14) / t;
-        uint32_t tree0 = d->bm_tree[c][0];
-        uint32_t ewc = (c < 0x3F9) ? d->bm_ew[c] : 0;
-        /* [GATED UHA_BMFREQ] dump (pos,ctx,sym,num,den,p,cost,tree0,ew,predb,flag) of the
-         * call primaire (exclude_ctx<0) for jointure vs oracle acc_cost legacy :
-         * slice if c'is freq (numerateur) now total (denominateur) which drifts,
-         * and decompose den = tree0 + ew - excl. read-only, default-OFF. */
-        { static FILE *s_bmf = NULL; static int s_bmfinit = -1;
-          if (s_bmfinit < 0) { const char *e = getenv("UHA_BMFREQ");
-              s_bmfinit = e ? 1 : 0;
-              if (s_bmfinit && e) { s_bmf = fopen(e, "w");
-                  if (s_bmf) fprintf(s_bmf, "pos\tctx\tsym\tnum\tden\tp\tcost\ttree0\tew\tpredb\tflag\n"); } }
-          if (s_bmf && exclude_ctx < 0)
-              fprintf(s_bmf, "%u\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%d\n", (unsigned) d->st.output_pos, c, sym,
-                  (unsigned) d->bm_freq[c][sym], (unsigned) t,
-                  (unsigned) bmidx, (unsigned) AlzSseMap[bmidx],
-                  (unsigned) tree0, (unsigned) ewc, (int) d->bm_predb, (int) d->bm_flag); }
         return AlzSseMap[bmidx];
     }
 }

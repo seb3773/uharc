@@ -15,10 +15,21 @@ typedef struct {
      * construction (identite) => behavior byte-identical without gate. Sets the `didx`
      * (column attrs 4*fc) when l'arrangement reordonne the members (UHA_FRONTIER=1). */
     uint32_t cmd_rank;
+    uint8_t  dos_attr;
 } uha_member;
+
+void uha_set_dict_kb(int dict_kb);
+int  uha_get_dict_kb(void);
+void uha_set_nomm(int nomm);
+int  uha_get_nomm(void);
+void uha_set_password(const char *pw, int header_encrypt);
+void uha_set_path_mode(int mode);
+int  uha_get_path_mode(void);
 
 int uha_encode_store(const uha_member *members, int count,
                      uint8_t **out, size_t *outlen);
+int uha_encode_rle(const uha_member *members, int count,
+                   uint8_t **out, size_t *outlen);
 int uha_encode_lzp(const uha_member *members, int count, int order,
                    uint8_t **out, size_t *outlen);
 int uha_encode_alz(const uha_member *members, int count, int method_class,

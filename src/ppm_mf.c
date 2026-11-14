@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "ppm_priv.h"
+#include "encode.h"
 
 static uint32_t hash1(uint32_t ctx0)
 {
@@ -21,12 +22,9 @@ static uint32_t hash1(uint32_t ctx0)
  * 13809/6988 * `difftest` 88 OK + 1 NOREF * roundtrip multi 12/12 * carte 7/8 (inchangee).
  *  `UHA_PPM_CUTEMIT` (tester OF MORE has `out_pos` au site d'emission) remainder INERT (md5 of the corps
  * identical au default) : there variable which counts is the COORDONNE, not the site. */
-static int ppm_cutpos_on(void)
+static inline int ppm_cutpos_on(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_CUTPOS");
-                 v = (e && e[0] == '0') ? 0 : 1; }   /* DEFAULT = ON ; =0 retablit l'historique */
-    return v;
+    return 1;
 }
 
 static uint32_t hash2(uint32_t ctx0, uint32_t ctx1, uint32_t ctx2)
@@ -221,30 +219,6 @@ void ppm_matchfinder_decode(ppm_model *m, uha_rc *r, uint8_t *raw_syms, ppm_matc
         }
     }
 
-    /* [M205 UHA_MFTRACE, default-OFF, no emissif] Jumeau decoder of `[MFENC]` : same instant,
-     * same historique (the decoder reconstruit exactement the same bytes), therefore the two lines
-     * doivent porter the same ctx0/h1/saved18 au same `pos`. Has divergence between elles localise
-     * has state d'input false in l'encoder, not has decision law. */
-    { static long lo = -1, hi = -1;
-      if (lo == -1) {
-          const char *e = getenv("UHA_MFTRACE");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              lo = atol(e);
-              hi = c ? atol(c + 1) : lo + 64;
-          } else {
-              lo = 0;
-              hi = -2;
-          }
-      }
-      if (hi >= lo && (long)winpos >= lo && (long)winpos <= hi)
-          fprintf(stderr, "[MFDEC] pos=%u ctx0=%u h1=%u h2=%u saved18=%u type=0x%x edi_dist=%u"
-                  " bestlen=%u d4=%u d8=%u b8=%u\n",
-                  (unsigned)winpos, (unsigned)ctx0, (unsigned)h1, (unsigned)h2,
-                  (unsigned)saved18, (unsigned)type1c, (unsigned)((edi - winpos) & mask),
-                  (unsigned)bestlen, (unsigned)m->d4, (unsigned)m->d8, (unsigned)m->b8);
-    }
-
     register_entry(m, ctx0, ctx1, ctx2, winpos);
     if (type1c == 0)
         return;
@@ -319,21 +293,6 @@ void ppm_matchfinder_decode(ppm_model *m, uha_rc *r, uint8_t *raw_syms, ppm_matc
         node = nxt;
     }
     length_ = (uint32_t)declen;
-    /* [M208 GATED UHA_LENX] there length LUE depasse-t-elle `maxlen` in the stream legacy ?
-     * if yes, the legacy engine n'has not plafonne : notre maxlen (now there law) is false. */
-    { static int lx = -1;
-      if (lx < 0) { const char *e = getenv("UHA_LENX"); lx = (e && e[0] != '0') ? 1 : 0; }
-      if (lx && (int)declen > maxlen)
-          fprintf(stderr, "[LENX] out=%u declen=%d maxlen=%d bank=%d flag30=%u b8=%u\n",
-                  m->out_count, (int)declen, maxlen, bank, flag30, (unsigned)m->b8); }
-    /* [M208 GATED UHA_LENZ] has line by match decode : jointure out line with the bounds of
-     * member for separer " continuation " (flag30) and match normal au bord of has member. */
-    { static int lz = -1;
-      if (lz < 0) { const char *e = getenv("UHA_LENZ"); lz = (e && e[0] != '0') ? 1 : 0; }
-      if (lz)
-          fprintf(stderr, "[LENZ] out=%u declen=%d flag30=%u maxlen=%d bank=%d winpos=%u\n",
-                  m->out_count, (int)declen, flag30, maxlen, bank, (unsigned)winpos); }
-
     dist = (winpos - (edi & mask)) & mask;
     if (dist == m->d4)
         m->d8 >>= 1;
@@ -449,21 +408,6 @@ int ppm_matchfinder_encode(ppm_model *m, ppm_match *mr,
     }
 
     register_entry(m, ctx0, ctx1, ctx2, winpos);
-    /* [M256/M255, GATED UHA_PPM_CUTLIT, default-OFF] D2 of OUT/m256_integration.md : the master
-     * TESTE there cut en 0x421973, sure the path some two `jb` of REJET of match - therefore BEFORE nos
-     * outputs anticipees `type1c == 0` (l.432) and `(edi-winpos)&mask < 0x100` (l.434). Measures
-     * (an_m255_grid.py + probe UHA_M255GRID) : 12 cuts of the master never testees whose 57 883 and
-     * 70 427 ; l'escape of the master has 57 883 (which installe there class 0) is manque ; 1re divergence
-     * d'state reporte has 82 971 (cur master 0 vs port 1) ; escape parasite has 817 440 ; 1er byte
-     * divergent has payload 1 280.  Teste Redondance impossible : there keeps internal
-     * `start < g_blk_next` (ppm_encode.c l.1070) avale l'call as soon as the site normal (l.618) has
-     * already teste and rearme. `arg` rendu here = `type1c` BEFORE l'ajustement `inprog==0` : there probe
-     * UHA_M255GRID publique l'arg for qu'on puisse the to compare to the 66 `arg` of m256_route.tsv. */
-    { static int cl_ = -1;
-      if (cl_ < 0) { const char *e = getenv("UHA_PPM_CUTLIT"); cl_ = (e && e[0] != '0') ? 1 : 0; }
-      if (cl_)
-          (void)ppm_blk_node_encode(m, ppm_cutpos_on() ? m->out_count : winpos,
-                                    (int)(type1c & 0xFF)); }
     if (type1c == 0)
         return 0;
     if (((edi - winpos) & mask) < 0x100)
@@ -524,88 +468,8 @@ int ppm_matchfinder_encode(ppm_model *m, ppm_match *mr,
         mlen++;
     }
     want = (mlen > 0xFF) ? 0xFF : mlen;
-    /* [M208 GATED UHA_LENCLAMP, default-OFF] experience : there length emise is-elle plafonnee by
-     * `maxlen` (law `PPMS_MAXLEN*`) ? the legacy engine selects 3 = maxlen has out=45333 there now mlen=4. */
-    { static int lc = -1;
-      if (lc < 0) { const char *e = getenv("UHA_LENCLAMP"); lc = (e && e[0] != '0') ? 1 : 0; }
-      if (lc && maxlen > 0 && mlen > (uint32_t)maxlen) {
-          mlen = (uint32_t)maxlen;
-          want = mlen;
-      } }
-    /* [M208 GATED UHA_LENBOUND, default-OFF] bound en SYMBOLES of the member (law 0x421479) :
-     * there comparaison legacy not peut not depasser there end of the member en win_pos. */
-    { int64_t bb = ppm_lenb_sym_bound();
-      if (bb >= 0) {
-          uint32_t reste = (winpos < (uint32_t)bb) ? ((uint32_t)bb - winpos) : 0u;
-          if (reste < mlen) {
-              mlen = reste;
-              want = reste;
-          }
-      } }
-    /* [M208 GATED UHA_LEN4] inputs of the law of length au bord of the member 1 (out_count 45330..40) :
-     * window[] (stream transforme) vs syms[] (source) sure 6 bytes - now there length 4 devient 3 ? */
-    { static long lo4 = -1, hi4 = -1;
-      if (lo4 == -1) {
-          const char *e = getenv("UHA_LEN4");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              lo4 = atol(e); hi4 = c ? atol(c + 1) : lo4 + 10;
-          } else { lo4 = 0; hi4 = -2; }
-      }
-      if (hi4 >= lo4 && (long)m->out_count >= lo4 && (long)m->out_count <= hi4) {
-          uint32_t mw = 0, lim = 0xFF;
-          while (mw < lim && (int)(winpos + mw) < (int)(winpos + 0x40)) {
-              if (m->window[(winpos + mw) & mask] != m->window[((edi & mask) + mw) & mask])
-                  break;
-              mw++;
-          }
-          fprintf(stderr, "[LEN4] out=%u winpos=%u in_pos=%u type=%02x flag30=%u mlen=%u want=%u maxlen=%u bank=%d"
-                  " mlen_win=%u bb=%lld c4g=%u dcg=%u a8g=%u bc=%u mk=%u cls=%u"
-                  " w=%02x%02x%02x%02x%02x%02x s=%02x%02x%02x%02x%02x%02x edi=%u dist=%u\n",
-                  m->out_count, (unsigned)winpos, (unsigned)in_pos, (unsigned)type1c, flag30,
-                  (unsigned)mlen, (unsigned)want, (unsigned)maxlen, bank, (unsigned)mw,
-                  (long long)ppm_lenb_sym_bound(),
-                  (unsigned)m->c4g, (unsigned)m->dcg, (unsigned)m->a8g,
-                  (unsigned)m->byte_class, (unsigned)m->marker_fl, (unsigned)m->flag3934,
-                  m->window[(winpos - 6) & mask], m->window[(winpos - 5) & mask],
-                  m->window[(winpos - 4) & mask], m->window[(winpos - 3) & mask],
-                  m->window[(winpos - 2) & mask], m->window[(winpos - 1) & mask],
-                  syms[in_pos], (in_pos + 1 < nsyms) ? syms[in_pos + 1] : 0,
-                  (in_pos + 2 < nsyms) ? syms[in_pos + 2] : 0,
-                  (in_pos + 3 < nsyms) ? syms[in_pos + 3] : 0,
-                  (in_pos + 4 < nsyms) ? syms[in_pos + 4] : 0,
-                  (in_pos + 5 < nsyms) ? syms[in_pos + 5] : 0,
-                  (unsigned)(edi & mask), (unsigned)((winpos - (edi & mask)) & mask));
-      } }
 
-    /* [M205 UHA_MFTRACE=lo:hi, default-OFF, no emissif] Decision of the matcher encoder sure has
-     * window of positions d'input : inputs of the decision (length trouvee, length maximale
-     * autorisee by the laws of length, banque, distance of the candidate) then emission. Sert has
-     * localiser has member whose the matches not sortent not (measures, not correction). */
-    { static long lo = -1, hi = -1;
-      if (lo == -1) {
-          const char *e = getenv("UHA_MFTRACE");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              lo = atol(e);
-              hi = c ? atol(c + 1) : lo + 64;
-          } else {
-              lo = 0;
-              hi = -2;
-          }
-      }
-      if (hi >= lo && (((long)winpos >= lo && (long)winpos <= hi) ||
-                       ((long)in_pos >= lo && (long)in_pos <= hi)))
-          fprintf(stderr, "[MFENC] pos=%u in_pos=%u ctx0=%u h1=%u h2=%u saved18=%u type=0x%x flag30=%u bestlen=%u edi_dist=%u mlen=%u want=%u"
-                  " maxlen=%u bank=%u d4=%u d8=%u b8=%u cont=%u\n",
-                  (unsigned)winpos, (unsigned)in_pos, (unsigned)ctx0, (unsigned)h1, (unsigned)h2, (unsigned)saved18,
-                  (unsigned)type1c, (unsigned)flag30, (unsigned)bestlen,
-                  (unsigned)((edi - winpos) & mask), (unsigned)mlen, (unsigned)want,
-                  (unsigned)maxlen, (unsigned)bank, (unsigned)m->d4, (unsigned)m->d8,
-                  (unsigned)m->b8, (unsigned)m->has_cont);
-    }
-
-    if (want >= maxlen && ppm_len_walk(m, (int)bank, (int)maxlen, want, 0) == 0) {
+    if (uha_get_dict_kb() >= 0 && want >= maxlen && ppm_len_walk(m, (int)bank, (int)maxlen, want, 0) == 0) {
         if (ppm_lzp_encode_class(m, (int)(type1c & 0xFF), 1) == 1) {
             uint32_t length_;
             if (ppm_len_walk(m, (int)bank, (int)maxlen, want, 1) != 0)

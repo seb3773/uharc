@@ -150,16 +150,6 @@ uint32_t alz_arena2d_master_learn(alz_arena2d_t *a, uint32_t relrow, uint32_t de
             }
             a->total[relrow] = (uint16_t) sn;          /* racine = Σf_new */
             a->mtot[relrow]  = (mtb + 1u) >> 1;        /* master_total halve (m23_c1) */
-            /* [DIAG UHA_A3_MASTERLAW_COUNT, LECTURE SEULE] journal des rescales
-             * maitre (miroir de m23_c2/phys) pour comparer la CADENCE par ligne. */
-            {
-                static int s_mlc = -1;
-                if (s_mlc < 0) s_mlc = getenv("UHA_A3_MASTERLAW_COUNT") ? 1 : 0;
-                if (s_mlc)
-                    fprintf(stderr, "[A3MR] row=%u root_before=%u mt_before=%u sum_after=%u mt_after=%u\n",
-                            (unsigned) relrow, (unsigned) s, (unsigned) mtb,
-                            (unsigned) sn, (unsigned) ((mtb + 1u) >> 1));
-            }
         }
     } else if (a->aging_on) {
         /* double porte C6-ter : racine(=Σfreq ligne) + master_total >= 0x4000  OU  aging<0 */
@@ -168,13 +158,10 @@ uint32_t alz_arena2d_master_learn(alz_arena2d_t *a, uint32_t relrow, uint32_t de
         for (j = 0; j < 256u; j++) s += a->freq[rb + j];    /* racine = Σfreq (arbre slot[0]) */
         ags = (int32_t)a->aging[relrow];
         if (s + a->mtot[relrow] >= ALZ_ARENA2D_RESCALE || ags < 0) {
-            uint32_t sn = 0u, mtb = a->mtot[relrow];
-            uint32_t nc = 0u, sav = 0u, sap = 0u;   /* [tour 14] colonnes GT m23_c2 */
-            int seuil = (s + mtb >= ALZ_ARENA2D_RESCALE);
+            uint32_t sn = 0u;
             for (j = 0; j < 256u; j++) {                     /* 0x40ffa0 : f>16 -> >>1 sinon 0 */
                 uint32_t v0 = a->freq[rb + j];
                 uint32_t v = (v0 > 16u) ? (v0 >> 1) : 0u;
-                if (v != v0) { nc++; sav += v0; sap += v; }  /* cellules RÉELLEMENT modifiées */
                 a->freq[rb + j] = (uint16_t)v; sn += v;
             }
             a->total[relrow] = (uint16_t)sn;                 /* racine = Σfreq_new */
@@ -190,18 +177,6 @@ uint32_t alz_arena2d_master_learn(alz_arena2d_t *a, uint32_t relrow, uint32_t de
                 /* 0x4100a8 dit `shl 6` (si ligne < 0x300), mais cette transcription
                  * sur-déclenche x2 (143 vs 69 au bloc 0) ; `<<8` reproduit 69/44. */
                 a->aging[relrow] = agv << 8;
-            }
-            /* [DIAG UHA_A3_MASTERLAW_COUNT, LECTURE SEULE] mêmes champs que le registre m23_c4
-             * (mt_before/sfreq) + motif (S=seuil 0x4121b4, A=aging 0x41232f). */
-            {
-                static int s_mlc2 = -1;
-                if (s_mlc2 < 0) s_mlc2 = getenv("UHA_A3_MASTERLAW_COUNT") ? 1 : 0;
-                if (s_mlc2)
-                    fprintf(stderr, "[A3MR] pos=%u row=%u root_before=%u mt_before=%u sum_after=%u"
-                                    " mt_after=%u ncells=%u sav=%u sap=%u src=%s\n",
-                            (unsigned) g_a3_mr_pos, (unsigned) relrow, (unsigned) s, (unsigned) mtb,
-                            (unsigned) sn, (unsigned) ((mtb + 1u) >> 1), (unsigned) nc,
-                            (unsigned) sav, (unsigned) sap, seuil ? "S" : "A");
             }
             g_a3_halv_count++;
         }

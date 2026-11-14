@@ -107,7 +107,8 @@ static int verdict(const marche_t *mm, uint32_t eax, uint32_t edx, uint32_t lett
 
 static int cascade(const uint8_t *octets, uint32_t n,
                    uint32_t *eax_o, uint32_t *edx_o, uint32_t *capa_o,
-                   uint32_t *sig_o, uint32_t *chai_o, int *arret_o, int *ajoute_o, int *promu_o)
+                   uint32_t *sig_o, uint32_t *chai_o, int *arret_o,
+                   int *ajoute_o, int *promu_o, int *pal_o)
 {
     marche_t mm;
     uint32_t eax = 0, edxsum = 0, lettres = 0, k, i;
@@ -124,29 +125,37 @@ static int cascade(const uint8_t *octets, uint32_t n,
     if (chai_o) *chai_o = mm.chaine;
     if (arret_o) *arret_o = arret_anticipe(&mm);
     uint32_t r1 = 0;
-    int casse = arret_anticipe(&mm), court, promu;
+    int casse = arret_anticipe(&mm), court, promu, pal = 0;
     if (casse)
         ajoute = 0;                                      /* output without level -> no adds */
     else
-        ajoute = verdict(&mm, eax, edxsum >> 2, lettres, 0, &r1);
+        ajoute = verdict(&mm, eax, edxsum >> 2, lettres, &pal, &r1);
     /* m370 chemin_court : remainder==0 (i.e. NOT casse) AND r1<=0x12c AND (size>>6)<=string */
     court = (!casse) && (r1 <= SEUIL_300) && (((n >> 6) <= mm.chaine) ? 1 : 0);
     promu = ajoute || court;
     if (promu_o) *promu_o = promu;
     if (ajoute_o) *ajoute_o = ajoute;
+    if (pal_o) *pal_o = ajoute ? pal : 0;
     return ajoute;
 }
 
 int uha_frontier_addoue(const uint8_t *octets, uint32_t n)
 {
-    return cascade(octets, n, 0, 0, 0, 0, 0, 0, 0, 0);
+    return cascade(octets, n, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+}
+
+uint32_t uha_frontier_pal(const uint8_t *octets, uint32_t n)
+{
+    int pal = 0;
+    cascade(octets, n, 0, 0, 0, 0, 0, 0, 0, 0, &pal);
+    return (uint32_t)pal;
 }
 
 /* m370 : promu = cumul (adds) UNION chemin_court (count=0 / annulus) - tete of l'arrangement. */
 int uha_frontier_promu(const uint8_t *octets, uint32_t n)
 {
     int promu = 0;
-    cascade(octets, n, 0, 0, 0, 0, 0, 0, 0, &promu);
+    cascade(octets, n, 0, 0, 0, 0, 0, 0, 0, &promu, 0);
     return promu;
 }
 
@@ -155,5 +164,5 @@ void uha_frontier_debug(const uint8_t *octets, uint32_t n,
                         uint32_t *out_sigma, uint32_t *out_chaine, int *out_arret,
                         int *out_addoue)
 {
-    cascade(octets, n, out_eax, out_edx, out_capa, out_sigma, out_chaine, out_arret, out_addoue, 0);
+    cascade(octets, n, out_eax, out_edx, out_capa, out_sigma, out_chaine, out_arret, out_addoue, 0, 0);
 }

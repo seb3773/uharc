@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "alz.h"
+#include "encode.h"
 #include "alz_priv.h"
 #include "alz_parse_score.h"   /* [a5-e3 sonde graine] machine ctx cls3 + arène (gated) */
 #include "alz_score.h"          /* [livebud-ring] coût proba->cost (alz_score_proba_to_cost) */
@@ -27,7 +28,7 @@ static long long alz_parsedbg_pos(void)
     static int init = 0;
     static long long pos = -1;
     if (!init) {
-        const char *e = getenv("UHA_PARSEDBG");
+        const char *e = ((const char *)0);
         pos = e ? atoll(e) : -1;
         init = 1;
     }
@@ -38,16 +39,14 @@ static int alz_seldbg_on(void)
 {
     static int s = -1;
     if (s < 0)
-        s = getenv("UHA_SELDBG") ? 1 : 0;
+        s = ((const char *)0) ? 1 : 0;
     return s;
 }
 
 int a3_promo_on(const char *name)
 {
-    const char *e = getenv(name);
-    if (!e || !*e)
-        return 1;
-    return strcmp(e, "0") != 0;
+    (void)name;
+    return 1;
 }
 
 int alz_decode_item(alz_dec *d)
@@ -61,7 +60,7 @@ int alz_decode_item(alz_dec *d)
     int tr;
     uint32_t tpos = d->st.output_pos;
     if (s_tr < 0)
-        s_tr = getenv("UHA_TRACE") != NULL ? 1 : 0;
+        s_tr = ((const char *)0) != NULL ? 1 : 0;
     tr = s_tr;
 
     escape_count = 0;
@@ -149,7 +148,7 @@ static int a3_esched_hit(uint32_t pos, int *sel)
     int s;
 
     if (!s_init) {
-        s_e = getenv("UHA_A3_ESCSCHED");
+        s_e = ((const char *)0);
         s_init = 1;
     }
     e = s_e;
@@ -449,7 +448,7 @@ static uint32_t alz_chain_best(alz_dec *d, const uint8_t *plain, uint32_t usize,
      * dont 128 dist>=512 mesurés ici). Non-émissif sans env. */
     static uint32_t s_cap = 0;
     if (s_cap == 0) {
-        const char *c = getenv("UHA_CHAINMAX");
+        const char *c = ((const char *)0);
         s_cap = (c && atoi(c) > 0) ? (uint32_t)atoi(c) : 1024u;
     }
     /* [GATED UHA_AGEBOUND, défaut-OFF = marche inchangée] Port fidèle de la BORNE
@@ -463,7 +462,7 @@ static uint32_t alz_chain_best(alz_dec *d, const uint8_t *plain, uint32_t usize,
      * Sans env : strictement inerte (s_agebound<0). */
     static int s_agebound = -1;
     if (s_agebound < 0) {
-        const char *a = getenv("UHA_AGEBOUND");
+        const char *a = ((const char *)0);
         s_agebound = a ? atoi(a) : -1;
     }
 
@@ -529,7 +528,7 @@ static uint32_t alz_chain_first(alz_dec *d, const uint8_t *plain, uint32_t usize
     uint32_t h, p, depth, n;
     static uint32_t s_cap = 0;
     if (s_cap == 0) {
-        const char *c = getenv("UHA_CHAINMAX");
+        const char *c = ((const char *)0);
         s_cap = (c && atoi(c) > 0) ? (uint32_t)atoi(c) : 1024u;
     }
     *dist_out = 0;
@@ -584,7 +583,7 @@ static uint32_t alz_chain_shrwalk(alz_dec *d, const uint8_t *plain, uint32_t usi
     uint32_t h, p, depth, top = 0, maxenc, hmask_local = hmask;
     static uint32_t s_cap = 0;
     if (s_cap == 0) {
-        const char *c = getenv("UHA_CHAINMAX");
+        const char *c = ((const char *)0);
         s_cap = (c && atoi(c) > 0) ? (uint32_t)atoi(c) : 1024u;
     }
     *len_out = 0;
@@ -677,7 +676,7 @@ static int s_cost_arbiter = -1;
 static int cost_arbiter_on(void)
 {
     if (s_cost_arbiter < 0)
-        s_cost_arbiter = (getenv("UHA_COST") != NULL) ? 1 : 0;
+        s_cost_arbiter = (((const char *)0) != NULL) ? 1 : 0;
     return s_cost_arbiter;
 }
 
@@ -688,7 +687,7 @@ static int s_adaptive = -1;
 static int adaptive_on(void)
 {
     if (s_adaptive < 0)
-        s_adaptive = (getenv("UHA_ADAPTIVE") != NULL) ? 1 : 0;
+        s_adaptive = (((const char *)0) != NULL) ? 1 : 0;
     return s_adaptive;
 }
 
@@ -703,9 +702,9 @@ static int s_trueparse_margin = -1;
 static int trueparse_on(void)
 {
     if (s_trueparse < 0) {
-        const char *e = getenv("UHA_TRUEPARSE");
+        const char *e = ((const char *)0);
         s_trueparse = e ? 1 : 0;
-        e = getenv("UHA_TRUEPMARGIN");
+        e = ((const char *)0);
         s_trueparse_margin = e ? atoi(e) : 0;   /* bits de marge (defaut 0) */
     }
     return s_trueparse;
@@ -723,7 +722,7 @@ static int s_budgetparse = -1;
 static int budgetparse_on(void)
 {
     if (s_budgetparse < 0)
-        s_budgetparse = (getenv("UHA_BUDGETPARSE") != NULL) ? 1 : 0;
+        s_budgetparse = (((const char *)0) != NULL) ? 1 : 0;
     return s_budgetparse;
 }
 
@@ -733,7 +732,7 @@ static int s_argminparse = -1;
 static int argminparse_on(void)
 {
     if (s_argminparse < 0)
-        s_argminparse = (getenv("UHA_ARGMINPARSE") != NULL) ? 1 : 0;
+        s_argminparse = (((const char *)0) != NULL) ? 1 : 0;
     return s_argminparse;
 }
 
@@ -746,7 +745,7 @@ static int s_finder_legacy = -1;
 static int finder_legacy_on(void)
 {
     if (s_finder_legacy < 0) {
-        const char *e = getenv("UHA_FINDER");
+        const char *e = ((const char *)0);
         s_finder_legacy = (e && e[0] == 'l' && e[1] == 'e' && e[2] == 'g') ? 1 : 0;
     }
     return s_finder_legacy;
@@ -761,7 +760,7 @@ static int s_costfit = -1;
 static int costfit_on(void)
 {
     if (s_costfit < 0)
-        s_costfit = (getenv("UHA_COSTFIT") != NULL) ? 1 : 0;
+        s_costfit = (((const char *)0) != NULL) ? 1 : 0;
     return s_costfit;
 }
 
@@ -948,17 +947,17 @@ static int a3v_shift(int bloc, uint32_t len)
 static int a3v_gate_enabled(void)
 {
     if (a3v_on < 0) {
-        const char *e = getenv("UHA_A3_VISIT");
+        const char *e = ((const char *)0);
         a3v_on = (e && *e && strchr(e, '/')) ? 1 : 0;
         if (a3v_on) {
             a3v_out = fopen(e, "w");
             a3v_dl = 0; a3v_bl = 1; a3v_bb = 0xff; a3v_prev = 0xffffffffu;
-            a3v_legscan = getenv("UHA_A3_VISIT_LEGSCAN") ? 1 : 0;
-            a3v_recf = getenv("UHA_A3_VISIT_REC") ? 1 : 0;
+            a3v_legscan = ((const char *)0) ? 1 : 0;
+            a3v_recf = ((const char *)0) ? 1 : 0;
             if (a3v_arb < 0)
                 a3v_arb = a3_promo_on("UHA_A3_VISIT_ARB");   /* [PROMUE t138 — défaut‑ON, `=0` = l'ancien chemin; 5 sites cohérents] */
             if (a3v_tail < 0)
-                a3v_tail = getenv("UHA_A3_VISIT_TAIL") ? 1 : 0;
+                a3v_tail = ((const char *)0) ? 1 : 0;
         }
         if (!a3v_out)
             a3v_on = 0;
@@ -1340,8 +1339,8 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
             static const char *s_trig_env = NULL;
             static const char *s_dist_env = NULL;
             if (!s_td_init) {
-                s_trig_env = getenv("UHA_A3_VISIT_TRIGN");
-                s_dist_env = getenv("UHA_A3_TRIGDIST");
+                s_trig_env = ((const char *)0);
+                s_dist_env = ((const char *)0);
                 s_td_init = 1;
             }
             if (d && d->bst_head && d->bst_tree && (!s_trig_env || !*s_trig_env) && (!s_dist_env || !*s_dist_env)) {
@@ -1439,7 +1438,7 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
         * descente). Plafonds de longueur courte 0x4137b2..0x413807, puis
         * descente de longueurs 0x41381d..0x41384f, puis test d'adoption. */
         if (b8 > 2u) {
-            uint32_t gap;
+            uint32_t gap, orig_b8 = b8;
             uint32_t ref = (b8 < 256u) ? s_len[b8] : 0u;
             int lvl;
             if (s_len[3] >= 256u)     s_len[3] = 0u;    /* 0x4137bf */
@@ -1448,18 +1447,16 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
             if (s_len[6] >= 1048576u) s_len[6] = 0u;    /* 0x4137f3 */
             /* Le test de rejet 0x41380f relit la MEMOIRE (valeurs APRES plafonds),
              * alors que la descente marche avec eax charge a 0x4137b8 (AVANT) :
-             * les deux grandeurs sont distinctes dans le binaire. */
-            if ((b8 < 256u ? s_len[b8] : 0u) == 0u) {
-                b8 = 0u;                               /* rejet pur 0x4138b7 */
-            } else {
-                for (lvl = (int)b8 - 1; lvl >= 3; lvl--) {
-                    ref >>= a3v_shift(ref >= 0x200000u, (uint32_t)lvl);
-                    if (ref == 0u)
-                        break;                        /* 0x413849 */
-                    if (s_len[lvl] != 0u && ref > s_len[lvl]) {
-                        b8 = (uint32_t)lvl;           /* ADOPTER lvl 0x4138da */
-                        ref = s_len[lvl];
-                    }
+             * memoire nulle remet b8=0 tout en descendant depuis orig_b8-1. */
+            if ((b8 < 256u ? s_len[b8] : 0u) == 0u)
+                b8 = 0u;                                /* 0x4138b7 */
+            for (lvl = (int)orig_b8 - 1; lvl >= 3; lvl--) {
+                ref >>= a3v_shift(ref >= 0x200000u, (uint32_t)lvl);
+                if (ref == 0u)
+                    break;                              /* 0x413849 */
+                if (s_len[lvl] != 0u && ref > s_len[lvl]) {
+                    b8 = (uint32_t)lvl;                 /* ADOPTER lvl 0x4138da */
+                    ref = s_len[lvl];
                 }
             }
             ref = (b8 < 256u) ? s_len[b8] : 0u;       /* 0x413893 relit dist[b8] */
@@ -1487,7 +1484,7 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
         return;
     }
     if (a3v_recf < 0)
-        a3v_recf = getenv("UHA_A3_VISIT_REC") ? 1 : 0;
+        a3v_recf = ((const char *)0) ? 1 : 0;
     if (a3v_recf) {
         /* Arbitre 0x413920 (loi MESUREE sur le brut n°31, tour 92) : on parcourt
          * recent[0..11] et on retient la PLUS LONGUE etendue; a egalite c'est le
@@ -1519,7 +1516,7 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
         }
     }
     if (a3v_legscan < 0)
-        a3v_legscan = getenv("UHA_A3_VISIT_LEGSCAN") ? 1 : 0;
+        a3v_legscan = ((const char *)0) ? 1 : 0;
     if ((a3v_legscan ? alz_find_match_legacy : alz_find_match)
             (d, plain, usize, p, min_len, tok2_min, hashtab, chain,
              hmask, cmask, &t, &dd, &cc)
@@ -1542,7 +1539,7 @@ static int s_lm413530 = -2;
 static int lm413530_on(void)
 {
     if (s_lm413530 == -2)
-        s_lm413530 = getenv("UHA_LM413530") ? 1 : 0;
+        s_lm413530 = ((const char *)0) ? 1 : 0;
     return s_lm413530;
 }
 
@@ -1561,7 +1558,7 @@ static int s_ecbb_on = -2;
 static int lazyecbb_on(void)
 {
     if (s_ecbb_on == -2)
-        s_ecbb_on = getenv("UHA_LAZY413530_ECBB") ? 1 : 0;
+        s_ecbb_on = ((const char *)0) ? 1 : 0;
     return s_ecbb_on;
 }
 
@@ -1578,7 +1575,7 @@ static int s_penddesc = -2;
 static int penddesc_on(void)
 {
     if (s_penddesc == -2)
-        s_penddesc = getenv("UHA_A3_PENDDESC") ? 1 : 0;
+        s_penddesc = ((const char *)0) ? 1 : 0;
     return s_penddesc;
 }
 
@@ -1595,7 +1592,7 @@ static int s_prevd = -2;
 static int prevdist_on(void)
 {
     if (s_prevd == -2)
-        s_prevd = getenv("UHA_A3_PREVDIST") ? 1 : 0;
+        s_prevd = ((const char *)0) ? 1 : 0;
     return s_prevd;
 }
 /* Copie des seuils 0x4397d4 (AlzRefineThr de alz_find_match_legacy). */
@@ -1618,7 +1615,7 @@ static int s_cost_k = -1;
 static int cost_k(void)
 {
     if (s_cost_k < 0) {
-        const char *e = getenv("UHA_COSTK");
+        const char *e = ((const char *)0);
         s_cost_k = e ? atoi(e) : 256;   /* 256 = echelle 1.0 */
         if (s_cost_k < 1)
             s_cost_k = 1;
@@ -1635,7 +1632,7 @@ static uint32_t alz_match_cost(alz_dec *d, int token, uint32_t dist, uint32_t co
      * sous-champs (miroir des uha_rcw_encode), memes unites AlzSseMap que le
      * littéral alz_literal_cost. Defaut (env absent) : chemin crude inchange. */
     if (s_model < 0) {
-        const char *e = getenv("UHA_MODEL");
+        const char *e = ((const char *)0);
         s_model = (e && atoi(e)) ? 1 : 0;
     }
     if (s_model) {
@@ -1707,9 +1704,9 @@ static uint32_t arb_pick_len(alz_dec *d, const uint8_t *plain, uint32_t usize,
     uint32_t L, bestL = 0, bestgain = 0;
 
     if (arglmin < 0) {
-        const char *e = getenv("UHA_ARGLMIN");
+        const char *e = ((const char *)0);
         arglmin = (e && atoi(e) == 0) ? 0 : 1;
-        e = getenv("UHA_COLDLIT");
+        e = ((const char *)0);
         coldlit = (e && atoi(e)) ? 1 : 0;
     }
     /* [RE-DBG parse] sonde lecture-seule : dump les couts par candidat L au
@@ -1849,7 +1846,7 @@ static int s_dp_init = 0, s_dp_window = 0;
 static int dp_on(void)
 {
     if (!s_dp_init) {
-        const char *e = getenv("UHA_DP");
+        const char *e = ((const char *)0);
         int w = e ? atoi(e) : 0;
         s_dp_window = (w == 0) ? 0 : (w < 2 ? 16 : (w > ALZ_DP_WMAX ? ALZ_DP_WMAX : w));
         s_dp_init = 1;
@@ -1902,7 +1899,7 @@ static int s_dp_real = -1;
 static int dp_real(void)
 {
     if (s_dp_real < 0)
-        s_dp_real = getenv("UHA_DPREAL") ? 1 : 0;
+        s_dp_real = ((const char *)0) ? 1 : 0;
     return s_dp_real;
 }
 
@@ -2256,7 +2253,7 @@ static int dp_livegov(void)
 {
     static int s = -1;
     if (s < 0)
-        s = getenv("UHA_LIVEGOV") ? 1 : 0;
+        s = ((const char *)0) ? 1 : 0;
     return s;
 }
 /* [GATED UHA_LIVEGOV, défaut-OFF, §14.044] Cœur single‑pass : avance un réplica du
@@ -2295,7 +2292,7 @@ static int dp_snap(void)
 {
     static int s = -1;
     if (s < 0)
-        s = getenv("UHA_DPSNAP") ? 1 : 0;
+        s = ((const char *)0) ? 1 : 0;
     return s;
 }
 static uint32_t dp_snap_at(alz_dec *d, const uint8_t *plain, uint32_t usize,
@@ -2352,7 +2349,7 @@ static int a3_pendc_on(void)
 {
     static int s_pendc = -1;
     if (s_pendc < 0)
-        s_pendc = getenv("UHA_A3_PENDC") ? 1 : 0;
+        s_pendc = ((const char *)0) ? 1 : 0;
     return s_pendc;
 }
 
@@ -2404,7 +2401,7 @@ static uint32_t s_cl_mixlag      = 37440u;
 static uint32_t s_cl_mixlag_prev = 37440u;
 static uint32_t alz_cl_seed_resolve(void) {
     if (s_cl_seed == 0) {
-        const char *sv = getenv("UHA_CLSEED");
+        const char *sv = ((const char *)0);
         s_cl_seed = sv ? (uint32_t) strtoul(sv, NULL, 10) : 37440u;
         if (s_cl_seed == 0) s_cl_seed = 37440u;
     }
@@ -2500,7 +2497,7 @@ static void c4dens_ensure(void)
         return;
     s_c4df_init = 1;
     {
-        const char *cd = getenv("UHA_C4DENS");
+        const char *cd = ((const char *)0);
         if (cd) {
             s_c4df = fopen(cd, "w");
             if (s_c4df)
@@ -2526,7 +2523,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
      * "row total freqsum nonzero", à diff (dual_diff.py) contre ref_hot_b1.tsv de #17.
      * Test décisif : le maître inline du clone correspond‑il DÉJÀ à l'oracle legacy ? */
     {
-        const char *dp = getenv("UHA_ACLDUMP_PERM");
+        const char *dp = ((const char *)0);
         static int acl_dumped = 0;
         static uint32_t s_maxpos = 0; static int s_diag = 0;
         if (pos > s_maxpos) s_maxpos = pos;
@@ -2561,9 +2558,9 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
         static int s_emiss_once = 0;
         if (!s_emiss_once) {
             s_emiss_once = 1;
-            if (s_acl.emiss < 0) s_acl.emiss = (getenv("UHA_CM_EMISS") != NULL) ? 1 : 0;
-            else s_acl.emiss = (getenv("UHA_CM_EMISS") != NULL) ? 1 : s_acl.emiss;
-            if (s_acl_emiss_aging < 0) s_acl_emiss_aging = (getenv("UHA_ACL_EMISS_AGING") != NULL) ? 1 : 0;   /* [défaut-OFF] */
+            if (s_acl.emiss < 0) s_acl.emiss = (((const char *)0) != NULL) ? 1 : 0;
+            else s_acl.emiss = (((const char *)0) != NULL) ? 1 : s_acl.emiss;
+            if (s_acl_emiss_aging < 0) s_acl_emiss_aging = (((const char *)0) != NULL) ? 1 : 0;   /* [défaut-OFF] */
         }
     }
     if (s_acl.emiss && !s_acl.mem) {
@@ -2577,18 +2574,18 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
         s_acl.sg = 0;
         s_acl.esc_wait = 0;
         if (s_cmwire < 0)
-            s_cmwire = (getenv("UHA_CM_WIRE") != NULL) ? 1 : 0;
+            s_cmwire = (((const char *)0) != NULL) ? 1 : 0;
         if (s_cmwire)
             alz_ps_cmlive_reset(0u);   /* début section 0 : registres+engine frais */
         if (s_cmctxroll < 0)
-            s_cmctxroll = (getenv("UHA_CM_CTXROLL") != NULL) ? 1 : 0;
+            s_cmctxroll = (((const char *)0) != NULL) ? 1 : 0;
         s_cmctx = 0u;                  /* reset du contexte roulant à la section */
         if (s_cmctxroll) {
             if (!s_acl.ar2) s_acl.ar2 = (alz_arena2d_t *) malloc(sizeof(alz_arena2d_t));
             if (s_acl.ar2) alz_arena2d_init(s_acl.ar2, 32u);
         }
         if (s_acl.emiss < 0)
-            s_acl.emiss = (getenv("UHA_CM_EMISS") != NULL) ? 1 : 0;   /* [GATED défaut-OFF] */
+            s_acl.emiss = (((const char *)0) != NULL) ? 1 : 0;   /* [GATED défaut-OFF] */
         s_acl.ctx = 0u;
         if (s_acl.emiss) {
             if (!s_acl.mem) s_acl.mem = (alz_arena2d_t *) malloc(sizeof(alz_arena2d_t));
@@ -2600,14 +2597,14 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
      * `M` par bloc, pas d'un bloc à l'autre en continu → refroidit le block1. */
     if (s_acl.emiss && s_acl.mem && pos > 0u) {
         static uint32_t s_bs = 0u;
-        if (s_bs == 0u) { const char *e = getenv("UHA_CM_EMISS_BS");
+        if (s_bs == 0u) { const char *e = ((const char *)0);
             s_bs = e ? (uint32_t) strtoul(e, NULL, 10) : 12544u; }
         if (s_bs && (pos % s_bs) == 0u) {
             uint32_t r; for (r = 0u; r < ALZ_ARENA2D_MAX_ROW; r++) alz_arena2d_rescale(s_acl.mem, r);
         }
         /* [GATED UHA_ACLDUMP_PERM] dump une fois le maître s_acl.mem au 1er pos>=12544,
          * à confronter au PERM legacy 0xf80230 (row68 Σ~13134 / row37=0). LECTURE seule. */
-        if (getenv("UHA_ACLDUMP_PERM") && pos >= 12544u) {
+        if (((const char *)0) && pos >= 12544u) {
             static int s_dumped = 0;
             if (!s_dumped) {
                 uint32_t rr; s_dumped = 1;
@@ -2635,7 +2632,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
     {
         c4dens_ensure();
         if (s_acllearn_all < 0)
-            s_acllearn_all = (getenv("UHA_ACLLEARN_ALL") != NULL) ? 1 : 0;
+            s_acllearn_all = (((const char *)0) != NULL) ? 1 : 0;
         start = (s_acl.done == ACL_DONE_NONE) ? 0u : s_acl.done + 1u;
         for (q = start; q < pos; q++) {
             uint32_t rowq = 0x341u + 32u * ((q % 3u + 2u) % 3u) + alz_arena_c4_tbucket[s_acl.kprev];
@@ -2659,7 +2656,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
                 static int s_livepromo = -1;
                 uint32_t lp_learn = 0u;
                 if (s_livepromo < 0)
-                    s_livepromo = (getenv("UHA_LIVEPROMO") != NULL) ? 1 : 0;   /* [GATED défaut-OFF §14.039] */
+                    s_livepromo = (((const char *)0) != NULL) ? 1 : 0;   /* [GATED défaut-OFF §14.039] */
                 s_acl.ctx = ((s_acl.ctx << 8) | ((uint32_t) plain[q] & 0xffu)) & 0x1FFFFu;
                 erow = (s_acl.ctx >> 8) & 0x1FFu;
                 /* [DIAG gated UHA_EMISS_ROWQ, isolat, défaut‑OFF] apprendre le maître
@@ -2670,8 +2667,8 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
                 {
                     static int s_erowq = -1; uint32_t mrow;
                     static int s_tok = -1;
-                    if (s_erowq < 0) s_erowq = getenv("UHA_EMISS_ROWQ") ? 1 : 0;
-                    if (s_tok < 0) s_tok = getenv("UHA_EMISS_TOKEN") ? 1 : 0;
+                    if (s_erowq < 0) s_erowq = ((const char *)0) ? 1 : 0;
+                    if (s_tok < 0) s_tok = ((const char *)0) ? 1 : 0;
                     mrow = s_erowq ? ((rowq - 0x341u) & 0x1FFu) : erow;
                     /* [GATED UHA_A3_CTX3DUMP=<chemin>, LECTURE SEULE, DEFAUT-OFF, NON-EMISSIF,
                      * lane ALZ -m3 §13.76x] dump de la MACHINE ctx3 cls3 (`alz_ps_gen_ctxs(3)`)
@@ -2681,7 +2678,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
                     {
                         static int s_a3cx = -1;
                         if (s_a3cx < 0) {
-                            const char *cx3 = getenv("UHA_A3_CTX3DUMP");
+                            const char *cx3 = ((const char *)0);
                             s_a3cx = 0;
                             if (cx3 && *cx3 && usize > 0u && usize <= 0x1000000u) {
                                 uint32_t *ct = (uint32_t *) calloc(usize, sizeof(uint32_t));
@@ -2706,7 +2703,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
                     {
                         static int s_genx = -1; static uint32_t *g_c3 = NULL; static uint32_t g_c3n = 0;
                         if (s_genx < 0) {
-                            s_genx = getenv("UHA_ACL_GENCTX3") ? 1 : 0;
+                            s_genx = ((const char *)0) ? 1 : 0;
                             if (s_genx && usize <= 0x10000u) {
                                 g_c3 = (uint32_t *) calloc(usize, sizeof(uint32_t));
                                 if (g_c3) { alz_ps_gen_ctxs(3, plain, usize, g_c3); g_c3n = usize; }
@@ -2746,14 +2743,14 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
                  * fournit le bon counter (mais son dens chaud est faux) → ne prendre QUE le counter. */
                 {
                     static FILE *s_cd = NULL; static int s_cdi = -1;
-                    if (s_cdi < 0) { const char *ce = getenv("UHA_ACL_CTRDUMP"); s_cdi = (ce && *ce) ? 1 : 0; if (s_cdi) s_cd = fopen(ce, "w"); }
+                    if (s_cdi < 0) { const char *ce = ((const char *)0); s_cdi = (ce && *ce) ? 1 : 0; if (s_cdi) s_cd = fopen(ce, "w"); }
                     if (s_cd) fprintf(s_cd, "%u\t%u\t%u\t%u\t%u\n", (unsigned)q, (unsigned)mrow,
                         (unsigned)s_acl.mem->counter[mrow], (unsigned)s_acl.mem->total[mrow], (unsigned)(cq & 0xffu));
                 }
                 {   /* re‑route du learn‑log sur la ligne réellement apprise */
                     static FILE *s_alz2 = NULL; static int s_alz2_init = -1;
                     if (s_alz2_init < 0) {
-                        const char *al2 = getenv("UHA_ACL_LEARNLOG");
+                        const char *al2 = ((const char *)0);
                         s_alz2_init = (al2 && *al2) ? 1 : 0;
                         if (s_alz2_init) s_alz2 = fopen(al2, "w");
                     }
@@ -2770,7 +2767,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
                 }
                 if (q < 0x10000u && !s_acl_emiss_aging) {   /* [UHA_ACL_EMISS_AGING] learn-only : ne PAS écrire g_lmin_dens (découplage du chaud → pas 71) */
                     static int s_integ = -1;
-                    if (s_integ < 0) s_integ = getenv("UHA_ACL_INTEGRATE") ? 1 : 0;
+                    if (s_integ < 0) s_integ = ((const char *)0) ? 1 : 0;
                     if (s_integ) {
                         /* [port in‑encode] acclive n'écrase le dens QUE des cellules FROIDES (les
                          * chaudes gardent COSTSNAP correct) + ajoute l'ESCAPE `bm[0x402+sel][delta]`.
@@ -2801,7 +2798,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
                          * Sans env : valeur inchangée. */
                         static int s_dval = -1;
                         if (s_dval < 0)
-                            s_dval = getenv("UHA_A3_DENSVAL") ? 1 : 0;
+                            s_dval = ((const char *)0) ? 1 : 0;
                         if (s_dval) {
                             uint32_t f = 0u, t = 0u, cost = 0u;
                             if (g_bm_freq && g_bm_tree) {
@@ -2841,7 +2838,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
              * Défaut‑OFF = zéro effet (g_lmin_live non écrit par cette voie). */
             {
                 static int s_smfeed = -1;
-                if (s_smfeed < 0) s_smfeed = getenv("UHA_ACLIVE_SMFEED") ? 1 : 0;
+                if (s_smfeed < 0) s_smfeed = ((const char *)0) ? 1 : 0;
                 if (s_smfeed && q < 0x10000u) {
                     if (!g_lmin_live) g_lmin_live = (uint32_t *) calloc(0x10000u, sizeof(uint32_t));
                     if (g_lmin_live) { g_lmin_live[q] = cq_cost; g_lmin_live_ready = 1; }
@@ -2882,7 +2879,7 @@ static uint32_t acclive_event(const uint8_t *plain, uint32_t usize, uint32_t pos
         uint32_t erow;
         static int s_erowq_lit = -1;
         uint32_t lrow;
-        if (s_erowq_lit < 0) s_erowq_lit = getenv("UHA_EMISS_ROWQ") ? 1 : 0;
+        if (s_erowq_lit < 0) s_erowq_lit = ((const char *)0) ? 1 : 0;
         s_acl.ctx = ((s_acl.ctx << 8) | ((uint32_t) plain[pos] & 0xffu)) & 0x1FFFFu;
         erow = (s_acl.ctx >> 8) & 0x1FFu;
         /* [gated UHA_EMISS_ROWQ] ligne delta‑2D du littéral = 32·phase + affinité(base[3] retiré) */
@@ -2976,7 +2973,7 @@ static uint32_t cl_bm_predict(alz_dec *d, const uint8_t *plain)
  * RÉEL du decide legacy (c30e_proxybud.tsv). zéro effet défaut. */
 static void lmin_dump_gated(uint32_t usize)
 {
-    const char *dp = getenv("UHA_DENSDUMP");
+    const char *dp = ((const char *)0);
     if (dp && g_lmin_dens) {
         FILE *f = fopen(dp, "w");
         uint32_t q;
@@ -3043,7 +3040,7 @@ static void emit_walk_dump(uint32_t pos, int is_match, int token,
     if (g_a3_pass != 0 && !is_match && g_a3_litmask && pos < g_a3_litmask_n)
         g_a3_litmask[pos] = 1u;
     if (!s_inited) {
-        const char *ep = getenv("UHA_EMITWALK");
+        const char *ep = ((const char *)0);
         s_inited = 1;
         if (ep) s_f = fopen(ep, "w");
     }
@@ -3134,7 +3131,7 @@ static void c4pre_dens_dump(const uint8_t *plain, uint32_t usize, const char *pa
     uint32_t q, row, sym, kprev = 0u, start;
     int sg = 0, mode = 0;
     static const uint32_t bpos[6] = {0x0000u,0x3100u,0x620cu,0x931cu,0xc4ffu,0xff00u};
-    const char *mv = getenv("UHA_C4PREMODE");
+    const char *mv = ((const char *)0);
     (void)bpos;
     if (mv && *mv) mode = atoi(mv);
     if (usize > 0x10000u) return;
@@ -3258,7 +3255,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
     /* [GATED UHA_A3_STATEPOS] position du dump [A3FD] (défaut 16685, historique). */
     static long s_spos = -2;
     if (s_spos == -2) {
-        const char *sp0 = getenv("UHA_A3_STATEPOS");
+        const char *sp0 = ((const char *)0);
         s_spos = sp0 ? strtol(sp0, NULL, 10) : 16685L;
     }
     extern unsigned g_a3_hw_count;   /* [DIAG] cadence rescales working (m21t) */
@@ -3283,14 +3280,14 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
     M = s_lw_m;
     if (!M)
         return;
-    e = getenv("UHA_LIVEWALK_INC");
+    e = ((const char *)0);
     inc = e ? (uint32_t) strtoul(e, NULL, 10) : 32u;
     if (inc == 0u) inc = 32u;
-    e = getenv("UHA_LIVEWALK_CTX");
+    e = ((const char *)0);
     use_cls3 = e ? (atoi(e) != 0) : a3_promo_on("UHA_LIVEWALK_CTX");
-    e = getenv("UHA_LIVEWALK_CTXCLASS");
+    e = ((const char *)0);
     if (e) { ctx_class = atoi(e); use_cls3 = 1; }   /* [TEST] classe de ctx du maître (0..4) ; cls0 = 82% warm vs cls3 */
-    else if (getenv("UHA_NOMM") && getenv("UHA_NOMM")[0] == '1') {
+    else if (uha_get_nomm()) {
         ctx_class = 0;
         use_cls3 = 1;                               /* -mm- : désactive les classes multimédias 1..4 */
     }
@@ -3311,13 +3308,13 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
         }
         for (k = 1; k < 5; k++) if (cnt[k] > cnt[bestc]) bestc = k;
         ctx_class = bestc; use_cls3 = 1;
-        if (getenv("UHA_A3TP_DBG"))
+        if (((const char *)0))
             fprintf(stderr, "[A3CA] gagnante exportee=%d blocs=%d uniforme=%d ctx_class=%d\n",
                     alz_ps_snapwin_blk[0], alz_ps_snapwin_n, uni, ctx_class);
     }
-    e = getenv("UHA_LIVEWALK_AGE");
+    e = ((const char *)0);
     age_cadence = e ? (atoi(e) != 0) : 0;   /* 1 = aging master 0x40ffa0 en plus du @0x4000 working ; défaut 0 (GT halving = working) */
-    e = getenv("UHA_LIVEWALK_LEARN");
+    e = ((const char *)0);
     learn_mode = e ? atoi(e) : 1;           /* 0=jamais 1=littéraux-seuls 2=dense 3=cold-seul(ré‑armes) 6=5‑classes */
     if (learn_mode == 6) use_cls3 = 1;      /* mode 6 : coût de sortie lu au row cls3, apprentissage = 5 passes */
     if (learn_mode == 7) { use_cls3 = 1; ctx_class = 3; }   /* mode 7 : accumulation cls0 (ctxall[0]) + lecture coût cls3 */
@@ -3329,26 +3326,26 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
      * l'hypothèse §14.130 (bloc0 : garde de scope ∞ ⟹ learn dense) contre la banque
      * littéraux-seuls. LECTURE/ÉCRITURE limitées à l'arène locale `M` de cette pré-passe.
      * Défaut-OFF : aucun effet sur la banque reproductible. */
-    e = getenv("UHA_A3_MASTERINCODE");
+    e = ((const char *)0);
     if (e && *e) {
         learn_mode = (atoi(e) == 3) ? 3 : 2;
         age_period = 0u;
     }
-    e = getenv("UHA_LIVEWALK_AGE_PERIOD");
+    e = ((const char *)0);
     age_period = e ? (uint32_t) strtoul(e, NULL, 10) : 0u;  /* ré‑arme `rescale_master`(0x40ffa0) tous N pos (commit/passe) ; 0=frontière bloc seule */
-    stats = getenv("UHA_LIVEWALK_STATS") ? 1 : 0;
+    stats = ((const char *)0) ? 1 : 0;
     {   /* [GATED UHA_LIVEWALK_TRAJ=chemin] dump par-position de la trajectoire maître
          * (rel_idx\ttotal[68]\ttotal[37]) pour confront DIRECT contre GT
          * _scratch/a150_sc/gt/leg_b1_tot{68,37}_1300.log. LECTURE seule (hors out). */
-        const char *tp = getenv("UHA_LIVEWALK_TRAJ");
+        const char *tp = ((const char *)0);
         if (tp && *tp) { tj = fopen(tp, "w"); if (tj) fprintf(tj, "idx\tq\trow\tdelta\ttotal68\ttotal37\n"); }
     }
     {   /* [DIAG per-slot, GATED défaut-OFF, LECTURE SEULE] dump q\trow\tsym\tfreqF\tTOT\tdens */
-        const char *pp = getenv("UHA_LIVEWALK_SLOTPROBE");
+        const char *pp = ((const char *)0);
         if (pp && *pp) sp = fopen(pp, "w");
     }
     {   /* [GATED UHA_A3_ESCLINE_DBG, LECTURE SEULE] en-tête du journal de crédits. */
-        const char *lp = getenv("UHA_A3_ESCLINE_DBG");
+        const char *lp = ((const char *)0);
         if (lp && *lp) {
             char jp[1100];
             elk = fopen(lp, "w");
@@ -3380,7 +3377,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
      * (pos row sym freq counter total num p cost) — confrontation au ring legacy (m15). */
     static FILE *celldump = NULL;
     {
-        const char *cdp = getenv("UHA_A3_CELLDUMP");
+        const char *cdp = ((const char *)0);
         if (cdp && *cdp) celldump = fopen(cdp, "w");
     }
     /* [GATED UHA_A3_ESCFEED_DBG=<f>, LECTURE SEULE] compteurs d'événements froids cls3
@@ -3390,7 +3387,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
     static int efdbg = -1;
     static FILE *s_efev = NULL;   /* journal des cellules froides bloc 0 (pos row sym) */
     if (efdbg < 0) {
-        const char *efp0 = getenv("UHA_A3_ESCFEED_DBG");
+        const char *efp0 = ((const char *)0);
         char fnev[1024];
         efdbg = efp0 ? 1 : 0;
         if (efp0 && *efp0) {
@@ -3409,10 +3406,10 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
     static int s_esc_seeded = 0;   /* table déjà l'état du bloc 1 (graine GT) : pas de feed b1 */
     static int escfeed = -1;
     if (escfeed < 0) {
-        escfeed = getenv("UHA_A3_ESCFEED") ? 1 : 0;
+        escfeed = ((const char *)0) ? 1 : 0;
         if (escfeed) { uint32_t s0; for (s0 = 0u; s0 < 256u; s0++) s_esc_f[s0] = 4u; }
     }
-    if (s_escold < 0) s_escold = getenv("UHA_A3_ESCCOLD") ? 1 : 0;
+    if (s_escold < 0) s_escold = ((const char *)0) ? 1 : 0;
     /* [GATED UHA_A3_ESCLINE, PROMUE tour 138 — DÉFAUT‑ON, échappatoire `UHA_A3_ESCLINE=0`]
      * LIGNE d'ESCAPE `0x402+cls3` DÉRIVÉE, sans fichier injecté. Loi MESURÉE (sonde `UHA_A3_ESCLINE_DBG` + journal de crédits
      * de la capture n°10, `work/a3_esc_events.py`) : un crédit = **écriture FROIDE du
@@ -3430,7 +3427,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
     {
         if (a3_promo_on("UHA_A3_ESCLINE")) {
             uint32_t s1;
-            const char *ei = getenv("UHA_A3_ESCLINE_INC");
+            const char *ei = ((const char *)0);
             escline = 1;
             /* Le pas de la ligne est `WORD[0x45DCCE + 2·data_row]` : **mesuré** 16 pour cls 3
              * (151/151 év., ligne 1029 — capture n°10), **6 pour cls 0** (drow 768 constant,
@@ -3451,7 +3448,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
     {   /* [GATED UHA_A3_ESCOLDFILE=<f>, DIAGNOSTIC] table STATIQUE de la ligne d'escape
          * `0x402+cls3` : total en 1re ligne non-#, puis `sym freq` (source GT, m9 cold rows).
          * Sert à MESURER l'impact du terme froid ; ne se promet pas from-scratch. */
-        const char *ef = getenv("UHA_A3_ESCOLDFILE");
+        const char *ef = ((const char *)0);
         if (ef && *ef) {
             FILE *f = fopen(ef, "r");
             if (f) {
@@ -3476,7 +3473,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
         }
     }
     {   /* [GATED UHA_A3_ESCOLDMOD=<f>, MESURE] charge les états par bloc (1..5). */
-        const char *em = getenv("UHA_A3_ESCOLDMOD");
+        const char *em = ((const char *)0);
         static int em_loaded = -1;
         if (em_loaded < 0) {
             uint32_t s0;
@@ -3519,7 +3516,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
                     (unsigned) s_emod_t[4], (unsigned) s_emod_t[5]);
     }
     alz_arena2d_init(M, (uint16_t) inc);
-    M->aging_on = a3_promo_on("UHA_LIVEWALK_AGING") ? 1 : (getenv("UHA_A3_MASTERLAW") ? 2 : 0);   /* [C6-ter défaut-OFF] ; [UHA_A3_MASTERLAW] loi maître 0x40ffa0 root+master_total (registre m23) */
+    M->aging_on = a3_promo_on("UHA_LIVEWALK_AGING") ? 1 : (((const char *)0) ? 2 : 0);   /* [C6-ter défaut-OFF] ; [UHA_A3_MASTERLAW] loi maître 0x40ffa0 root+master_total (registre m23) */
     if (use_cls3) {
         if (s_lw_ctx_cap < need_u) {
             uint32_t *nc = (uint32_t *) realloc(s_lw_ctx3, sizeof(uint32_t) * (size_t) need_u);
@@ -3552,7 +3549,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
          * (`q row sym`) pour confronter la loi de ligne du maître (journal `m18`) au
          * mapping du clone, position par position. Aucun effet hors env. */
         {
-            const char *cd = getenv("UHA_A3_CTX3DUMP");
+            const char *cd = ((const char *)0);
             if (cd && *cd && ctx3) {
                 FILE *cf = fopen(cd, "w");
                 if (cf) {
@@ -3568,7 +3565,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
         /* [GATED UHA_A3_ESCWRDUMP=<f>, canal ÉCRITURE] dump `q row sym` du canal maître
          * (ligne d'escape quand 0x41031f a tiré) — vérification vs machine fermée. */
         {
-            const char *wd = getenv("UHA_A3_ESCWRDUMP");
+            const char *wd = ((const char *)0);
             if (wd && *wd && escwr) {
                 FILE *wf = fopen(wd, "w");
                 if (wf) {
@@ -3615,9 +3612,9 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
              * maître cumulée à l'ENTRÉE de chaque bloc (registre m23_c2 :
              * b0 69 · b1 44 · b2 32 · b3 27 · b4 3 · b5 1 = 176). */
             extern unsigned g_a3_halv_count;
-            if (getenv("UHA_A3_MASTERLAW_COUNT"))
+            if (((const char *)0))
                 fprintf(stderr, "[A3MRBLK] b=%u halv_cum=%u\n", (unsigned) b, g_a3_halv_count);
-            if (getenv("UHA_A3_WORKARENA"))
+            if (((const char *)0))
                 fprintf(stderr, "[A3WHBLK] b=%u hw_resc_cum=%u (GT m21t cum: 0/164/323/486/651/865)\n",
                         (unsigned) b, (unsigned) g_a3_hw_count);
         }
@@ -3651,7 +3648,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
                 Hw->total[r2]   = (uint16_t)(s2 + M->mtot[r2]);
                 Hw->counter[r2] = (uint16_t) M->mtot[r2];
             }
-            if (getenv("UHA_A3_WORKARENA_DUMP"))
+            if (((const char *)0))
                 fprintf(stderr,
                         "[A3WH] b=%u H:=P row35(sfreq=%u mtot=%u total=%u cnt=%u) row5(sfreq=%u mtot=%u total=%u)\n",
                         (unsigned) b, (unsigned)(Hw->total[35u] - Hw->counter[35u]),
@@ -3682,7 +3679,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
                     s_esc_cnt[s3] = 0u;
                 }
                 s_esc_t += 16u * na;
-                if (getenv("UHA_A3_ESCFEED_DBG"))
+                if (((const char *)0))
                     fprintf(stderr, "[A3EF] b=%u feed +%u evts -> total=%u (GT bloc1=2528)\n",
                             (unsigned) b, (unsigned) na, (unsigned) s_esc_t);
             } else if (escfeed && b > 0u && s_esc_seeded && b == 1u) {
@@ -3691,7 +3688,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
             }
             /* [GATED UHA_A3_ESCFEED_DBG] dump des compteurs froids cls3 du bloc 0 (entrée b1). */
             if (efdbg && b == 1u) {
-                const char *efp = getenv("UHA_A3_ESCFEED_DBG");
+                const char *efp = ((const char *)0);
                 FILE *ef = (efp && *efp) ? fopen(efp, "w") : NULL;
                 if (ef) {
                     uint32_t s, ta = 0u, tl = 0u;
@@ -3712,7 +3709,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
          * cellules non nulles (`row sym freq`). Sert a la carte d'ecart contre le
          * registre PERM phys band (perm_b{b}_band_768-1023.raw.txt). Zero effet sans env. */
         if (b > 0u) {
-            const char *sd = getenv("UHA_A3_STATEDUMP");
+            const char *sd = ((const char *)0);
             if (sd && *sd) {
                 char fn[1024];
                 FILE *f;
@@ -3755,10 +3752,10 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
          * bloc1 est un défaut d'ÉTAT D'ENTRÉE (→ le scan convergerait ~99% vs m7_sm_gt) ou
          * de CADENCE intra-bloc (→ resterait ~25%). GT en entrée = LOCALISATION uniquement,
          * JAMAIS câblé à l'émission. Zéro effet sans env. */
-        if (b == 1u && getenv("UHA_SEED_B1FREQ")) {
-            const char *ff = getenv("UHA_SEED_B1FREQ");
-            const char *ft = getenv("UHA_SEED_B1TOTAL");
-            const char *fk = getenv("UHA_SEED_B1CTR");
+        if (b == 1u && ((const char *)0)) {
+            const char *ff = ((const char *)0);
+            const char *ft = ((const char *)0);
+            const char *fk = ((const char *)0);
             FILE *sf;
             uint32_t k;
             if ((sf = fopen(ff, "r"))) {          /* freq[row*256+sym] 131072 u16 */
@@ -3881,7 +3878,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
                 (void) alz_arena2d_score(Hw, row, sym, NULL);   /* learn scan + rescale working */
                 if (Hw->total[row] < Tc) g_a3_hw_count++;      /* rescale working de H (cadence m21t) */
                 if ((long) q == s_spos) {
-                    const char *sd2 = getenv("UHA_A3_STATEDUMP");
+                    const char *sd2 = ((const char *)0);
                     if (sd2 && *sd2)
                     {
                         uint32_t ev = s_emod_cur ? s_emod_cur[sym] : 4u;
@@ -3922,7 +3919,7 @@ static void live_walk_master_prepass(const uint8_t *plain, uint32_t usize, uint3
                 /* [GATED UHA_A3_STATEDUMP] etat PRE-learn lu par le scoreur a la 1re
                  * divergence connue (pos 16685). LECTURE seule. */
                 if ((long) q == s_spos) {
-                    const char *sd2 = getenv("UHA_A3_STATEDUMP");
+                    const char *sd2 = ((const char *)0);
                     if (sd2 && *sd2)
                         fprintf(stderr, "[A3FD] pos=%u row=%u sym=%u freq=%u total=%u counter=%u cost=%u\n",
                                 (unsigned) q, (unsigned) row, (unsigned) sym,
@@ -4096,20 +4093,20 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
     const char *e;
     FILE *sp = NULL;
     if (!plain || !out || usize > 0x10000u) return;
-    e = getenv("UHA_LIVEWALK_INC"); inc = e ? (uint32_t)strtoul(e,NULL,10) : 32u; if(!inc) inc=32u;
-    e = getenv("UHA_LIVEWALK_DENSCLS"); if (e) dens_cls = atoi(e);
-    physperm = getenv("UHA_LIVEWALK_PHYSPERM") ? 1 : 0;
+    e = ((const char *)0); inc = e ? (uint32_t)strtoul(e,NULL,10) : 32u; if(!inc) inc=32u;
+    e = ((const char *)0); if (e) dens_cls = atoi(e);
+    physperm = ((const char *)0) ? 1 : 0;
     /* [GATED UHA_LIVEWALK_FEEDSELF, DEFAUT-OFF, ISOLAT, point 3] quand l'émission propre du clone
      * est la SOURCE (feedself), le commit scan HOT→Pph est DÉSACTIVÉ pour que l'émission reste
      * l'unique scribe de Pph (sinon le scan-learn écrase l'avancée par-émission). Zéro effet sinon. */
-    {   static int s_fs = -1; if (s_fs < 0) s_fs = getenv("UHA_LIVEWALK_FEEDSELF") ? 1 : 0; 
+    {   static int s_fs = -1; if (s_fs < 0) s_fs = ((const char *)0) ? 1 : 0; 
         if (s_fs && !physperm) { /* FEEDSELF requiert PHYSPERM */ }
         feedself = s_fs;
     }
     {   /* [COUCHE1 gated UHA_LIVEWALK_FEEDDRIVE] arène = composition feed(+=bx par émission)+rescale@0x4000,
          * dens lue depuis Pph avancé par position, SANS scan-learn source-order. Recette validée sim. */
         static int s_fd = -1;
-        if (s_fd < 0) s_fd = getenv("UHA_LIVEWALK_FEEDDRIVE") ? 1 : 0;
+        if (s_fd < 0) s_fd = ((const char *)0) ? 1 : 0;
         feeddrive = s_fd;
     }
     {   /* [COUCHE1 gated UHA_LIVEWALK_REALPRIM] passe0 fidèle : HOT rechargé UNE fois/bloc depuis Pph(band=PERM),
@@ -4117,7 +4114,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
          * atomiques canoniques) qui ACCUMULE dans HOT → la comptabilité counter/total est celle qui a
          * généré m9 (pas mon hand-roll). Zéro effet hors gate. */
         static int s_rp = -1;
-        if (s_rp < 0) s_rp = getenv("UHA_LIVEWALK_REALPRIM") ? 1 : 0;
+        if (s_rp < 0) s_rp = ((const char *)0) ? 1 : 0;
         realprim = s_rp;
     }
     if (!Pph) {
@@ -4127,7 +4124,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
     {   /* init une fois de l'arène physique partagée */
         static int s_pph_init = 0;
         if (!s_pph_init) {
-            int agon = getenv("UHA_LIVEWALK_AGING") ? 1 : 0;   /* [C6-ter défaut-OFF] double porte aging */
+            int agon = ((const char *)0) ? 1 : 0;   /* [C6-ter défaut-OFF] double porte aging */
             for (rr0 = 0u; rr0 < 3u; rr0++) { alz_arena2d_init(&Pph[rr0], (uint16_t)inc); Pph[rr0].aging_on = agon; }
             s_pph_init = 1;
         }
@@ -4136,7 +4133,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
     if (!H) return;
     {
         static int s_pmg = -1;
-        if (s_pmg < 0) s_pmg = getenv("UHA_LIVEWALK_PMMASTER") ? 1 : 0;
+        if (s_pmg < 0) s_pmg = ((const char *)0) ? 1 : 0;
         if (s_pmg && !g_pm) { g_pm = (alz_arena2d_t*)malloc(sizeof(alz_arena2d_t)); if (g_pm) alz_arena2d_init(g_pm, (uint16_t)inc); }
     }
     /* [COUCHE1 gated UHA_LIVEWALK_ESC_MODEL, isolat, défaut‑OFF] accumulateur d'ESCAPE
@@ -4147,7 +4144,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * Zéro GT en émission : état RECONSTRUIT par le scan, validé vs m9 par cellule. */
     static uint16_t (*esc)[256] = NULL; static uint32_t esctot[8];
     int escmodel; uint32_t escp;
-    { static int s_em=-1; if (s_em<0) s_em = getenv("UHA_LIVEWALK_ESC_MODEL") ? 1 : 0; escmodel = s_em; }
+    { static int s_em=-1; if (s_em<0) s_em = ((const char *)0) ? 1 : 0; escmodel = s_em; }
     if (escmodel) {
         if (!esc) { esc = (uint16_t (*)[256])malloc(8u * 256u * sizeof(uint16_t)); if (!esc) escmodel = 0; }
         if (esc) { for (escp=0; escp<8u; escp++){ uint32_t s2; esctot[escp]=512u; for (s2=0u;s2<256u;s2++) esc[escp][s2]=2u; } }
@@ -4165,7 +4162,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * LECTURE seule d'un fichier, zéro GT en émission. */
     long *seedvals = NULL; size_t seedn = 0;
     {
-        const char *sf = getenv("UHA_LIVEWALK_SEEDPERM");
+        const char *sf = ((const char *)0);
         if (sf && *sf) {
             FILE *fp = fopen(sf, "r");
             if (fp) {
@@ -4180,8 +4177,8 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * seq<base[b]) → produit le PERM d'entrée de CHAQUE bloc par le feed oracle réel.
      * Rescale FLOOR ÷2 quand total>=0x4000 (aging approximatif ; #18 finalise). DIAG only. */
     long *fline = NULL, *fsym = NULL, *fbx = NULL, *fseq = NULL; size_t fn = 0, fpos = 0;
-    if (getenv("UHA_LIVEWALK_FEEDPHYS")) {
-        const char *ff = getenv("UHA_LIVEWALK_FEEDPHYS");
+    if (((const char *)0)) {
+        const char *ff = ((const char *)0);
         FILE *fp = (*ff=='=')? fopen(ff+1, "r") : (ff && *ff ? fopen(ff,"r") : NULL);
         if (fp) {
             char ln[256]; size_t cap = 40000;
@@ -4207,8 +4204,8 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * d'emission. Alimente les MEMES tableaux que FEEDPHYS (fline/fsym/fbx/fseq) => le replay
      * par-emission existant (master_learn + double porte aging) tourne sur l'emission PROPRE du
      * clone, sans GT. Zero effet hors gate. Juge : an_front (distribution -> band) puis firstdiv. */
-    if (!fline && getenv("UHA_LIVEWALK_FEEDSELF") && ctxc[3]) {
-        const char *ls = getenv("UHA_LIVEWALK_FEEDSELF");
+    if (!fline && ((const char *)0) && ctxc[3]) {
+        const char *ls = ((const char *)0);
         FILE *fp = (*ls=='=') ? fopen(ls+1, "r") : (ls && *ls ? fopen(ls, "r") : NULL);
         if (fp) {
             char ln[64]; size_t cap = 40000; long q;
@@ -4226,7 +4223,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
              * ; seul un SINGLE‑PASS où score ET learn partagent un même ctx en ordre d'émission (TASK16)
              * peut rapprocher ces lignes. Zéro effet hors gate. */
             static uint32_t *s_l3row = NULL, *s_l3sym = NULL; static uint32_t s_l3n = 0; static int s_l3ok = 0;
-            int lag3 = getenv("UHA_LIVEWALK_FEEDSELF_LAG3") ? 1 : 0;
+            int lag3 = ((const char *)0) ? 1 : 0;
             if (lag3 && (!s_l3ok || s_l3n != usize)) {
                 free(s_l3row); free(s_l3sym); s_l3row=NULL; s_l3sym=NULL; s_l3ok=0;
                 s_l3row = (uint32_t*)calloc(usize ? usize : 1u, sizeof(uint32_t));
@@ -4249,7 +4246,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                     if (sscanf(ln, "%ld", &q) != 1) continue;
                     if (q < 0 || (unsigned long)q >= usize) continue;
                     uint32_t row, sy;
-                    static int ph2 = -1; if (ph2<0) ph2 = getenv("UHA_LIVEWALK_FEEDSELF_PHASE2")?1:0;
+                    static int ph2 = -1; if (ph2<0) ph2 = ((const char *)0)?1:0;
                     if (lag3 && s_l3ok) { row = s_l3row[(size_t)q]; sy = s_l3sym[(size_t)q]; }
                     else {
                         uint32_t sc = ctxc[3][(size_t)q]; row = (sc >> 8) & 0x1FFu; sy = sc & 0xFFu;
@@ -4286,7 +4283,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * Zéro effet hors gate (rsched=0 → seuil conservé). DIAGNOSTIC, pas GT en émission. */
     long *rsrow = NULL; long *rsseq = NULL; size_t rsn = 0, rspos = 0; int rsched = 0;
     {
-        const char *rs = getenv("UHA_LIVEWALK_RESCALE_SCH");
+        const char *rs = ((const char *)0);
         if (rs && *rs) {
             FILE *fp = fopen(rs, "r");
             if (fp) {
@@ -4316,7 +4313,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * DIAGNOSTIC/vérification uniquement, JAMAIS voie d'expédition (comme SEEDPERM). */
     long *odens = NULL; int oracle = 0;
     {
-        const char *od = getenv("UHA_LIVEWALK_ORACLE_DENS");
+        const char *od = ((const char *)0);
         if (od && *od) {
             FILE *fp = fopen(od, "r");
             if (fp) {
@@ -4346,7 +4343,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * est déja calculé). GT de DIAGNOSTIC uniquement, JAMAIS voie d'expédition. */
     long *escM = NULL; long *escFen = NULL; char *escSet = NULL; int escdbg = 0;
     {
-        const char *ep = getenv("UHA_LIVEWALK_ESC_DBG");
+        const char *ep = ((const char *)0);
         if (ep && *ep) {
             FILE *fp = fopen(ep, "r");
             if (fp) {
@@ -4379,7 +4376,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * Étape warmed‑live (pass émission → fichier → pass dens), comme EMIPROD lits.txt. DIAG→port. */
     long *aclcnt = NULL; long *acltot = NULL; char *aclset = NULL; int aclctr = 0;
     {
-        const char *af = getenv("UHA_LIVEWALK_ACCLIVE_CTRFILE");
+        const char *af = ((const char *)0);
         if (af && *af) {
             FILE *fp = fopen(af, "r");
             if (fp) {
@@ -4406,7 +4403,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
      * arena2d rescale), pas par le banc figé. Zéro GT en émission (DIAGNOSTIC). */
     alz_arena2d_t *Pfeed = NULL;
     {
-        const char *pf = getenv("UHA_LIVEWALK_PERMFEED");
+        const char *pf = ((const char *)0);
         if (pf && *pf) {
             FILE *fp = fopen(pf, "r");
             if (fp) {
@@ -4433,7 +4430,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
             }
         }
     }
-    { const char *pp = getenv("UHA_LIVEWALK_4PASS_PROBE"); if (pp && *pp) sp = fopen(pp,"w"); }
+    { const char *pp = ((const char *)0); if (pp && *pp) sp = fopen(pp,"w"); }
     for (b = 0u; b < 6u; b++) {
         uint32_t base = blpos[b], len = blen[b];
         if (base >= usize) continue;
@@ -4449,7 +4446,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
             static FILE *s_pd = NULL;
             static int s_pd_init = -1;
             if (s_pd_init < 0) {
-                const char *pe = getenv("UHA_LIVEWALK_PHDUMP");
+                const char *pe = ((const char *)0);
                 s_pd_init = 1;
                 if (pe && *pe) { s_pd = fopen(pe, "w");
                     if (s_pd) fprintf(s_pd, "b\tphys\trelrow\tsum\tnz\tcounter\ttotal\tpromo\n"); }
@@ -4476,7 +4473,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
          * @18432 vient du seed incomplet (je ne seedais que b1). Phys lignes 768..1023. */
         {
             static const char *s_bd = NULL; static int s_bd_init = -1;
-            if (s_bd_init < 0) { s_bd = getenv("UHA_LIVEWALK_BANKDIR"); s_bd_init = (s_bd && *s_bd) ? 1 : 0; }
+            if (s_bd_init < 0) { s_bd = ((const char *)0); s_bd_init = (s_bd && *s_bd) ? 1 : 0; }
             if (s_bd_init && b >= 1u && b <= 5u) {
                 char bpath[512]; long *bv = NULL; size_t bn = 0;
                 snprintf(bpath, sizeof bpath, "%s/perm_b%u_band_768-1023.raw.txt", s_bd, (unsigned)b);
@@ -4519,9 +4516,9 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
             }
         }
         if ((seedvals || Pfeed) && b == 1u) {         /* seed/feed = commit de bloc0 → entrée bloc1 UNIQUEMENT ; b>=2 propage dynamiquement (Pc=commit) */
-            if (physperm && seedvals && !getenv("UHA_LIVEWALK_TOTNOTCOUNTER")) {   /* STEP1 : seed→Pph PHYSIQUE (band #18) */
+            if (physperm && seedvals && !((const char *)0)) {   /* STEP1 : seed→Pph PHYSIQUE (band #18) */
                 uint32_t phys;
-                uint32_t clean = getenv("UHA_LIVEWALK_SEEDCLEANCNT") ? 1u : 0u;   /* [COUCHE1 gated] purge le counter hérité du commit bloc0 : le band PERM d'ENTRÉE porte freq+total+counter maîtres, PAS le counter transitoire de la passe bloc0. Sans ça, les lignes froides (row29/27/67 sym…) héritent total≈counter(bloc0) et sur-chauffent (dens trop basse → sm 136387 vs 184287). */
+                uint32_t clean = ((const char *)0) ? 1u : 0u;   /* [COUCHE1 gated] purge le counter hérité du commit bloc0 : le band PERM d'ENTRÉE porte freq+total+counter maîtres, PAS le counter transitoire de la passe bloc0. Sans ça, les lignes froides (row29/27/67 sym…) héritent total≈counter(bloc0) et sur-chauffent (dens trop basse → sm 136387 vs 184287). */
                 for (phys = 768u; phys < 1024u && phys < 3u*ALZ_ARENA2D_MAX_ROW; phys++) {
                     alz_arena2d_t *ch = &Pph[phys >> 9]; uint32_t orow = phys & (ALZ_ARENA2D_MAX_ROW-1u);
                     uint32_t sy, sum = 0u;
@@ -4543,7 +4540,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                  * `counter[5]=29` LEG est le SEUL bloqueur @19456 → then le port fidèle =
                  * capturer `*0x4373dc`. GT de DIAGNOSTIC, jamais expédition. */
                 {
-                    const char *cs = getenv("UHA_LIVEWALK_CTRSEED");
+                    const char *cs = ((const char *)0);
                     if (cs && *cs) {
                         FILE *cf = fopen(cs, "r");
                         if (cf) {
@@ -4559,7 +4556,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                         }
                     }
                 }
-            } else if (physperm && seedvals && getenv("UHA_LIVEWALK_TOTNOTCOUNTER")) {
+            } else if (physperm && seedvals && ((const char *)0)) {
                 /* [DIAG GATED] TOT = Σfreq SANS counter : teste l'hypothèse que l'inflation
                  * de TOT sur lignes rares vient du counter d'entrée, pas de Σfreq (fc exact). */
                 uint32_t phys;
@@ -4602,7 +4599,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
          * figé (garder celui du band). Appliqué APRÈS le seed de freq (BANKDIR/SEEDPERM) pour ne pas
          * être écrasé. Zéro effet hors gate. */
         {
-            const char *cd = getenv("UHA_LIVEWALK_CTRSEEDDIR");
+            const char *cd = ((const char *)0);
             if (cd && *cd && b >= 1u && b <= 5u && physperm) {
                 char cpath[512];
                 snprintf(cpath, sizeof cpath, "%s/ctr_entry_b%u.tsv", cd, (unsigned)b);
@@ -4670,7 +4667,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                             rspos++;
                         }
                     }
-                    if (rsched || feeddrive || (fline && getenv("UHA_LIVEWALK_FEEDPHYS_REREAD"))) {   /* relire H depuis Pph pour que la dens voie feed(avancé par position)+rescale */
+                    if (rsched || feeddrive || (fline && ((const char *)0))) {   /* relire H depuis Pph pour que la dens voie feed(avancé par position)+rescale */
                         uint32_t phs = s_pbase[dens_cls] + row;
                         if (phs < 3u*ALZ_ARENA2D_MAX_ROW) {
                             alz_arena2d_t *chs=&Pph[phs>>9]; uint32_t ors=phs&(ALZ_ARENA2D_MAX_ROW-1u); uint32_t s2;
@@ -4698,7 +4695,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                      * renvoie la proba AVANT learn) fournit le secondaire propre. Gate UHA_LIVEWALK_PMMASTER. */
                     {
                         static int s_pmm = -1;
-                        if (s_pmm < 0) s_pmm = getenv("UHA_LIVEWALK_PMMASTER") ? 1 : 0;
+                        if (s_pmm < 0) s_pmm = ((const char *)0) ? 1 : 0;
                         if (s_pmm && g_pm) {
                             gmf = g_pm->freq[(row<<8)|sym]; gmc = g_pm->counter[row]; gmt = g_pm->total[row];
                             uint32_t ltl2 = 0u;
@@ -4733,7 +4730,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                     {
                         static int s_eff = -1; static uint32_t s_ef[6][256]; static uint32_t s_efen[6];
                         if (s_eff < 0) {
-                            const char *ef = getenv("UHA_LIVEWALK_ESCFILE");
+                            const char *ef = ((const char *)0);
                             s_eff = (ef && *ef) ? 1 : 0;
                             if (s_eff) {
                                 FILE *fp = fopen(ef, "r");
@@ -4778,7 +4775,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                         /* [DIAG dump esc MODEL vs m9] slot ci delta freqM_apres tot ; pour extraire
                          * la loi d'alimentation (facteur d'évènements vs legacy). */
                         { static FILE *s_ed=NULL; static int s_edi=-1;
-                          if (s_edi<0){ const char*ee=getenv("UHA_LIVEWALK_ESC_MODEL_DUMP"); s_edi=(ee&&*ee)?1:0; if(s_edi) s_ed=fopen(ee,"w"); }
+                          if (s_edi<0){ const char*ee=((const char *)0); s_edi=(ee&&*ee)?1:0; if(s_edi) s_ed=fopen(ee,"w"); }
                           if (s_ed) fprintf(s_ed,"%u\t%u\t%u\t%u\t%u\n",(unsigned)(q-12544u),(unsigned)(0x3F9u+ci),(unsigned)sym,(unsigned)esc[ci][sym],(unsigned)esctot[ci]);
                         }
                     }
@@ -4818,7 +4815,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                  * par c → aliasing. Zéro effet hors gate. */
                 {
                     static int s_rpap = -1;
-                    if (s_rpap < 0) s_rpap = getenv("UHA_LIVEWALK_RP_ALLPASS") ? 1 : 0;
+                    if (s_rpap < 0) s_rpap = ((const char *)0) ? 1 : 0;
                     if (realprim && s_rpap && (int)c != dens_cls) {
                         uint32_t ltl = 0u;
                         alz_arena2d_score(H, row, sym, &ltl);
@@ -4826,7 +4823,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                 }
                 if (!feeddrive && !realprim) {   uint32_t idx = (row<<8)|sym;    /* LEARN source-order (sauté si feeddrive OU realprim : ce dernier apprend via la primitive) */
                     static int s_tnc = -1;
-                    if (s_tnc < 0) s_tnc = getenv("UHA_LIVEWALK_TOTNOTCOUNTER") ? 1 : 0;
+                    if (s_tnc < 0) s_tnc = ((const char *)0) ? 1 : 0;
                     if (H->freq[idx] == 0u) {
                         H->freq[idx] = (uint16_t)inc;
                         H->counter[row] = (uint16_t)(H->counter[row]+inc);
@@ -4838,7 +4835,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                     if (H->total[row] >= ALZ_ARENA2D_RESCALE) alz_arena2d_rescale(H, row);
                 }
             }
-            if (physperm && !feedself && !(getenv("UHA_LIVEWALK_COMMITDENS") && (int)c != dens_cls)) {
+            if (physperm && !feedself && !(((const char *)0) && (int)c != dens_cls)) {
                                                 /* STEP1 : commit HOT→Pph[base[c]+relrow] (partagé).
                                                  * [GATED UHA_LIVEWALK_COMMITDENS] ne commite QUE la passe
                                                  * dens : le legacy, lui, apprend le MAITRE a l'EMISSION (une
@@ -4867,7 +4864,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                      * 14 lignes >=10k la ou LEG n'en a que 3). ICI la granularite est PAR BLOC (le
                      * pre-passe ne connait pas l'ordre d'emission) : premiere brique, a affiner en
                      * par-evenement. Zéro effet hors gate. */
-                    if (getenv("UHA_LIVEWALK_PERMRESCALE")) {
+                    if (((const char *)0)) {
                         static uint32_t *s_pmt = NULL;
                         if (!s_pmt) s_pmt = (uint32_t *)calloc(3u * ALZ_ARENA2D_MAX_ROW, sizeof(uint32_t));
                         if (s_pmt) {
@@ -4902,7 +4899,7 @@ static void live_walk_master_4pass(const uint8_t *plain, uint32_t usize,
                 }
                 /* [DIAG stderr gated] trace Pph[838] (cls3 relrow5) counter/total aprs chaque commit
                  * de passe : rvle où `counter[5]` s'effondre (devrait ~29 l'entre b1). */
-                if (getenv("UHA_LIVEWALK_CTRTRACE") && (int)c == dens_cls) {
+                if (((const char *)0) && (int)c == dens_cls) {
                     uint32_t ph5 = s_pbase[dens_cls] + 5u; alz_arena2d_t *c5 = &Pph[ph5>>9]; uint32_t o5 = ph5&(ALZ_ARENA2D_MAX_ROW-1u);
                     fprintf(stderr, "[CTRTRACE] b=%u c=%u Pph[838] row5 counter=%u total=%u\n",
                             (unsigned)b, (unsigned)c, (unsigned)c5->counter[o5], (unsigned)c5->total[o5]);
@@ -5117,13 +5114,13 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
     if (g_lmin_dens_ready)
         return;
     {   /* [GATED UHA_C4PRE] sonde pre-pass learn-all, sans effet sur le chemin reel */
-        const char *cp = getenv("UHA_C4PRE");
+        const char *cp = ((const char *)0);
         if (cp && *cp) c4pre_dens_dump(plain, usize, cp);
     }
     /* [A3 BLKCHAIN] chaîne par défaut (sans masque) : queue = fenêtre. Si
      * `UHA_EMIPROD` est présent, la chaîne sera reconstruite AVEC le masque `is_lit`
      * (queue réelle = fin du match qui dépasse) dans le bloc EMIPROD ci-dessous. */
-    if (!getenv("UHA_EMIPROD"))
+    if (!((const char *)0))
         lmin_blkchain_build(NULL, usize);
     if (g_lmin_dens_cap < need_d) {
         uint32_t *nd = (uint32_t *) realloc(g_lmin_dens, (size_t) need_d * sizeof(uint32_t));
@@ -5137,7 +5134,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
      * SINGLE-PASS live (live_master_cost_at : ctx-roll + LEARN promo à chaud), en
      * ordre de scan, au lieu de la pré‑passe proxy. Test direct : est‑ce que le coût
      * chaud intra‑bloc refroidit sm → franchit la razor @8693 ? Zéro effet hors gate. */
-    if (getenv("UHA_LIVEFULL") != NULL) {
+    if (((const char *)0) != NULL) {
         uint32_t q;
         for (q = 0u; q < usize; q++)
             g_lmin_dens[q] = live_master_cost_at(plain, usize, q + 1u);
@@ -5146,7 +5143,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
     /* [GATED UHA_CLASSPASS=1, DEFAUT-OFF] Producteur dens FIDÈLE §13.722 :
      * arène SHARED monotone × 5 passes de classe/bloc, snapshot = passe cls3.
      * Prioritaire sur SNAPWALK/COSTSNAP (modèles approximatifs) quand présent. */
-    if (getenv("UHA_CLASSPASS") != NULL) {
+    if (((const char *)0) != NULL) {
         if (alz_ps_classpass_percost(plain, usize, s_blpos, s_blen, 6, g_lmin_dens) == 0) {
             g_lmin_dens_ready = 1; lmin_dump_gated(usize); return;
         }
@@ -5156,7 +5153,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
      * g_lmin_dens via le carry maître arena2d (reload W:=copy(M)/bloc + rescale working
      * 0x414590), bloc par bloc (s_blpos/s_blen), AVANT l'émission → alimente réellement
      * `sm`. C'est ICI (et non l'acclive) que la fenêtre du gouverneur est peuplée. */
-    if (getenv("UHA_CM_EMISS") != NULL) {
+    if (((const char *)0) != NULL) {
         int ok = 1;
         for (b = 0; b < 6; b++)
             if (s_blen[b] && alz_ps_emission_master_carry(plain, s_blpos[b], s_blen[b], g_lmin_dens) != 0)
@@ -5167,7 +5164,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
      * master avancé sur LITTÉRAUX ÉMIS (masque = positions-littéral du clone, une par
      * ligne), puis snapshot(master)→working + scan dense intra-bloc cls3. */
     {
-        const char *ew = getenv("UHA_EMIPROD");
+        const char *ew = ((const char *)0);
         /* [GATED UHA_A3_TWOPASS] masque INTERNE auto-produit par les passes de
         * `a3_twopass_prepare` quand aucun fichier n'est donne : meme objet `is_lit`, meme
         * branche, aucune donnee exterieure. La passe froide (`g_a3_pass == 1`) reste sur
@@ -5235,7 +5232,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
                  * remplit bloc0 (fidèle jusqu'au razor), puis classpass (arène partagée
                  * monotone 5 passes, maître froid @bloc1) REÉCRIT les blocs>=1 = modèle
                  * CORRECT du cost[rc] bloc>=1 (§14.135). Sans env : RIEN (non régressif). */
-                if (getenv("UHA_CLASSPASS_HYB"))
+                if (((const char *)0))
                     (void) alz_ps_classpass_percost(plain, usize, s_blpos + 1, s_blen + 1, 5,
                                                     g_lmin_dens);
                 /* [GATED UHA_CLASSPASS_WARM, défaut-OFF, §14.138] classpass sur TOUS les
@@ -5243,7 +5240,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
                  * mais on N'ADOpte que ses blocs>=1 (bloc0 garde EMIPROD, correct
                  * jusqu'au razor). Teste si l'héritage d'accumulation du bloc0 corrige
                  * le `sm` bloc1. Sans env : RIEN. */
-                if (getenv("UHA_CLASSPASS_WARM")) {
+                if (((const char *)0)) {
                     uint32_t *cp = (uint32_t *) calloc(usize ? usize : 1u, sizeof(uint32_t));
                     if (cp && alz_ps_classpass_percost(plain, usize, s_blpos, s_blen, 6, cp) == 0) {
                         int hb;
@@ -5264,21 +5261,21 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
                  * bloc1) ; le bloc0 GARDE EMIPROD (bit‑exact 0..13808, cf §14.219). Zéro
                  * effet hors gate. Juge unique = firstdiv. */
                 if (a3_promo_on("UHA_LIVEWALK")) {
-                    const char *fw = getenv("UHA_LIVEWALK_FROM");
+                    const char *fw = ((const char *)0);
                     uint32_t lw_from = fw ? (uint32_t) strtoul(fw, NULL, 10) : 0x3100u;
-                    if (getenv("UHA_LIVEWALK_LC") != NULL)                 /* MESURE literal‑carry (n'écrit pas out) */
+                    if (((const char *)0) != NULL)                 /* MESURE literal‑carry (n'écrit pas out) */
                         (void) alz_ps_livewalk_litcarry(plain, usize, s_blpos, s_blen, 6, is_lit, NULL);
-                    else if (getenv("UHA_LIVEWALK_DUAL") != NULL)           /* côté B : double-buffer P/H + injection #17 */
+                    else if (((const char *)0) != NULL)           /* côté B : double-buffer P/H + injection #17 */
                         (void) alz_ps_livewalk_dual(plain, usize, is_lit, lw_from, g_lmin_dens);
-                    else if (getenv("UHA_LIVEWALK_CM") != NULL) {           /* maître d'émission row_hash_cm (FP=stats only) */
-                        uint32_t *cmout = getenv("UHA_LIVEWALK_CM_FP") ? NULL : g_lmin_dens;
+                    else if (((const char *)0) != NULL) {           /* maître d'émission row_hash_cm (FP=stats only) */
+                        uint32_t *cmout = ((const char *)0) ? NULL : g_lmin_dens;
                         (void) alz_ps_livewalk_cm(plain, usize, is_lit, lw_from, cmout);
                     }
-                    else if (getenv("UHA_LIVEWALK_PS") != NULL)             /* producteur multi3 (snap gagnant dense) */
+                    else if (((const char *)0) != NULL)             /* producteur multi3 (snap gagnant dense) */
                         (void) alz_ps_livewalk_master(plain, usize, s_blpos, s_blen, 6, lw_from, g_lmin_dens);
-                    else if (getenv("UHA_LIVEWALK_4PASS") != NULL) {          /* blueprint #16 : reload H:=P ×4 passes + commit */
+                    else if (((const char *)0) != NULL) {          /* blueprint #16 : reload H:=P ×4 passes + commit */
                         g_lw_islit = is_lit;                                  /* masque littéraux pour LIT_LEARN (gated) */
-                        g_lw_litlearn = getenv("UHA_LIVEWALK_LIT_LEARN") ? 1 : 0;
+                        g_lw_litlearn = ((const char *)0) ? 1 : 0;
                         live_walk_master_4pass(plain, usize, g_lmin_dens, lw_from);
                         g_lw_islit = NULL; g_lw_litlearn = 0;
                     }
@@ -5287,7 +5284,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
                 }
                 /* [GATED UHA_A3_CLASS0] densité fidèle classe-0 (blocs>=1),
                  * masque convergé is_lit ; uniquement hors voie twopass (-m3). */
-                if (getenv("UHA_A3_CLASS0") && !g_a3_twopass_ready && g_a3_pass != 2 &&
+                if (((const char *)0) && !g_a3_twopass_ready && g_a3_pass != 2 &&
                     (escape_sel == 0 || escape_sel == 10))
                     a3_class0_overlay(plain, usize, is_lit, (escape_sel == 0));
                 if (v2cold && v2b0 > 0u)          /* [UHA_A3_DENSV2] le bloc 0 garde le froid */
@@ -5302,7 +5299,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
      * positions-littéral émises à inc=16, dens = scoreur dense inc=32). mask = liste
      * d'entiers = positions-littéral (une par ligne). Sans env → chemin standard. */
     {
-        const char *mw = getenv("UHA_SNAPWALK");
+        const char *mw = ((const char *)0);
         if (mw && *mw) {
             FILE   *mf    = fopen(mw, "r");
             uint8_t *is_lit = (uint8_t *) calloc(usize ? usize : 1u, 1u);
@@ -5326,7 +5323,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
     /* [GATED UHA_PERPOS, DEFAUT-OFF] producteur dens per-POSITION argmin (§13.729) :
      * legacy sélectionne la classe par POSITION (0x413ea0), pas par bloc. Prioritaire
      * sur COSTSNAP (qui choisit UN gagnant par bloc) quand présent. */
-    if (getenv("UHA_PERPOS") != NULL) {
+    if (((const char *)0) != NULL) {
         if (alz_ps_perpos_percost(plain, usize, s_blpos, s_blen, 6, g_lmin_dens) == 0) {
             g_lmin_dens_ready = 1;
             lmin_dump_gated(usize);
@@ -5347,7 +5344,7 @@ static void lmin_dens_precompute(const uint8_t *plain, uint32_t usize, int escap
              * accumulation multi-classes), qui est le modèle CORRECT du cost[rc] bloc>=1
              * (cf §14.135 : 5 passes partagent une arène, reload à la frontière). Zéro effet
              * si env absent. */
-            if (getenv("UHA_CLASSPASS_HYB"))
+            if (((const char *)0))
                 (void) alz_ps_classpass_percost(plain, usize, s_blpos + 1, s_blen + 1, 5,
                                                 g_lmin_dens);
             if (escape_sel == 10) {
@@ -5551,7 +5548,7 @@ static int alz_find_match_argmin(alz_dec *d, const uint8_t *plain, uint32_t usiz
             continue;
         cost = alz_match_model_cost(d, tok, r, (uint32_t)elen);
         /* [GATED UHA_ARGDUMP, lecture seule, défaut-OFF] journal coût modèle par candidat. */
-        if (getenv("UHA_ARGDUMP") && pos >= 690u && pos <= 700u)
+        if (((const char *)0) && pos >= 690u && pos <= 700u)
             fprintf(stderr, "[ARG] pos=%u tok=%d dist=%u len=%d cost=%u\n",
                     (unsigned)pos, tok, r, elen, cost);
         if (cost != ~(uint32_t)0 && cost < bcost) {
@@ -5577,7 +5574,7 @@ static int alz_find_match_argmin(alz_dec *d, const uint8_t *plain, uint32_t usiz
             int elen = alz_best_encodable_len(d, 1, dist, n);
             if (elen >= 3) {
                 uint32_t cost = alz_match_model_cost(d, 1, dist, (uint32_t)elen);
-                if (getenv("UHA_ARGDUMP") && pos >= 690u && pos <= 700u)
+                if (((const char *)0) && pos >= 690u && pos <= 700u)
                     fprintf(stderr, "[ARG] pos=%u TOK1 dist=%u len=%d cost=%u\n",
                             (unsigned)pos, dist, elen, cost);
                 if (cost != ~(uint32_t)0 && cost < bcost) {
@@ -5599,7 +5596,7 @@ static int alz_find_match_argmin(alz_dec *d, const uint8_t *plain, uint32_t usiz
     {
         static int s_nolit = -1;
         if (s_nolit < 0)
-            s_nolit = (getenv("UHA_ARGMIN_NOLIT") != NULL) ? 1 : 0;
+            s_nolit = (((const char *)0) != NULL) ? 1 : 0;
         if (!s_nolit &&
             alz_bm_literal_cost_warm(d, plain, usize, pos, blen) <= bcost)
             return 0;
@@ -5621,7 +5618,7 @@ static int s_trueargmin = -2;
 static int trueargmin_on(void)
 {
     if (s_trueargmin == -2)
-        s_trueargmin = getenv("UHA_TRUEARGMIN") ? 1 : 0;
+        s_trueargmin = ((const char *)0) ? 1 : 0;
     return s_trueargmin;
 }
 
@@ -5693,7 +5690,7 @@ static int alz_find_match_truecost(alz_dec *d, const uint8_t *plain, uint32_t us
         }
         /* [GATED UHA_ARGDUMP=chemin, LECTURE SEULE, défaut-OFF] journal candidats + bits. */
         {   static FILE *s_ad = NULL; static int s_ad_init = 0;
-            if (!s_ad_init) { const char *ad = getenv("UHA_ARGDUMP");
+            if (!s_ad_init) { const char *ad = ((const char *)0);
                 s_ad = ad ? fopen(ad, "w") : NULL; s_ad_init = 1;
                 if (s_ad) fprintf(s_ad, "pos tok dist len mbits lbits\n"); }
             if (s_ad) fprintf(s_ad, "%u %d %u %u %llu %llu\n", (unsigned)pos,
@@ -5711,7 +5708,7 @@ static int alz_find_match_truecost(alz_dec *d, const uint8_t *plain, uint32_t us
     {
         static int s_trueinv = -2;
         if (s_trueinv == -2)
-            s_trueinv = getenv("UHA_TRUEINV") ? 1 : 0;
+            s_trueinv = ((const char *)0) ? 1 : 0;
         int is_recent_or_rle = (cd[bidx].tok == 2 || cd[bidx].tok == 3 ||
                                 cd[bidx].dist == 1u);
         if (!(s_trueinv && is_recent_or_rle) && blbits <= bmbits)
@@ -5769,7 +5766,7 @@ static void as_init(void)
     char *tok;
     if (s_as_n >= 0)
         return;
-    e = getenv("UHA_ARENASCAN");
+    e = ((const char *)0);
     if (!e || !*e) { s_as_n = 0; return; }
     strncpy(buf, e, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
@@ -5906,7 +5903,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
     {   /* [sonde lecture-seule UHA_FMPROBE] sequence des pos demandes par le
          * parser (feed 1x/pos?). N'emet que si env pose. Defaut-OFF. */
         static int s_fm = -2;
-        if (s_fm == -2) s_fm = getenv("UHA_FMPROBE") ? 1 : 0;
+        if (s_fm == -2) s_fm = ((const char *)0) ? 1 : 0;
         if (s_fm) fprintf(stderr, "[FMPOS pos=%u out=%u]\n", pos, d->st.output_pos);
     }
     int best_tok = 0;
@@ -5978,17 +5975,17 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
      * (UHA_LEGACY_MARGIN, défaut 0 = reproduction du chemin de base). */
     adaptive_on();
     if (s_margin == -2) {
-        const char *m = getenv("UHA_LEGACY_MARGIN");
+        const char *m = ((const char *)0);
         s_margin = m ? atoi(m) : 0;
         if (s_margin < 0)
             s_margin = 0;
     }
     margin = s_margin;
     if (s_use_cost == -2)
-        s_use_cost = getenv("UHA_LEGACY_COST") ? 1 : 0;
+        s_use_cost = ((const char *)0) ? 1 : 0;
     use_cost = s_use_cost;
     if (s_use_refine == -2)
-        s_use_refine = getenv("UHA_LEGACY_REFINE") ? 1 : 0;
+        s_use_refine = ((const char *)0) ? 1 : 0;
     use_refine = s_use_refine;
     /* [a5.3-t4 GATED UHA_SLOTMIN, défaut OFF = 7041/7052 intacts] Loi d'acceptation
      * GRADUÉE par slot mesurée §13.214 (état legacy propre) : TOK2(slot0) min court
@@ -5996,7 +5993,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
      * grille de seuils par ordre 0x4397d4. Le défaut applique eff_t2 PLAT à tous les
      * slots -> sur-émission de TOK3 courts (662 vetos §13.214). */
     if (s_slotmin == -2)
-        s_slotmin = getenv("UHA_SLOTMIN") ? 1 : 0;
+        s_slotmin = ((const char *)0) ? 1 : 0;
     use_slotmin = s_slotmin;
     /* [GATED UHA_T1COST, défaut-OFF] Sélection TOK1 (block B) par COÛT-RÉEL
      * (alz_true_bits, bit-exact prouvé) au lieu de la longueur MAX. Le legacy
@@ -6004,7 +6001,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
      * long) : la distance DOMINE le coût d'un TOK1 (§13.479, mur 4608). Sans
      * ce gate : comportement argmax-longueur + élagage inchangés. */
     if (s_t1cost == -2)
-        s_t1cost = getenv("UHA_T1COST") ? 1 : 0;
+        s_t1cost = ((const char *)0) ? 1 : 0;
     use_t1cost = s_t1cost;
     /* [GATED UHA_T1FIRST, défaut-OFF] Marche de chaîne 0x4137a0 = ACCEPTER le
      * 1er candidat passant la borne (min_len), PUIS stopper : la chaîne est
@@ -6012,7 +6009,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
      * PLUS PETITE distance (ex. d5 c5 @4608), pas la plus longue (d518 c6).
      * Le legacy n'argmine PAS la longueur de chaîne, il ANCRE au plus tôt. */
     if (s_t1first == -2)
-        s_t1first = getenv("UHA_T1FIRST") ? 1 : 0;
+        s_t1first = ((const char *)0) ? 1 : 0;
     use_t1first = s_t1first;
     /* [GATED UHA_T1NET, défaut-OFF] Sélection TOK1 (block B) par ÉCONOMIE NETTE
      * de bits RÉELS (alz_true_bits) : maximiser net = lb − mb (littéraux économisés
@@ -6022,7 +6019,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
      * second sauve un littéral de plus (mur 4608). Cohérent avec la décision
      * coût-littéral-vs-match PAR POSITION du legacy (≠ DP global rejeté §13.485). */
     if (s_t1net == -2) {
-        const char *e = getenv("UHA_T1NET");
+        const char *e = ((const char *)0);
         s_t1net = e ? atoi(e) : 0;               /* 1 = net bits émission ; 2 = net coût side-model */
         if (s_t1net < 0) s_t1net = 0;
     }
@@ -6034,7 +6031,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
      * profonds que le legacy ne voit jamais -> sur-emission (§13.216, 1910 vs 1385).
      * Recopier la borne exacte = reproduire la GENERATION BORNEE de candidats. */
     if (s_chainmax == -2) {
-        const char *c = getenv("UHA_CHAINMAX");
+        const char *c = ((const char *)0);
         s_chainmax = (c && atoi(c) > 0) ? atoi(c) : 1024;
     }
     chain_cap = (unsigned)s_chainmax;
@@ -6057,7 +6054,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
     /* [GATED UHA_MINMATCHPOS=<n>, défaut-OFF] Aucun match avant `pos>=n` (littéraux
      * de tête au démarrage de flux). §13.977 (zeros : legacy 1ᵉʳ match à pos≥2). */
     {   static int s_minpos = -1;
-        if (s_minpos < 0) { const char *v = getenv("UHA_MINMATCHPOS"); s_minpos = v ? atoi(v) : -1; }
+        if (s_minpos < 0) { const char *v = ((const char *)0); s_minpos = v ? atoi(v) : -1; }
         if (s_minpos > 0 && (int)pos < s_minpos)
             return 0;
     }
@@ -6121,11 +6118,11 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
         }
     }
     if (s_lvlwalk == -2)
-        s_lvlwalk = getenv("UHA_LVLWALK") ? 1 : 0;
+        s_lvlwalk = ((const char *)0) ? 1 : 0;
     if (s_triewalk == -2)
-        s_triewalk = getenv("UHA_TRIEWALK") ? 1 : 0;
+        s_triewalk = ((const char *)0) ? 1 : 0;
     if (s_triecmp == -2) {
-        const char *ce = getenv("UHA_TRIECMP");
+        const char *ce = ((const char *)0);
         s_triecmp = ce ? atoi(ce) : 0;
     }
     if (s_lvlwalk) {
@@ -6387,7 +6384,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
                  * chemin strict inchangé (image24/hello/zeros non affectés). */
                 static int s_lw3gov = -1;
                 if (s_lw3gov < 0)
-                    s_lw3gov = (getenv("UHA_LVLW3GOV") != NULL) ? 1 : 0;
+                    s_lw3gov = (((const char *)0) != NULL) ? 1 : 0;
                 if (!(s_lw3gov && mru_tok == 3)) {
                     *token_out = mru_tok;
                     *dist_out = mru_dist;
@@ -6573,7 +6570,7 @@ legacy_done: ;
      * `pos+1` couvre au moins autant (`len+1 >= best_len`), le legacy LITTÉRALISE `pos`
      * pour prendre le récent (moins cher) en `pos+1`. Miroir pos7341 (d6573 différé au
      * profit de d76@7342). Non‑émissif sans env ; gated ; ne mute pas `d`. */
-    if (best_tok == 1 && best_len >= 2u && getenv("UHA_LM_DEFER") != NULL
+    if (best_tok == 1 && best_len >= 2u && ((const char *)0) != NULL
         && pos + 1u < usize) {
         int s2; uint32_t rlen_max = 0u;
         for (s2 = 0; s2 < ALZ_MAX_RECENT; s2++) {
@@ -6620,7 +6617,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
      * d1279 c5). Quand un slot récent a matché, on interdit à TOK1 (RLE et chaîne)
      * d'écraser le gagnant. Sans env : strict `elen > best_len` (comportement actuel). */
     static int s_recprio = -1;
-    if (s_recprio < 0) s_recprio = getenv("UHA_RECPRIO") ? 1 : 0;
+    if (s_recprio < 0) s_recprio = ((const char *)0) ? 1 : 0;
     adaptive_on();  /* lazy-init s_adaptive */
     /* [GATED UHA_LEADLIT2, défaut-OFF, §14.081] Règle de DÉMARRAGE legacy : les
      * DEUX premiers octets sont des LITTÉRAUX obligatoires (aucun jeton match, y
@@ -6630,7 +6627,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
      * = comportement strictement inchangé (prod 13809). */
     {
         static int s_leadlit = -1;
-        if (s_leadlit < 0) s_leadlit = getenv("UHA_LEADLIT2") ? 1 : 0;
+        if (s_leadlit < 0) s_leadlit = ((const char *)0) ? 1 : 0;
         if (s_leadlit && pos < 2u)
             return 0;
     }
@@ -6688,7 +6685,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
      * runs (±1) et sont la source dominante des FP/FN appariés. §13.476. */
     static int s_t3min = -1;
     if (s_t3min < 0)
-        s_t3min = getenv("UHA_T3MIN") ? atoi(getenv("UHA_T3MIN")) : -1;
+        s_t3min = ((const char *)0) ? atoi(((const char *)0)) : -1;
     for (slot = 0; slot < ALZ_MAX_RECENT; slot++) {
         uint32_t r = d->st.recent_distance[slot];
         int tok = (slot == 0) ? 2 : 3;
@@ -6725,7 +6722,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
      * par ordre legacy (0x4397d4) : proposer selon la distance, laisser le décideur
      * gov trancher le coût. Non-émissif sans env ; jugé sur taille. */
     static int s_t1min = -1;
-    if (s_t1min < 0) s_t1min = getenv("UHA_T1MIN") ? 1 : 0;
+    if (s_t1min < 0) s_t1min = ((const char *)0) ? 1 : 0;
     {
         int eff_ml = min_len;
         if (s_adaptive) {
@@ -6743,7 +6740,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
          * N'affecte RIEN sans env. */
         {
             static int s_rld = -1;
-            if (s_rld < 0) { const char *e = getenv("UHA_RLEDEFAULT"); s_rld = e ? atoi(e) : 0; }
+            if (s_rld < 0) { const char *e = ((const char *)0); s_rld = e ? atoi(e) : 0; }
             if (s_rld > 0 && elen >= s_rld && elen > (int)best_len)
                 eff_ml = elen;   /* abaisse le seuil pour ce run RLE uniquement */
         }
@@ -6774,7 +6771,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
         {
             static int s_t1firstd = -1;
             if (s_t1firstd < 0)
-                s_t1firstd = (getenv("UHA_T1FIRSTD") != NULL) ? 1 : 0;
+                s_t1firstd = (((const char *)0) != NULL) ? 1 : 0;
             if (s_t1firstd) {
                 uint32_t fd = 0;
                 uint32_t fn = alz_chain_first(d, plain, usize, pos, hashtab, chain,
@@ -6816,7 +6813,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
             {
                 static int s_t1chain = -1;
                 if (s_t1chain < 0)
-                    s_t1chain = (getenv("UHA_T1CHAIN") != NULL) ? 1 : 0;
+                    s_t1chain = (((const char *)0) != NULL) ? 1 : 0;
                 if (s_t1min || s_t1chain)
                     eff_ml2 = alz_tok1_min_count(dist);   /* plancher TOK1 gradué (distance) */
             }
@@ -6833,7 +6830,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
             {
                 static int s_agechain = -1;
                 if (s_agechain < 0)
-                    s_agechain = getenv("UHA_AGECHAIN") ? atoi(getenv("UHA_AGECHAIN")) : -1;
+                    s_agechain = ((const char *)0) ? atoi(((const char *)0)) : -1;
                 if (s_agechain >= 0 && slot_best) {
                     uint32_t prow = AlzOrderGroup[(best_len < 16u) ? best_len : 15u];
                     uint32_t pgro = AlzOrderGroup[((uint32_t)elen < 16u) ? (uint32_t)elen : 15u];
@@ -6860,7 +6857,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
             {
                 static int s_recchain = -1;
                 if (s_recchain < 0)
-                    s_recchain = getenv("UHA_RECCHAIN") ? atoi(getenv("UHA_RECCHAIN")) : -1;
+                    s_recchain = ((const char *)0) ? atoi(((const char *)0)) : -1;
                 if (s_recchain >= 0 && slot_best &&
                     (int)elen - (int)best_len <= s_recchain)
                     elen = 0;   /* rejet : la chaîne ne bat pas le récent (gain<=marge) */
@@ -6874,7 +6871,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
             {
                 static int s_candcost = -1;
                 if (s_candcost < 0)
-                    s_candcost = (getenv("UHA_CANDCOST") != NULL) ? 1 : 0;
+                    s_candcost = (((const char *)0) != NULL) ? 1 : 0;
                 if (s_candcost && slot_best && elen >= eff_ml2) {
                     uint32_t cur_c = alz_match_model_cost(d, best_token, best_dist, best_len);
                     uint32_t ch_c  = alz_match_model_cost(d, 1, dist, (uint32_t)elen);
@@ -6892,7 +6889,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
             {
                 static int s_candtrue = -1;
                 if (s_candtrue < 0)
-                    s_candtrue = (getenv("UHA_CANDTRUE") != NULL) ? 1 : 0;
+                    s_candtrue = (((const char *)0) != NULL) ? 1 : 0;
                 if (s_candtrue && slot_best && elen >= eff_ml2) {
                     uint64_t rc_mb = 0, rc_lb = 0, ch_mb = 0, ch_lb = 0;
                     alz_true_bits(d, plain, usize, pos, best_token, best_dist,
@@ -6913,7 +6910,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
             {
                 static int s_candmix = -2;
                 if (s_candmix == -2) {
-                    const char *e = getenv("UHA_CANDMIX");
+                    const char *e = ((const char *)0);
                     s_candmix = e ? atoi(e) : -1;
                 }
                 if (s_candmix >= 0 && slot_best && elen >= eff_ml2) {
@@ -6986,7 +6983,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
     {
         static int s_d1lr = -1;
         if (s_d1lr < 0) {
-            const char *e = getenv("UHA_D1LASTRESORT");
+            const char *e = ((const char *)0);
             s_d1lr = e ? atoi(e) : 0;   /* seuil de longueur mini de la run ; 0 = OFF */
             if (s_d1lr < 0) s_d1lr = 0;
         }
@@ -7015,7 +7012,7 @@ static int alz_find_match_inner(alz_dec *d, const uint8_t *plain, uint32_t usize
     {
         static int s_costclass = -1;
         if (s_costclass < 0)
-            s_costclass = getenv("UHA_COSTCLASS") ? 1 : 0;
+            s_costclass = ((const char *)0) ? 1 : 0;
         if (s_costclass) {
             int rslot;
             uint32_t rcost = ~(uint32_t)0;
@@ -7079,7 +7076,7 @@ static int alz_find_match(alz_dec *d, const uint8_t *plain, uint32_t usize,
     static int s_t1min4 = -1;
     int r;
 
-    if (s_t1min4 < 0) s_t1min4 = getenv("UHA_A3_T1MIN4") ? 1 : 0;
+    if (s_t1min4 < 0) s_t1min4 = ((const char *)0) ? 1 : 0;
     r = alz_find_match_inner(d, plain, usize, pos, min_len, tok2_min,
                              hashtab, chain, hmask, cmask,
                              token_out, dist_out, count_out);
@@ -7286,7 +7283,7 @@ static int a3_clspick_decide(const uint8_t *plain, uint32_t pos, uint32_t blen, 
  * d'entrée) et à localiser la première position divergente. Aucun effet sur les décisions. */
 static void a3_twopass_dump(int np, const uint8_t *mask, uint32_t usize)
 {
-    const char *dp = getenv("UHA_A3_TWOPASS_DUMP");
+    const char *dp = ((const char *)0);
     char path[1100];
     FILE *f;
     uint32_t s;
@@ -7344,7 +7341,7 @@ static void a3_twopass_prepare(const uint8_t *plain, uint32_t usize, int order,
     {   /* [diagnostic gated] compte de la passe froide : doit tomber sur le masque que
          * rendrait la voie single-pass lue dans sa propre trace de jetons. */
         uint32_t s0, n0 = 0u;
-        if (getenv("UHA_A3TP_DBG")) {
+        if (((const char *)0)) {
             for (s0 = 0u; s0 < usize; s0++) n0 += g_a3_litmask[s0] ? 1u : 0u;
             fprintf(stderr, "[A3TP] passe froide: %u LIT\n", (unsigned) n0);
         }
@@ -7365,7 +7362,7 @@ static void a3_twopass_prepare(const uint8_t *plain, uint32_t usize, int order,
         a3_twopass_dump(k + 1, g_a3_litmask, usize);   /* masque de la passe chaude k */
         if (n != 0) break;
         if (memcmp(g_a3_mask_prev, g_a3_litmask, (size_t) usize) == 0) break;
-        if (getenv("UHA_A3TP_DBG")) {   /* [diagnostic gated] masque rendu par la passe chaude no k. */
+        if (((const char *)0)) {   /* [diagnostic gated] masque rendu par la passe chaude no k. */
             uint32_t s0, n0 = 0u;
             for (s0 = 0u; s0 < usize; s0++) n0 += g_a3_litmask[s0] ? 1u : 0u;
             fprintf(stderr, "[A3TP] passe chaude %d: %u LIT\n", (unsigned) k, (unsigned) n0);
@@ -7374,7 +7371,7 @@ static void a3_twopass_prepare(const uint8_t *plain, uint32_t usize, int order,
     g_a3_pass = 0;
     g_a3_twopass_ready = 1;
     a3_pass_reset();          /* la passe finale doit REcalculer son propre `dens` */
-    if (getenv("UHA_A3TP_DBG")) {
+    if (((const char *)0)) {
         uint32_t s, nl = 0u;
         for (s = 0u; s < usize; s++) nl += g_a3_litmask[s] ? 1u : 0u;
         fprintf(stderr, "[A3TP] passes internes=%d masque=%u LIT\n",
@@ -7435,7 +7432,7 @@ static void a3_class0_prepare(const uint8_t *plain, uint32_t usize, int order,
     g_a3_pass = 0;
     g_a3_class0_ready = 1;
     a3_pass_reset();               /* la passe finale REcalcule dens + overlay fidèle */
-    if (getenv("UHA_A3TP_DBG")) {
+    if (((const char *)0)) {
         uint32_t s, nl = 0u;
         for (s = 0u; s < usize; s++) nl += g_a3_litmask[s] ? 1u : 0u;
         fprintf(stderr, "[A3C0] passes=%d masque=%u LIT\n", c0_passes, (unsigned) nl);
@@ -7739,7 +7736,7 @@ static int a3_sel_pick(const uint8_t *plain, uint32_t usize, uint32_t pos, uint3
             int klive = a3_promo_on("UHA_A3_KLIVE");
             static int s_ktr = -1;
             if (s_ktr < 0)
-                s_ktr = getenv("UHA_A3_KTR") ? 1 : 0;
+                s_ktr = ((const char *)0) ? 1 : 0;
             if (s_ktr)
                 fprintf(stderr, "[A3KTR] pos=%u branch=%s\n", (unsigned) pos,
                         klive ? "K_live(±1)" : "K_sum(frais)");
@@ -7793,13 +7790,13 @@ static int a3_sel_derive(const uint8_t *plain, uint32_t usize, int order, int se
      * Un `SEL_AUTO` posé explicitement (=1) garde le comportement d'aujourd'hui : dérive, même avec
      * FORCESCFG (cas jugé 12/12 avant la promo). */
     {
-        const char *sa = getenv("UHA_A3_SEL_AUTO");
+        const char *sa = ((const char *)0);
         if (!a3_promo_on("UHA_A3_SEL_AUTO"))
             return sel_forced;                     /* échappatoire `=0` : l'ancien chemin */
-        if (!sa && getenv("UHA_FORCESCFG"))
+        if (!sa && ((const char *)0))
             return sel_forced;                     /* sel fourni explicitement : priorité rendue */
     }
-    if (getenv("UHA_NOMM") && getenv("UHA_NOMM")[0] == '1')
+    if (uha_get_nomm())
         return 0;                                   /* -mm- : désactive le mode multimédia */
     if (usize == 0u)
         return 0;                                   /* archive STORE : aucun escape émis */
@@ -7845,7 +7842,7 @@ static int alz_lmgov_on(void)
 static int alz_lmgov_orc_on(void)
 {
     static int s = -1;
-    if (s < 0) s = (getenv("UHA_LMGovernOracle") != NULL) ? 1 : 0;
+    if (s < 0) s = (((const char *)0) != NULL) ? 1 : 0;
     return s;
 }
 
@@ -7873,21 +7870,21 @@ static int alz_findergate_on(void)
 static int alz_lazy413530_on(void)
 {
     static int s = -1;
-    if (s < 0) s = (getenv("UHA_LAZY413530") != NULL) ? 1 : 0;
+    if (s < 0) s = (((const char *)0) != NULL) ? 1 : 0;
     return s;
 }
 
 static int alz_obs413530_on(void)
 {
     static int s = -1;
-    if (s < 0) s = (getenv("UHA_LAZY413530_OBS") != NULL) ? 1 : 0;
+    if (s < 0) s = (((const char *)0) != NULL) ? 1 : 0;
     return s;
 }
 
 static int alz_insstop_on(void)
 {
     static int s = -1;
-    if (s < 0) s = getenv("UHA_A3_INSSTOP") ? 1 : 0;
+    if (s < 0) s = ((const char *)0) ? 1 : 0;
     return s;
 }
 
@@ -7899,6 +7896,19 @@ static int alz_insstop_on(void)
  * recherche BEST (`UHA_FORCESCFG=<sel>:2:2:1`) que uha_c ne choisit pas par défaut, et
  * le sel legacy n'est pas dérivable ici. La clôture de lane se juge donc avec
  * `work/a3_corpus_plein.sh` (gates explicites) : 12/12 md5 OUI, aucune divergence. */
+
+typedef struct {
+    uint32_t K[5];
+    uint32_t K_mir[5];
+    uint8_t  prev_b;
+} a3_live_k_state;
+
+int  a3_live_blksel_on(void);
+void a3_live_block_eval(const alz_dec *d, const uint8_t *plain,
+                        uint32_t usize, uint32_t pos, int order,
+                        int nomm, a3_live_k_state *ks,
+                        int *out_sel, uint32_t *out_blen,
+                        uint32_t **p_dens, uint32_t *p_dens_cap, int *p_dens_ready);
 
 int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                    int order,
@@ -7928,7 +7938,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         static int s_tc_init = 0;
         static int s_tc_val = -1;
         if (!s_tc_init) {
-            const char *t = getenv("UHA_A3_CLSPICK_TRIG");
+            const char *t = ((const char *)0);
             s_tc_val = (t && *t) ? atoi(t) : -1;
             if (s_tc_val > 3) s_tc_val = 3;
             s_tc_init = 1;
@@ -7964,6 +7974,13 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
 
     *out = NULL;
     *outlen = 0;
+    a3_live_k_state k_state;
+    uint32_t live_cc84 = 0u;
+    int live_nomm = uha_get_nomm();
+    int no_match = (uha_get_dict_kb() < 0);
+    int live_sel_mode = a3_live_blksel_on();
+
+    memset(&k_state, 0, sizeof(k_state));
     uha_alz_gen_tables();
     a3v_dl = 0; a3v_bl = 1; a3v_bb = 0xff; a3v_prev = 0xffffffffu;
     if (g_a3_pass == 0) {
@@ -7971,37 +7988,21 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         g_a3_twopass_ready = 0;
         g_a3_class0_ready = 0;
     }
-    /* [GATED UHA_A3_SEL_AUTO] le sel d'en-tête est DÉRIVÉ (argmin bloc 0), pas fourni. */
-    if (g_a3_pass == 0)
-        escape_sel = a3_sel_derive(plain, usize, order, escape_sel);
-    /* [UHA_A3_TWOPASS, PROMUE tour 138 — DÉFAUT‑ON, échappatoire `=0`] les passes internes
-     * précèdent toute mise en place locale : `g_a3_pass != 0` interdit la récursion, et la passe
-     * finale utilise le masque convergé produit ci‑dessus. GATE PORTEUSE mesurée (t136 : `image.raw`
-     * 7 002 o avec, 7 014 o sans — c'est elle qui internalise la passe 1 et tue la prothèse
-     * `UHA_EMIPROD`).
-     * TÉMOINS DÉPLACÉS [mesuré t138, accepté et consigné] : la bascule change `dflt/e3gate_m3.sh`
-     * (7 036 → 7 038) et `dflt/e3m3.sh` (6 988 → 6 998), dont la PASSE 1 amorce le masque externe
-     * sans rien poser : le défaut‑ON internalise donc cette passe 1. Les deux bancs restent
-     * roundtrip `f1975ed0…` et leurs frontaliers de JETONS sont INTACTS (`firstdiv` 16 685 et
-     * 13 809, inchangés comme avant la promo) — leurs en‑têtes disent explicitement que ces
-     * chiffres sont des « témoins de non‑régression sur masque ÉTRANGER, pas une frontière de loi ».
-     * La référence de la lane, `dflt/e3fix_m3.sh`, reste **md5 identique** `99c80db9…` et 7 002 o.
-     * Une condition `&& !getenv("UHA_EMIPROD")` a été TENTÉE puis RETIRÉE par la mesure : elle ne
-     * restaurait pas les témoins (le déplacement vient de la passe 1, sans `EMIPROD`) et aurait
-     * inventé une loi nouvelle au lieu de promouvoir une branche déjà jugée. » */
-    if ((order >= 72 || (escape_sel != 0 && escape_sel != 10)) &&
-        g_a3_pass == 0 && plain && usize > 2u && a3_promo_on("UHA_A3_TWOPASS"))
-        a3_twopass_prepare(plain, usize, order, member_ends, nmembers, escape_sel,
-                           min_len, tok2_min, lazy);
-    /* [UHA_A3_CLASS0, défaut-ON, échappatoire =0] -m1/-m2 (order<72, sel 0/10) :
-     * passes internes jusqu'au point fixe pour le masque des littéraux de classe 0. */
-    if (g_a3_pass == 0)
-        g_a3_class0_ready = 0;
-    if (a3_promo_on("UHA_A3_CLASS0") && order < 72 &&
-        (escape_sel == 0 || escape_sel == 10) &&
-        g_a3_pass == 0 && plain && usize > 2u)
-        a3_class0_prepare(plain, usize, order, member_ends, nmembers, escape_sel,
-                          min_len, tok2_min, lazy);
+    if (!live_sel_mode) {
+        if (g_a3_pass == 0)
+            escape_sel = a3_sel_derive(plain, usize, order, escape_sel);
+        if ((order >= 72 || (escape_sel != 0 && escape_sel != 10)) &&
+            g_a3_pass == 0 && plain && usize > 2u && a3_promo_on("UHA_A3_TWOPASS"))
+            a3_twopass_prepare(plain, usize, order, member_ends, nmembers, escape_sel,
+                               min_len, tok2_min, lazy);
+        if (g_a3_pass == 0)
+            g_a3_class0_ready = 0;
+        if (a3_promo_on("UHA_A3_CLASS0") && order < 72 &&
+            (escape_sel == 0 || escape_sel == 10) &&
+            g_a3_pass == 0 && plain && usize > 2u)
+            a3_class0_prepare(plain, usize, order, member_ends, nmembers, escape_sel,
+                              min_len, tok2_min, lazy);
+    }
 
     if (!s_ws_d) {
         s_ws_d = malloc(sizeof(*s_ws_d));
@@ -8084,6 +8085,37 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         chain_size <<= 1;
     cmask = chain_size - 1;
 
+    member = 0;
+    {
+        uint32_t next_boundary = alz_next_boundary(usize, 0, member_ends,
+                                                   nmembers, &member);
+    if (live_sel_mode) {
+        uint32_t need_d = usize ? usize : 1u;
+        uint32_t blen0 = 0u;
+        if (g_lmin_dens_cap < need_d) {
+            uint32_t *nd = (uint32_t *)realloc(g_lmin_dens, (size_t)need_d * sizeof(uint32_t));
+            if (nd) {
+                g_lmin_dens = nd;
+                g_lmin_dens_cap = need_d;
+            }
+        }
+        if (g_lmin_dens) {
+            memset(g_lmin_dens, 0, (size_t)need_d * sizeof(uint32_t));
+            g_lmin_dens_ready = 1;
+        }
+        if (!((const char *)0) && next_boundary > 0u) {
+            a3_live_block_eval(d, plain, next_boundary, 0u, order, live_nomm,
+                               &k_state, &escape_sel, &blen0,
+                               &g_lmin_dens, &g_lmin_dens_cap, &g_lmin_dens_ready);
+        } else {
+            blen0 = (next_boundary >= 0x4b00u) ? 0x3100u : ((next_boundary > 0x100u) ? (next_boundary - 0x100u) : next_boundary);
+        }
+        live_cc84 = blen0;
+        g_live_blk_base = 0u;
+        g_live_blk_len = blen0;
+        g_live_blk_end = blen0;
+    }
+
     if (alz_encode_escape(d, escape_sel) != 0) {
         if (g_a3_pass != 0 && w.buf) {
             s_pass_rc_buf = w.buf;
@@ -8095,22 +8127,20 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         return 3;
     }
 
-    member = 0;
-    g_live_blk_base = 0u;
-    {
-        uint32_t r0 = usize;
-        g_live_blk_len = (r0 >= 0x4b00u) ? 0x3100u : ((r0 > 0x100u) ? (r0 - 0x100u) : r0);
-        g_live_blk_end = g_live_blk_base + g_live_blk_len;
+    if (!live_sel_mode) {
+        g_live_blk_base = 0u;
+        {
+            uint32_t r0 = next_boundary;
+            g_live_blk_len = (r0 >= 0x4b00u) ? 0x3100u : ((r0 > 0x100u) ? (r0 - 0x100u) : r0);
+            g_live_blk_end = g_live_blk_base + g_live_blk_len;
+        }
     }
-    {
-        uint32_t next_boundary = alz_next_boundary(usize, 0, member_ends,
-                                                   nmembers, &member);
         /* [RE b3 sonde] cumul de cout SSE litteral par bloc pour q=(cout/len)/585
          * du gate de budget (b). READ-ONLY, gated UHA_PARSE3DBG ; ne touche PAS
          * l'emission (defaut = 6977 intact). */
         uint64_t p3_cost = 0;
         uint32_t p3_len = 0, p3_blocks = 0;
-        const char *p3e = getenv("UHA_PARSE3DBG");
+        const char *p3e = ((const char *)0);
         uint32_t p3tgt = p3e ? (uint32_t)atoi(p3e) : 0xFFFFFFFFu;
         /* [a5-e3 PROBE graine, GATED UHA_SEEDDBG, LECTURE SEULE] Miroir du
          * modele 2-arenes §13.149 : le clone tient une arène delta-2D CONTINUE
@@ -8120,7 +8150,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * coups litteral delta4/deltafc/deltafd, confronte a l'oracle legacy
          * {4:4272, fc:112, fd:0}/total 4413 (§13.147/148). N'affecte NI
          * l'emission NI d (arene locale). Ferme aussi a5e2b (267=coups-literal). */
-        const char *seede = getenv("UHA_SEEDDBG");
+        const char *seede = ((const char *)0);
         uint32_t *seed_ctx3 = NULL;
         alz_arena2d_t *seed_arena = NULL;
         uint32_t seed_n4 = 0, seed_nfc = 0, seed_nfd = 0, seed_nlit = 0;
@@ -8149,12 +8179,12 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         int            ld_reset_done = 0;
         uint32_t       ld_cls      = 3;   /* UHA_LVDCLS : classe machine de contexte (défaut 3) */
         {
-            const char *lvp = getenv("UHA_LIVDENS");
+            const char *lvp = ((const char *)0);
             if (lvp && usize > 0) {
-                const char *lm = getenv("UHA_LVDLEARNM");
-                const char *lr = getenv("UHA_LVDRESET");
-                const char *li = getenv("UHA_LVDINC");
-                const char *lc = getenv("UHA_LVDCLS");
+                const char *lm = ((const char *)0);
+                const char *lr = ((const char *)0);
+                const char *li = ((const char *)0);
+                const char *lc = ((const char *)0);
                 ld_learnm = lm ? (uint32_t) strtoul(lm, NULL, 10) : 0u;
                 ld_inc    = li ? (uint32_t) strtoul(li, NULL, 10) : 16u;
                 ld_reset_at = lr ? (uint32_t) strtoul(lr, NULL, 10) : 0u;
@@ -8179,11 +8209,11 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * Ne mute NI d NI l'emission : tally des flips + direction d'impact.
          * Flip CIBLE (ramene 7052->7005) = clone LITTERALISE mais porte ALLOW
          * match (= legacy couvre par un match ; cf. §13.150 « ≈23 events »). */
-        const char *gse = getenv("UHA_GATESTAT");
+        const char *gse = ((const char *)0);
         /* [a5-c GATED UHA_BUDGETGATE] decision lit-vs-match par BUDGET/AGING BLOC
          * (parse3_budget_allow sur gs_cost/gs_len ecoules) plutot que veto cout
          * local (§13.227 falsifie). Defaut OFF. */
-        const int bgate = getenv("UHA_BUDGETGATE") ? 1 : 0;
+        const int bgate = ((const char *)0) ? 1 : 0;
         uint64_t gs_cost = 0;
         uint32_t gs_len = 0, gs_blk = 0;
         uint32_t gs_flip_match = 0, gs_flip_lit = 0, gs_agree = 0, gs_nomatch = 0;
@@ -8193,7 +8223,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * (a) dominance allow/deny, (b) accord porte-vraie vs décision LEGACY sous
          * forcing (g_oracle->kind==1 sur les positions candidats = matchs legacy).
          * Teste directement le garde-fou mémoire 847098a9 (fixer l'entrée Σ). */
-        int p1_on = (getenv("UHA_P1GATE") != NULL);
+        int p1_on = (((const char *)0) != NULL);
         uint32_t p1_cand = 0, p1_true_allow = 0, p1_true_deny = 0;
         uint32_t p1_vs_proxy_flip = 0, p1_legacy_agree = 0, p1_legacy_diff = 0;
         if (p1_on && !p1g_ready && plain && usize > 2u)
@@ -8201,7 +8231,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         /* [a5c2f-c-lmin-asm GATED UHA_LMINLIVE] pré-pass dens[] (source sm/bud du
          * feeder LIVE), lecture seule, non-émissif. Activé pour alimenter le dump
          * sm_live/bud_live du bloc UHA_LMINDUMP. */
-        if (alz_lminlive_on() && plain && usize > 2u)
+        if (!live_sel_mode && alz_lminlive_on() && plain && usize > 2u)
             lmin_dens_precompute(plain, usize, escape_sel);
         /* [cost-literal-live GATED UHA_DENSFORCE=chemin, DEFAUT-OFF] Remplace le
          * champ de coût g_lmin_dens (coût de la CLASSE GAGNANTE, issue d'
@@ -8212,7 +8242,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         {
             static int s_df = -1;
             if (s_df < 0) {
-                const char *dp = getenv("UHA_DENSFORCE");
+                const char *dp = ((const char *)0);
                 s_df = (dp && g_lmin_dens_ready && g_lmin_dens) ? 1 : 0;
                 if (s_df && dp) {
                     FILE *df = fopen(dp, "r");
@@ -8230,7 +8260,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         /* [C3' GATED UHA_CMCOST, LECTURE SEULE, non-wired] Comparateur du VRAI
          * cout side-aware (alz_true_bits) vs proxy ordre-1 (gs_cost) sur la MEME
          * porte parse3_budget_allow(cls3). Premier encodage seulement (cm_pass). */
-        const char *cme = getenv("UHA_CMCOST");
+        const char *cme = ((const char *)0);
         int cm_on = 0;
         uint64_t cm_lb_blk = 0, cm_units_blk = 0;
         uint32_t cm_blklen = 0, cm_q_true_const = 0;
@@ -8242,7 +8272,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * match LEGACY que le clone visite. Réutilise alz_oracle_load mais NE
          * force PAS l'émission (g_oracle reste NULL si UHA_ORACLE non posé).
          * Premier encodage seulement (am_pass). Ne mute NI d NI l'émission. */
-        const char *ame = getenv("UHA_ARGMIN");
+        const char *ame = ((const char *)0);
         int am_on = 0;
         alz_oracle *g_amref = NULL;
         uint32_t am_eval = 0, am_accept = 0, am_miss = 0, am_cantcode = 0;
@@ -8263,7 +8293,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
         uint32_t cf_oracle_longer = 0, cf_same_len = 0;   /* longueur coverante */
         uint64_t cf_sum_o = 0, cf_sum_w = 0;              /* bits somme (moy.) */
         {
-            const char *oce = getenv("UHA_ORACLE");
+            const char *oce = ((const char *)0);
             if (oce && !g_oracle)
                 g_oracle = alz_oracle_load(oce, usize);
         }
@@ -8274,7 +8304,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * un match que le legacy REFUSE (sur-match VALIDÉ par le coût seul) : si FP est
          * élevé, la retenue legacy N'EST PAS le coût (c'est le budget de récence MRU)
          * → levier « greffe du coût » mort (reproduit a52/C3'). Ne mute NI d NI l'émission. */
-        int ct_on = (getenv("UHA_COSTTALLY") != NULL);
+        int ct_on = (((const char *)0) != NULL);
         uint32_t ct_tp = 0, ct_fn = 0, ct_fp = 0, ct_tn = 0;
         uint64_t ct_fp_save = 0, ct_tn_save = 0;   /* bits : FP=(lb-mb) match moins cher ; TN=(mb-lb) veto économie */
         uint64_t ct_fn_over = 0, ct_tp_under = 0;  /* bits : FN surcoût du match-investissement (mb-lb) ; TP économie (lb-mb) */
@@ -8298,18 +8328,18 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * slot×len×kind. kind=1 : match legacy (oracle) ; kind=0 : LIT legacy MAIS le
          * finder de base PROPOSE un match (cible de veto). Le tout mesuré sur le recent[]
          * legacy non pollué (rejeu forcé). Balayage (K,L) hors-ligne = A5.3-k(b) propre. */
-        int rgprobe_on = (getenv("UHA_RECENCYGATE") != NULL);
+        int rgprobe_on = (((const char *)0) != NULL);
         static uint32_t lt_tbl[ALZ_MAX_RECENT + 1][4][2];
         static int lt_init = 0, lt_dumped = 0;
         if (!lt_init) { memset(lt_tbl, 0, sizeof lt_tbl); lt_init = 1; }
         /* [A5.3-m FINDERDBG, GATED UHA_FINDERDBG + UHA_ORACLE, non-émissif] Le finder de base
          * (chemin défaut, lecture pure de d) reproduit-il les vrais matchs legacy ? classes des
          * cibles de veto (kind=0 où finder propose). Décide réglage local du finder vs sélection globale. */
-        int fd_on = (getenv("UHA_FINDERDBG") != NULL);
+        int fd_on = (((const char *)0) != NULL);
         /* [A5.3-t FINDERDUMP, GATED UHA_FINDERDUMP=chemin, NON-ÉMISSIF] dump (dist,len,inrec)
          * par cible de veto + par DIFF legacy-match, pour en déduire le seuil d'acceptation exact
          * du matcher legacy. NULL (env absent) => aucun effet, baseline intacte. */
-        const char *fde = getenv("UHA_FINDERDUMP");
+        const char *fde = ((const char *)0);
         FILE *fdump = (fd_on && fde) ? fopen(fde, "w") : NULL;
         /* [a5c2e COSTFLUSH, GATED UHA_COSTFLUSH=chemin + UHA_ORACLE, NON-émissif]
          * Test décisif : le FLUSH legacy est-il prédit par le COÛT modèle
@@ -8318,7 +8348,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * issues différentes => le flush est coût-bound. On dump pour chaque
          * position scannée : pos, kind_legacy (flush?), clone-finder (tok,dist,
          * count), mc=alz_match_model_cost, lc=Σ literals warm. Lecture seule. */
-        const char *cfe = getenv("UHA_COSTFLUSH");
+        const char *cfe = ((const char *)0);
         FILE *cfdump = (cfe && g_oracle) ? fopen(cfe, "w") : NULL;
         uint32_t fd_lmatch = 0;                     /* vrais matchs legacy visités (kind=1) */
         uint32_t fd_miss = 0, fd_same_eq = 0, fd_same_long = 0, fd_same_short = 0;
@@ -8341,7 +8371,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * Un seul run (statique) ; cap cas + cap octets pour borner le temps. */
         {
             static int tb_ran = 0;
-            const char *tbe = getenv("UHA_TRUEBITS");
+            const char *tbe = ((const char *)0);
             if (tbe && !tb_ran && plain && usize > 2u) {
                 size_t wbytes = (size_t)d->mode.dict_size + 4096;
                 uint32_t lim = (usize < 12544u) ? usize : 12544u;
@@ -8446,7 +8476,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * (research/gt_scorer/mru_replay_validate.py). Ne mute RIEN. */
         static int s_mrudbg = -2;
         if (s_mrudbg == -2)
-            s_mrudbg = getenv("UHA_MRUDBG") ? 1 : 0;
+            s_mrudbg = ((const char *)0) ? 1 : 0;
         /* [A5.3-t8] etat croise du wrapper legacy 0x4136a0 (init = 1er appel :
          * dl=0, bl=cls=1, slot=0xff, Sigma8c=INF -> dl<2 -> rejet -> litteral). */
         int lm_dl = 0, lm_bl = 1, lm_prevslot = 0xff, lm_sl;
@@ -8466,7 +8496,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
          * tableaux temporaires separes ; ne touche PAS l'etat de la boucle
          * d'emission. min_len=2 => longueur brute (sans filtre tok2). */
         {
-            const char *tjp = getenv("UHA_TRAJDUMP");
+            const char *tjp = ((const char *)0);
             static int tj_done = 0;
             if (tjp && plain && usize > 2u && !tj_done) {
                 tj_done = 1;
@@ -8520,24 +8550,24 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             static int s_diag_chain = -1;
             if (s_diag_chain < 0) {
                 s_diag_chain = (
-                    getenv("UHA_WALK") != NULL
-                    || getenv("UHA_COSTLAZY") != NULL
-                    || getenv("UHA_LAZYPRI") != NULL
-                    || getenv("UHA_GATESTAT") != NULL
-                    || getenv("UHA_BUDGETGATE") != NULL
-                    || getenv("UHA_LMINDUMP") != NULL
-                    || getenv("UHA_LMCOSTDUMP") != NULL
-                    || getenv("UHA_TRAJDUMP") != NULL
-                    || getenv("UHA_PARSEDBG") != NULL
-                    || getenv("UHA_A3_LZTRACE") != NULL
-                    || getenv("UHA_A3_VISIT_LEGSCAN") != NULL
-                    || getenv("UHA_A3_VISIT_REC") != NULL
-                    || getenv("UHA_A3_VISIT_TRIGN") != NULL
-                    || getenv("UHA_A3_TRIGDIST") != NULL
-                    || getenv("UHA_LAZYFIX") != NULL
-                    || getenv("UHA_LAZYCOST") != NULL
-                    || getenv("UHA_LAZYREC") != NULL
-                    || getenv("UHA_LAZY413530_SWAP") != NULL
+                    ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
+                    || ((const char *)0) != NULL
                 ) ? 1 : 0;
             }
             need_chain = (g_oracle != NULL || dp_on() || trueparse_on()
@@ -8549,6 +8579,8 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                           || !alz_defer13_on() || !g_lmin_dens_ready
                           || alz_insstop_on() || ct_on || rgprobe_on || fd_on
                           || cfdump != NULL || am_on || s_diag_chain);
+            if (no_match)
+                need_chain = 0;
         }
         if (need_chain || d->mode.method_class < ALZ_BEST) {
             size_t inc_bytes = (size_t)usize + 16u;
@@ -8596,7 +8628,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             static int s_pl_set = 0;
             static int s_pl_val = 0;
             if (!s_pl_init) {
-                const char *e = getenv("UHA_PENDLAW");
+                const char *e = ((const char *)0);
                 if (e) { s_pl_set = 1; s_pl_val = atoi(e); }
                 s_pl_init = 1;
             }
@@ -8681,7 +8713,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                  * accepte ; mixed@34747 : refuse). */
                 static const char *s_cpat = NULL;
                 static int s_cpat_init = 0;
-                if (!s_cpat_init) { s_cpat = getenv("UHA_A3_CLSPICK_AT"); s_cpat_init = 1; }
+                if (!s_cpat_init) { s_cpat = ((const char *)0); s_cpat_init = 1; }
                 if (s_cpat && *s_cpat) {
                     const char *e = s_cpat;
                     unsigned p2 = 0;
@@ -8730,7 +8762,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             {
                 static int s_clsblk = -1;
                 static uint32_t s_cls_next = 0;
-                if (s_clsblk < 0) s_clsblk = getenv("UHA_A3_CLSBLK") ? 1 : 0;
+                if (s_clsblk < 0) s_clsblk = ((const char *)0) ? 1 : 0;
                 if (s_clsblk && d->st.escape_selector >= 5) {
                     if (pos == 0)
                         s_cls_next = 0;
@@ -8769,8 +8801,8 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static uint64_t s_iter = 0;
                 static long s_stallk = -1, s_maxiter = -1;
                 if (s_stallk < 0) {
-                    const char *e = getenv("UHA_STALLDBG");
-                    const char *m = getenv("UHA_MAXITER");
+                    const char *e = ((const char *)0);
+                    const char *m = ((const char *)0);
                     s_stallk = e ? atol(e) : 0;
                     s_maxiter = m ? atol(m) : 0;
                 }
@@ -8806,19 +8838,31 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 free(seed_arena); seed_arena = NULL;   /* dump unique */
             }
             if (d->st.output_pos >= next_boundary) {
-                /* miroir d'alz_rebuild_block_model (dec) : core + handle_escape
-                 * ; le selecteur courant est reemis (apply_escape identique
-                 * => etat preserve, escape_changed=0, symetrique aux deux
-                 * cotes). */
                 p3_cost = 0; p3_len = 0; p3_blocks++;
                 if (gse) { gs_cost = 0; gs_len = 0; gs_blk++; }
                 alz_rebuild_block_model_core(d);
-                if (alz_encode_escape(d, (int)d->st.escape_selector) != 0) {
-                    rc = 3;
-                    break;
-                }
                 next_boundary = alz_next_boundary(usize, next_boundary,
                                                   member_ends, nmembers, &member);
+                if (live_sel_mode && !((const char *)0) && pos < next_boundary) {
+                    int new_sel = (int)d->st.escape_selector;
+                    uint32_t blen = 0u;
+                    a3_live_block_eval(d, plain, next_boundary, pos, order, live_nomm,
+                                       &k_state, &new_sel, &blen,
+                                       &g_lmin_dens, &g_lmin_dens_cap, &g_lmin_dens_ready);
+                    if (alz_encode_escape(d, new_sel) != 0) {
+                        rc = 3;
+                        break;
+                    }
+                    live_cc84 = pos + (blen ? blen : 1u);
+                    g_live_blk_base = pos;
+                    g_live_blk_len = blen ? blen : 1u;
+                    g_live_blk_end = pos + g_live_blk_len;
+                } else {
+                    if (alz_encode_escape(d, (int)d->st.escape_selector) != 0) {
+                        rc = 3;
+                        break;
+                    }
+                }
             }
             if (g_oracle && pos < g_oracle->n) {
                 /* [oracle-replay] force la decision match/litteral du legacy. */
@@ -8902,7 +8946,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                      * (defaut-OFF) pour reproduire la falsification. */
                     static int s_lvlemit = -1;
                     if (s_lvlemit < 0)
-                        s_lvlemit = getenv("UHA_LVLWALK_EMIT") ? 1 : 0;
+                        s_lvlemit = ((const char *)0) ? 1 : 0;
                     descent_adopt = s_lvlemit ? g_lvlwalk_adopt : 0;
                 }
                 }
@@ -8924,7 +8968,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             {
                 static int s_wk = -1;
                 static uint32_t s_walk_carry = 0u;
-                if (s_wk < 0) s_wk = getenv("UHA_WALK") ? 1 : 0;
+                if (s_wk < 0) s_wk = ((const char *)0) ? 1 : 0;
                 if (s_wk) {
                     /* HYBRIDE fresh-prioritaire + carry-en-repli (§13.321 : le
                      * legacy relit le finder À CHAQUE octet, mais présente le
@@ -8941,11 +8985,11 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     uint32_t use = 0u, dl = 0u;
                     uint32_t floor_d;
                     if (s_wkmode < 0) {
-                        const char *wm = getenv("UHA_WALKMODE");
+                        const char *wm = ((const char *)0);
                         s_wkmode = wm ? atoi(wm) : 0;
                     }
                     if (s_wkrle < 0) {
-                        const char *wr = getenv("UHA_WALKRLE");
+                        const char *wr = ((const char *)0);
                         s_wkrle = wr ? atoi(wr) : 0;   /* dist==1 admis si run>=seuil */
                         if (s_wkrle < 0) s_wkrle = 0;
                     }
@@ -8954,10 +8998,10 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                      * sur-match recent (TOK2/TOK3 stride 2^k) vient du carry. */
                     static int s_wknocarry = -1;
                     if (s_wknocarry < 0)
-                        s_wknocarry = (getenv("UHA_WALKNOCARRY") != NULL) ? 1 : 0;
+                        s_wknocarry = (((const char *)0) != NULL) ? 1 : 0;
                     floor_d = 2u;
                     if (s_wkmin < 0) {
-                        const char *wv = getenv("UHA_WALKMIN");
+                        const char *wv = ((const char *)0);
                         s_wkmin = wv ? atoi(wv) : 2;
                         if (s_wkmin < 2) s_wkmin = 2;
                     }
@@ -8973,7 +9017,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     {
                         static int s_rlrd = -1;
                         if (s_rlrd < 0) {
-                            const char *rr = getenv("UHA_RLEDETECT");
+                            const char *rr = ((const char *)0);
                             s_rlrd = rr ? atoi(rr) : 0;   /* seuil de run ; 0 = OFF */
                             if (s_rlrd < 0) s_rlrd = 0;
                         }
@@ -9055,7 +9099,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static int s_wd_init = 0;
                 static long long s_wd_pos = -1;
                 if (!s_wd_init) {
-                    const char *wd = getenv("UHA_WARMDBG");
+                    const char *wd = ((const char *)0);
                     s_wd_pos = wd ? atoll(wd) : -1;
                     s_wd_init = 1;
                 }
@@ -9091,7 +9135,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static int s_mc_init = 0;
                 static long long s_mc_pos = -1;
                 if (!s_mc_init) {
-                    const char *mc = getenv("UHA_MCOST");
+                    const char *mc = ((const char *)0);
                     s_mc_pos = mc ? atoll(mc) : -1;
                     s_mc_init = 1;
                 }
@@ -9142,7 +9186,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             {
                 static const char *pa = NULL;
                 static int painit = 0;
-                if (!painit) { pa = getenv("UHA_P3A"); painit = 1; }
+                if (!painit) { pa = ((const char *)0); painit = 1; }
                 if (pa && (pos == (uint32_t)atoi(pa) || (pos & 0x3FFFu) == 0u)
                     && pos > 16u) {
                     uint32_t bstart = (pos > 0x2000u) ? (pos - 0x2000u) : 0u;
@@ -9367,7 +9411,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                  * court la ou le legacy le fait (sur-emissions FP, cf §13.409-410).
                  * Branche else = comportement d'origine STRICT (defaut-OFF garanti). */
                 if (s_lazyfix < 0)
-                    s_lazyfix = getenv("UHA_LAZYFIX") ? 1 : 0;
+                    s_lazyfix = ((const char *)0) ? 1 : 0;
                 /* [finder-port GATED UHA_LAZYCOST, défaut-OFF] Le legacy ne
                  * diffère un match RÉCENT (TOK2/TOK3, bon marché) au profit d'une
                  * distance EXPLICITE éloignée (TOK1, chère) QUE si cette dernière est
@@ -9379,9 +9423,9 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 {
                     static int s_lazyrec = -1, s_lazycost = -1;
                     if (s_lazyrec < 0)
-                        s_lazyrec = getenv("UHA_LAZYREC") ? atoi(getenv("UHA_LAZYREC")) : -1;
+                        s_lazyrec = ((const char *)0) ? atoi(((const char *)0)) : -1;
                     if (s_lazycost < 0)
-                        s_lazycost = getenv("UHA_LAZYCOST") ? 1 : 0;
+                        s_lazycost = ((const char *)0) ? 1 : 0;
                     #define LAZY_SUPPRESS(sup_, c2_, cnt_, t2_, tok_, dist_, d2_) do { \
                         (sup_) = 0; \
                         if ((tok_ == 2 || tok_ == 3) && (t2_) == 1) { \
@@ -9421,7 +9465,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     {
                         static int s_lzt = -2;
                         if (s_lzt == -2) {
-                            const char *e = getenv("UHA_A3_LZTRACE");
+                            const char *e = ((const char *)0);
                             s_lzt = e ? atoi(e) : -1;
                         }
                         if (s_lzt >= 0 && (int)pos == s_lzt)
@@ -9449,7 +9493,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             {
                 static int s_cl_k = -1;
                 if (s_cl_k < 0) {
-                    const char *e = getenv("UHA_COSTLAZY");
+                    const char *e = ((const char *)0);
                     s_cl_k = e ? atoi(e) : 0;
                 }
                 if (s_cl_k > 0 && have2 && count >= 2 && count < 255 && pos + 1 < usize
@@ -9464,18 +9508,18 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     static int s_tiny = -2;
                     static int s_margin = -2;
                     if (s_cgate < 0)
-                        s_cgate = (getenv("UHA_COSTLAZY_CG") != NULL) ? 1 : 0;
+                        s_cgate = (((const char *)0) != NULL) ? 1 : 0;
                     if (s_cglit < 0)
-                        s_cglit = (getenv("UHA_COSTLAZY_CGLIT") != NULL) ? 1 : 0;
+                        s_cglit = (((const char *)0) != NULL) ? 1 : 0;
                     if (s_reach < 0)
-                        s_reach = (getenv("UHA_COSTLAZY_REACH") != NULL) ? 1 : 0;
+                        s_reach = (((const char *)0) != NULL) ? 1 : 0;
                     if (s_tiny < 0)
-                        s_tiny = (getenv("UHA_COSTLAZY_TINY") != NULL) ? 1 : 0;
+                        s_tiny = (((const char *)0) != NULL) ? 1 : 0;
                     if (s_margin < 0)
-                        s_margin = (getenv("UHA_COSTLAZY_MARGIN") != NULL) ? 1 : 0;
+                        s_margin = (((const char *)0) != NULL) ? 1 : 0;
                     static int s_costpri = -2;
                     if (s_costpri < 0)
-                        s_costpri = (getenv("UHA_COSTLAZY_COSTPRI") != NULL) ? 1 : 0;
+                        s_costpri = (((const char *)0) != NULL) ? 1 : 0;
                     cost_cur = s_cgate ? alz_match_model_cost(d, token, dist, count) : 0u;
                     for (kk = 1; kk <= s_cl_k && (uint32_t)pos + (uint32_t)kk < usize; kk++) {
                         int tf;
@@ -9766,7 +9810,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     static FILE *g17 = NULL;
                     static int g17i = -1;
                     if (g17i < 0) {
-                        const char *gp = getenv("UHA_A3_GATE17");
+                        const char *gp = ((const char *)0);
                         g17i = 0;
                         if (gp && *gp) { g17 = fopen(gp, "w"); g17i = g17 ? 1 : 0; }
                     }
@@ -9787,7 +9831,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 {
                     static int s_lm_inv = -2;
                     if (s_lm_inv == -2)
-                        s_lm_inv = (getenv("UHA_LM413530_INV") != NULL) ? 1 : 0;
+                        s_lm_inv = (((const char *)0) != NULL) ? 1 : 0;
                     if (s_lm_inv)
                         emit_lit = (al != 0) ? 1 : 0;   /* [PROBE] polarite inverse */
                     else
@@ -9983,7 +10027,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     {
                         static int s_swap = -1;
                         if (s_swap < 0)
-                            s_swap = (getenv("UHA_LAZY413530_SWAP") != NULL) ? 1 : 0;
+                            s_swap = (((const char *)0) != NULL) ? 1 : 0;
                         if (s_swap)
                             al = alz_lm413530_gate(dh, cls, dl_cur, pslot_cur, bl_cur,
                                                   s8c_cur, s6c, slot);
@@ -10023,8 +10067,8 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         static int s_gdbg = -1;
                         static FILE *s_gf = NULL;
                         if (s_gdbg < 0) {
-                            const char *e = getenv("UHA_LAZY413530_DBG");
-                            const char *o = getenv("UHA_LAZY413530_OBS");
+                            const char *e = ((const char *)0);
+                            const char *o = ((const char *)0);
                             /* [OBS] la valeur de UHA_LAZY413530_OBS est un CHEMIN → dump
                              * par position (LECTURE SEULE, non-émissif) ; prime sur DBG. */
                             if (o && strchr(o, '/')) { s_gdbg = 1; s_gf = fopen(o, "w"); }
@@ -10077,7 +10121,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static FILE *s_mid = NULL;
                 static int s_mid_init = -1;
                 if (s_mid_init < 0) {
-                    const char *me = getenv("UHA_LMINDUMP");
+                    const char *me = ((const char *)0);
                     s_mid_init = (me && g_oracle) ? 1 : 0;
                     if (s_mid_init && me)
                         s_mid = fopen(me, "w");
@@ -10226,7 +10270,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static FILE *s_cd = NULL;
                 static int s_cd_init = -1;
                 if (s_cd_init < 0) {
-                    const char *ce = getenv("UHA_LMCOSTDUMP");
+                    const char *ce = ((const char *)0);
                     s_cd_init = (ce && g_oracle) ? 1 : 0;
                     if (s_cd_init && ce) s_cd = fopen(ce, "w");
                     if (s_cd)
@@ -10305,7 +10349,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static int s_budforce = -1;
                 static uint32_t *s_budforce_tab = NULL;
                 if (s_budforce < 0) {
-                    const char *bp = getenv("UHA_BUDFORCE");
+                    const char *bp = ((const char *)0);
                     s_budforce = bp ? 1 : 0;
                     if (s_budforce && bp) {
                         uint32_t zn;
@@ -10334,7 +10378,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static int s_smforce = -1;
                 static uint32_t *s_smforce_tab = NULL;
                 if (s_smforce < 0) {
-                    const char *sp = getenv("UHA_SMFORCE");
+                    const char *sp = ((const char *)0);
                     s_smforce = sp ? 1 : 0;
                     if (s_smforce && sp) {
                         uint32_t zn2;
@@ -10397,7 +10441,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static int s_mrud_init = 0;
                             static long s_mrud = -1;
                             if (!s_mrud_init) {
-                                const char *e = getenv("UHA_MRUDUMP");
+                                const char *e = ((const char *)0);
                                 s_mrud = e ? atol(e) : -1;
                                 s_mrud_init = 1;
                             }
@@ -10450,9 +10494,9 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                              * ne rend PAS sm, mesure 65 164 != 36 261 a image 13070).
                              * Zero effet sans env. */
                             static long s_dc = -2;
-                            if (s_smlive < 0) s_smlive = getenv("UHA_SM_LIVE") ? 1 : 0;
+                            if (s_smlive < 0) s_smlive = ((const char *)0) ? 1 : 0;
                             if (s_dc == -2) {
-                                const char *e = getenv("UHA_A3_DENSC");
+                                const char *e = ((const char *)0);
                                 s_dc = e ? atol(e) : -1;
                             }
                             for (j = g_off; j < g_key && (g_base + j) < usize; j++) {
@@ -10467,7 +10511,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                                  * (cases réutilisées : c'est le "plus chaud de 3,3 %" observé).
                                  * Sans env : index absolu, comportement inchangé. */
                                 static int s_drel = -1;
-                                if (s_drel < 0) s_drel = getenv("UHA_A3_DENSREL") ? 1 : 0;
+                                if (s_drel < 0) s_drel = ((const char *)0) ? 1 : 0;
                                 uint32_t di = s_drel ? j : (g_base + j);
                                 uint32_t sv = (s_smlive && g_lmin_live_ready && g_lmin_live &&
                                                di >= 0x3100u && g_lmin_live[di])
@@ -10500,7 +10544,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         {
                             static int s_cosm = -1;
                             if (s_cosm < 0)
-                                s_cosm = (getenv("UHA_COSTSM") != NULL) ? 1 : 0;
+                                s_cosm = (((const char *)0) != NULL) ? 1 : 0;
                             if (s_cosm) {
                                 uint32_t nsp = (g_key > g_off) ? (g_key - g_off) : 1u;
                                 uint32_t bm_cur = cl_bm_predict(d, plain);
@@ -10508,7 +10552,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             }
                         }
                         if (s_blit < 0)
-                            s_blit = (getenv("UHA_BUDLIT") != NULL) ? 1 : 0;
+                            s_blit = (((const char *)0) != NULL) ? 1 : 0;
                         if (s_blit) {
                             uint32_t acc_push;
                             static int s_buddmix = -1;
@@ -10519,7 +10563,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                                 s_blit_sum  = 255ull * 37440ull;
                             }
                             if (s_buddmix < 0)
-                                s_buddmix = (getenv("UHA_BUDDMIX") != NULL) ? 1 : 0;
+                                s_buddmix = (((const char *)0) != NULL) ? 1 : 0;
                             if (s_buddmix) {
                                 /* [GATED UHA_BUDDMIX, DÉFAUT-OFF, §13.647] pousse la
                                  * valeur FIDÈLE `acc` = coût-symbole du mixeur du
@@ -10564,7 +10608,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         {
                             static int s_budwin255 = -1;
                             if (s_budwin255 < 0)
-                                s_budwin255 = getenv("UHA_BUDWIN255") ? 1 : 0;
+                                s_budwin255 = ((const char *)0) ? 1 : 0;
                             if (s_costlive && s_budwin255 && s_cl_ready)
                                 g_bud = (uint32_t)(s_cl_sum - (uint64_t)alz_cl_seed_resolve());
                         }
@@ -10664,7 +10708,13 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                                 b = cls;
                             }
                         }
-                        alz_lm_decide(&gin, &gout);
+                        if (count >= 255u) {
+                            gout.ecx = 0u;
+                            gout.esi = 0u;
+                            gout.al = 1;
+                        } else {
+                            alz_lm_decide(&gin, &gout);
+                        }
                         /* [A3 LMDEC, GATED `UHA_A3_LMDEC=<pos>`, DEFAUT-OFF, LECTURE SEULE]
                          * Dump des entrees/sorties REELLES du port du decideur 0x412c30
                          * AU SITE D'APPEL : aucune reconstruction de bud/sm/esi. Sert a
@@ -10673,7 +10723,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         {
                             static long s_lmdec = -2;
                             if (s_lmdec == -2) {
-                                const char *e = getenv("UHA_A3_LMDEC");
+                                const char *e = ((const char *)0);
                                 s_lmdec = e ? atol(e) : -1;
                             }
                             if (s_lmdec >= 0 && (long)pos == s_lmdec) {
@@ -10711,7 +10761,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static uint32_t *s_ditab = NULL;
                             static size_t s_din = 0u, s_dipos = 0u;
                             if (s_decinj < 0) {
-                                const char *p = getenv("UHA_A3_DECINJ");
+                                const char *p = ((const char *)0);
                                 s_decinj = 0;
                                 if (p && *p) {
                                     FILE *fp = fopen(p, "r");
@@ -10748,7 +10798,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static FILE *s_dec = NULL;
                             static int s_decinit = -1;
                             if (s_decinit < 0) {
-                                const char *e = getenv("UHA_DECDBG");
+                                const char *e = ((const char *)0);
                                 s_decinit = e ? 1 : 0;
                                 if (s_decinit && e) s_dec = fopen(e, "w");
                             }
@@ -10796,7 +10846,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         {
                             static int s_pendc2 = -1;
                             if (s_pendc2 < 0)
-                                s_pendc2 = getenv("UHA_A3_PENDC") ? 1 : 0;
+                                s_pendc2 = ((const char *)0) ? 1 : 0;
                             if (s_pendc2 && gout.al == 0 && count >= 2u
                                 && gin.bb < 3u) {
                                 s_pend_ctr = (count - 2u) >> (unsigned) gin.bb;
@@ -10807,7 +10857,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         if (s_trig_c >= 0 && gout.al == 0 && count >= 2u) {
                             static int s_trigset = -1;
                             if (s_trigset < 0)
-                                s_trigset = getenv("UHA_A3_CLSPICK_TRIGSET") ? 1 : 0;
+                                s_trigset = ((const char *)0) ? 1 : 0;
                             s_trig_ctr = (count - 2u) >> (unsigned) s_trig_c;
                             if (s_trigset && s_trig_ctr) {
                                 static unsigned s_nset = 0;
@@ -10827,7 +10877,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         {
                             static int s_lazypri = -1;
                             if (s_lazypri < 0)
-                                s_lazypri = (getenv("UHA_LAZYPRI") && getenv("UHA_LAZYFIX")) ? 1 : 0;
+                                s_lazypri = (((const char *)0) && ((const char *)0)) ? 1 : 0;
                             if (s_lazypri && lazy_def)
                                 emit_lit = 1;
                         }
@@ -10867,7 +10917,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static int s_deny_init = -1;
                             static uint8_t *s_deny = NULL;
                             if (s_deny_init < 0) {
-                                const char *dp = getenv("UHA_DENYPOS");
+                                const char *dp = ((const char *)0);
                                 s_deny_init = 1;
                                 if (dp) {
                                     FILE *f = fopen(dp, "r");
@@ -10895,7 +10945,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static FILE *s_gvd = NULL;
                             static int s_gvd_init = -1;
                             if (s_gvd_init < 0) {
-                                const char *gv = getenv("UHA_GOVERNDUMP");
+                                const char *gv = ((const char *)0);
                                 s_gvd_init = (gv != NULL) ? 1 : 0;
                                 if (s_gvd_init && gv) {
                                     s_gvd = fopen(gv, "w");
@@ -10931,7 +10981,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static int s_wkd = -1;
                             static FILE *s_wkf = NULL;
                             if (s_wkd < 0) {
-                                const char *wp = getenv("UHA_WALKDUMP");
+                                const char *wp = ((const char *)0);
                                 s_wkd = wp ? 1 : 0;
                                 if (s_wkd && wp) s_wkf = fopen(wp, "w");
                             }
@@ -10949,7 +10999,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static int s_bmd = -1;
                             static FILE *s_bmf = NULL;
                             if (s_bmd < 0) {
-                                const char *mp = getenv("UHA_BMDUMP");
+                                const char *mp = ((const char *)0);
                                 s_bmd = mp ? 1 : 0;
                                 if (s_bmd && mp) s_bmf = fopen(mp, "w");
                             }
@@ -10965,7 +11015,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static int s_scd = -1;
                             static FILE *s_scf = NULL;
                             if (s_scd < 0) {
-                                const char *sp = getenv("UHA_SCALDUMP");
+                                const char *sp = ((const char *)0);
                                 s_scd = sp ? 1 : 0;
                                 if (s_scd && sp) s_scf = fopen(sp, "w");
                             }
@@ -11008,7 +11058,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static int s_ff_pos = -1, s_ff_tok = 0;
                 static uint32_t s_ff_dist = 0, s_ff_cnt = 0;
                 if (s_ff < 0) {
-                    const char *e = getenv("UHA_FORCEFIRST");
+                    const char *e = ((const char *)0);
                     unsigned pp, tt, dd, cc;
                     if (e && sscanf(e, "%u:%u:%u:%u", &pp, &tt, &dd, &cc) == 4) {
                         s_ff_pos = (int) pp; s_ff_tok = (int) tt;
@@ -11028,7 +11078,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
              * décideur (dump UHA_DECDBG) et le token effectivement codé. */
             {
                 static int s_ed = -1;
-                if (s_ed < 0) s_ed = getenv("UHA_A3_EMITDBG") ? 1 : 0;
+                if (s_ed < 0) s_ed = ((const char *)0) ? 1 : 0;
                 if (s_ed && pos <= 2000u)
                     fprintf(stderr, "[EMIT] pos=%u have2=%d emit_lit=%d lazy_def=%d descent=%d tok=%d d=%u c=%u\n",
                             (unsigned)pos, have2, emit_lit, lazy_def, descent_adopt,
@@ -11039,6 +11089,10 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             /* [A3 UHA_A3_VISIT_PRE] stockage de la visite n°2, calculee avant commit */
             uint32_t a3v_vp = 0u, a3v_ndist = 0xffffffffu;
             int a3v_ncls = 1, a3v_nslot = 0xff, a3v_ncnt = 0, a3v_pre = 0;
+            if (no_match) {
+                have2 = 0;
+                emit_lit = 1;
+            }
             if (have2 && !emit_lit) {
                 if (d->in_chain) {
                     static const uint8_t s_decim_tab[3][2] = {
@@ -11090,7 +11144,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 {
                     static int s_vpre = -1;
                     if (s_vpre < 0)
-                        s_vpre = getenv("UHA_A3_VISIT_PRE") ? 1 : 0;
+                        s_vpre = ((const char *)0) ? 1 : 0;
                     a3v_pre = (a3v_gate_enabled() && s_vpre) ? 1 : 0;
                 }
                 if (a3v_pre && (uint64_t) a3v_vp < (uint64_t) usize
@@ -11109,7 +11163,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                  * (octet source suivant la copie, site miroir 0x4130b7..e3).
                  * Zero effet si s_acclive==0 (défaut). */
                 if (s_acclive < 0)
-                    s_acclive = (getenv("UHA_ACCLIVE") != NULL) ? 1 : 0;
+                    s_acclive = (((const char *)0) != NULL) ? 1 : 0;
                 if (s_acclive && usize <= 0x10000u) {
                     s_acl.rawidx = (pos - dist + count) & 0xFFFFu;
                     s_acl.esc_wait = 1;
@@ -11153,7 +11207,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
             {
                 static int s_lb = -1;
                 if (s_lb < 0)
-                    s_lb = (getenv("UHA_LIVEBUD") != NULL) ? 1 : 0;
+                    s_lb = (((const char *)0) != NULL) ? 1 : 0;
                 if (s_lb) {
                     static FILE        *s_lbf   = NULL;
                     static alz_arena2d_t *s_lba  = NULL;
@@ -11161,7 +11215,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     static uint32_t      s_lbhead = 0;
                     static uint32_t      s_lbbud  = 0;
                     static uint32_t      s_lbseed_done = 0;
-                    const char *lbp = getenv("UHA_LIVEBUD");
+                    const char *lbp = ((const char *)0);
                     if (!s_lba) {
                         s_lba = (alz_arena2d_t *) malloc(sizeof(alz_arena2d_t));
                         if (s_lba) alz_arena2d_init(s_lba, 32u);
@@ -11243,7 +11297,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static int s_on = -1;
                 static FILE *s_f = NULL;
                 if (s_on < 0) {
-                    const char *ae = getenv("UHA_ACCDUMP");
+                    const char *ae = ((const char *)0);
                     s_on = ae ? 1 : 0;
                     if (s_on && ae)
                         s_f = fopen(ae, "w");
@@ -11346,7 +11400,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 {
                     static int s_accmix_any = -1;
                     if (s_accmix_any < 0)
-                        s_accmix_any = (getenv("UHA_ACCMIX") || getenv("UHA_ACCMIXLAG")) ? 1 : 0;
+                        s_accmix_any = (((const char *)0) || ((const char *)0)) ? 1 : 0;
                     if (s_accmix_any) {
                     static FILE *s_mixf = NULL;
                     static int s_mixf_init = -1;
@@ -11355,7 +11409,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     if (pos == 0u)
                         s_cl_mixlag_prev = 37440u;
                     if (s_mixf_init < 0) {
-                        const char *mp = getenv("UHA_ACCMIX");
+                        const char *mp = ((const char *)0);
                         s_mixf_init = 1;
                         if (mp && *mp) { s_mixf = fopen(mp, "w");
                             if (s_mixf) fprintf(s_mixf, "pos\tctx\tctx2\tsym\tpredict\tmix\n"); }
@@ -11373,7 +11427,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                      * ⚠ MESURE 2026-10-20 (jointure GT acc, prefixe aligne) : c'est
                      * l'INVERSE qui tient — lag-1 = 96,37 %, courant = 0,11 %. */
                     if (s_accnolag < 0)
-                        s_accnolag = getenv("UHA_ACCNOLAG") ? 1 : 0;
+                        s_accnolag = ((const char *)0) ? 1 : 0;
                     if (s_accnolag) {
                         c_bm = mixc;
                     } else {
@@ -11395,7 +11449,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 {
                     static int s_accring_on = -1;
                     if (s_accring_on < 0)
-                        s_accring_on = getenv("UHA_ACCRING") ? 1 : 0;
+                        s_accring_on = ((const char *)0) ? 1 : 0;
                     if (s_accring_on) {
                     static alz_arena2d_t *s_ar = NULL;
                     static uint32_t s_ar_seed = 0;
@@ -11419,7 +11473,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                      * rate rejoint GT, la structure bande est confirme. NON-CLoS :
                      * ne remplace PAS le vrai dispatch cls (SUBSTITUTION interdite). */
                     if (s_ararow_mask < 0) {
-                        const char *arw = getenv("UHA_ARAROW");
+                        const char *arw = ((const char *)0);
                         int b = arw ? atoi(arw) : 0;
                         s_ararow_mask = (b >= 1 && b < 9) ? (int)((1u << b) - 1u) : 0;
                     }
@@ -11454,7 +11508,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             static FILE *s_acf = NULL;
                             static int s_acf_init = -1;
                             if (s_acf_init < 0) {
-                                const char *ap = getenv("UHA_ARACC");
+                                const char *ap = ((const char *)0);
                                 s_acf_init = 1;
                                 if (ap) { s_acf = fopen(ap, "w");
                                     if (s_acf) fprintf(s_acf, "pos\trelrow\tdelta\tproba\tacc\n"); }
@@ -11485,7 +11539,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                  * appelé) : seul le choix de la source poussee change. Zéro effet hors gate. */
                 {
                     static int s_mixlag = -1;
-                    if (s_mixlag < 0) s_mixlag = getenv("UHA_ACCMIXLAG") ? 1 : 0;
+                    if (s_mixlag < 0) s_mixlag = ((const char *)0) ? 1 : 0;
                     if (s_mixlag) c_bm = s_cl_mixlag;
                 }
                 /* [GATED UHA_CLPUSH=chemin, LECTURE SEULE, DEFAUT-OFF] trace la valeur
@@ -11497,7 +11551,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     static FILE *s_psh = NULL;
                     static int s_psh_init = -1;
                     if (s_psh_init < 0) {
-                        const char *pp = getenv("UHA_CLPUSH");
+                        const char *pp = ((const char *)0);
                         s_psh_init = 1;
                         if (pp && *pp) { s_psh = fopen(pp, "w"); if (s_psh) fprintf(s_psh, "pos\tacc\n"); }
                     }
@@ -11517,7 +11571,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                     static const uint32_t s_pmd_blpos[6] =
                         { 0x0000u, 0x3100u, 0x620cu, 0x931cu, 0xc4ffu, 0xff00u };
                     if (s_pmd_init < 0) {
-                        const char *pd = getenv("UHA_LIVEWALK_PMDUMP");
+                        const char *pd = ((const char *)0);
                         s_pmd_init = 1;
                         if (pd && *pd) { s_pmd = fopen(pd, "w");
                             if (s_pmd) fprintf(s_pmd, "b\tphys\trelrow\tsum\tnz\tcounter\ttotal\tpromo\n"); }
@@ -11551,9 +11605,9 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
              * réellement émis ; les positions MATCH gardent `dens`. Auto-gardé
              * si g_lmin_dens absent (UHA_LMINLIVE off) -> zéro régression. */
             if (s_acclive < 0)
-                s_acclive = (getenv("UHA_ACCLIVE") != NULL) ? 1 : 0;
+                s_acclive = (((const char *)0) != NULL) ? 1 : 0;
             if (s_cmwire < 0)
-                s_cmwire = (getenv("UHA_CM_WIRE") != NULL) ? 1 : 0;
+                s_cmwire = (((const char *)0) != NULL) ? 1 : 0;
             /* [GATED UHA_CM_WIRE, §13.803] quand la voie fidèle est active, le producteur
              * emiprod a déjà posé g_lmin = cost[rc] BIT-EXACT (M5) : ne PAS l'écraser
              * par le coût arena_c4 approximatif d'acclive. */
@@ -11561,7 +11615,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static int s_acl_int = -1;
                 uint32_t ac;
                 if (s_acl_int < 0)
-                    s_acl_int = getenv("UHA_ACL_INTEGRATE") ? 1 : 0;
+                    s_acl_int = ((const char *)0) ? 1 : 0;
                 g_bm_freq = d->bm_freq; g_bm_tree = d->bm_tree; g_bm_sel = (int)d->st.escape_selector;   /* expose le bm live à acclive_event (escape) */
                 ac = acclive_event_once(plain, usize, pos);
                 if (!s_acl_int && ac != 0xFFFFFFFFu)
@@ -11581,7 +11635,26 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
              * 12544 / 4744 / 256 (captures n°3 et n°14) ; `random` = 11 appels de 0 à
              * 119744, escapes seulement aux bascules 5->6 (75264) et 6->0 (119744).
              * Exécuté AVANT `alz_encode_token_class(4)` : l'escape précède le littéral. */
-            {
+            if (live_sel_mode && !((const char *)0)) {
+                if (pos >= live_cc84) {
+                    int new_sel = (int)d->st.escape_selector;
+                    uint32_t blen = 0u;
+                    a3_live_block_eval(d, plain, next_boundary, pos, order, live_nomm,
+                                       &k_state, &new_sel, &blen,
+                                       &g_lmin_dens, &g_lmin_dens_cap, &g_lmin_dens_ready);
+                    if (new_sel != (int)d->st.escape_selector || d->st.escape_changed) {
+                        if (alz_encode_token_class(d, 0) != 0 ||
+                            alz_encode_escape(d, new_sel) != 0) {
+                            rc = 3;
+                            break;
+                        }
+                    }
+                    live_cc84 = pos + (blen ? blen : 1u);
+                    g_live_blk_base = pos;
+                    g_live_blk_len = blen ? blen : 1u;
+                    g_live_blk_end = pos + g_live_blk_len;
+                }
+            } else {
                 static int s_es2 = -1;
                 static uint32_t s_es2_cc84 = 0u;
                 static uint32_t s_es2_win_end = 0u;   /* pos + fenêtre du bloc en cours */
@@ -11636,7 +11709,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                             if (pos != 0u) {
                                 static int s_selblk = -1;
                                 if (s_selblk < 0)
-                                    s_selblk = getenv("UHA_A3_SEL_BLOCK") ? 1 : 0;
+                                    s_selblk = ((const char *)0) ? 1 : 0;
                                 if (s_selblk && blen > 0x800u) {
                                     /* [GATED UHA_A3_SEL_BLOCK, défaut-OFF, tour 130 — opération §5-2]
                                      * la chaîne COMPLÈTE par bloc : argmin CM du bloc COURANT
@@ -11706,7 +11779,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                         {   /* diagnostic LECTURE SEULE : sites de décision et classe rendue */
                             static int s_es2_dbg = -1;
                             if (s_es2_dbg < 0)
-                                s_es2_dbg = (getenv("UHA_A3_ES2DBG") != NULL) ? 1 : 0;
+                                s_es2_dbg = (((const char *)0) != NULL) ? 1 : 0;
                             if (s_es2_dbg)
                                 fprintf(stderr, "[ES2] pos=%u rest=%u blen=%u win=%u cur=%d cls=%d\n",
                                         (unsigned)pos, (unsigned)rest, (unsigned)blen,
@@ -11737,7 +11810,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                          * décideur 20104 al=1 à tort). `=0` laisse le producteur chaud intact. */
                         {
                             static int s_dref = -1;
-                            if (s_dref < 0) s_dref = getenv("UHA_A3_DENSREFRESH") ? 1 : 0;
+                            if (s_dref < 0) s_dref = ((const char *)0) ? 1 : 0;
                             if (s_dref && g_lmin_dens && pos != 0u && pos + g_live_blk_len <= usize) {
                                 uint32_t np = 0;
                                 alz_ps_class_sigma((uint32_t)cls, plain + pos, g_live_blk_len, 32u, ALZ_PS_COLD0, NULL, g_lmin_dens + pos, &np);
@@ -11764,7 +11837,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
              * (valeurs propres émises par le clone, pas m9). Zéro effet hors gate (lecture seule). */
             {
                 static FILE *s_ed = NULL; static int s_edi = -1; static uint32_t s_lastb = 0xFFFFFFFFu;
-                if (s_edi < 0) { const char *ee = getenv("UHA_LIVEWALK_ESCDUMP"); s_edi = (ee && *ee) ? 1 : 0; if (s_edi) s_ed = fopen(ee, "w"); }
+                if (s_edi < 0) { const char *ee = ((const char *)0); s_edi = (ee && *ee) ? 1 : 0; if (s_edi) s_ed = fopen(ee, "w"); }
                 if (s_ed) {
                     static const uint32_t bstart[6] = {0u,0x3100u,0x620cu,0x931cu,0xc4ffu,0xff00u};
                     int bi; for (bi=0; bi<6; bi++) if (d->st.output_pos == bstart[bi] && (uint32_t)bi != s_lastb) {
@@ -11787,10 +11860,10 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
                 static FILE *s_bp = NULL; static int s_bpi = -1;
                 static long tp[64]; static long td[64]; static long tfm[64]; static long tfen[64]; static int tn = 0;
                 if (s_bpi < 0) {
-                    const char *e = getenv("UHA_ESCBMFREQ_PROBE");
+                    const char *e = ((const char *)0);
                     s_bpi = (e && *e) ? 1 : 0;
                     if (s_bpi) {
-                        const char *mf = getenv("UHA_ESCBMFREQ_M9");
+                        const char *mf = ((const char *)0);
                         s_bp = fopen(e, "w");
                         if (mf && *mf) {   /* lit les froides pass0 de m9_prodstate_b1.log */
                             char ln[256]; FILE *fp = fopen(mf, "r");
@@ -11824,7 +11897,7 @@ int uha_alz_encode(const uint8_t *plain, uint32_t usize,
              * distribution `freqM` LEG (m9) pour prouver que `#side_events(cls,delta avant pos)` ≈ (freqM‑2)/32. */
             {
                 static FILE *s_sf = NULL; static int s_sfi = -1;
-                if (s_sfi < 0) { const char *se = getenv("UHA_SIDEFEED_PROBE"); s_sfi = (se && *se) ? 1 : 0; if (s_sfi) { s_sf = fopen(se, "w"); if (s_sf) fprintf(s_sf,"# pos sel escrow=0x402+sel bm_tree[escrow][0] bm_tree[0x405][0]\n"); } }
+                if (s_sfi < 0) { const char *se = ((const char *)0); s_sfi = (se && *se) ? 1 : 0; if (s_sfi) { s_sf = fopen(se, "w"); if (s_sf) fprintf(s_sf,"# pos sel escrow=0x402+sel bm_tree[escrow][0] bm_tree[0x405][0]\n"); } }
                 if (s_sf) {
                     uint32_t esrow = 0x402u + (uint32_t)d->st.escape_selector;
                     fprintf(s_sf, "%u\t%u\t%u\t%u\t%u\t%u\t%u\n", (unsigned)d->st.output_pos, (unsigned)d->st.escape_selector,

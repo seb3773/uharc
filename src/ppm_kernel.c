@@ -199,13 +199,6 @@ static int low_count_sse(ppm_model *m, uha_rc *r, ppm_kstate *ks,
     if (m->last_ctx == m->last_sym[pb])
         sse |= 0x400;
     prob = m->sse_prob[sse];
-    /* [GATED UHA_C550DBG, defautOFF, M90] jumeau of the log encode for to compares sse by symbole. */
-    { static int cdbg2 = -1; if (cdbg2 < 0) { const char *e = getenv("UHA_C550DBG"); cdbg2 = (e && e[0] != '0') ? 1 : 0; }
-      if (cdbg2) fprintf(stderr, "[C550D] ctx=%d pb=%d fpred=%u rem=%u sse=0x%x prob=%u winpos=%u rec=%u novel=%u\n",
-                        ctx, pb, freq_pred, rem, sse, prob, m->win_pos, m->recency[pb], m->novel[pb]);
-      if (cdbg2) fprintf(stderr, "[CSTATED] ctx=%d pred_byte=%d ent_wt=%u cls_idx=%u cum0=%u freqpb=%u winpos=%u\n",
-                        ctx, m->pred_byte[ctx], m->ent_wt[ctx], m->cls_idx[ctx], m->cum[ctx][0],
-                        m->freq[ctx][pb & 0xFF], m->win_pos); }
     r->range /= 0x2000;
     fdec = (r->code / r->range) & 0xFFFFu;
     if (fdec < prob) {
@@ -459,15 +452,6 @@ static int encode_low_count_sse(ppm_model *m, ppm_kstate *ks,
     if (m->last_ctx == m->last_sym[pb])
         sse |= 0x400;
     prob = m->sse_prob[sse];
-    /* [GATED UHA_C550DBG, defautOFF, M90] state of the bin c550 for isoler there feature divergente. */
-    { static int cdbg = -1; if (cdbg < 0) { const char *e = getenv("UHA_C550DBG"); cdbg = (e && e[0] != '0') ? 1 : 0; }
-      if (cdbg) fprintf(stderr, "[C550] ctx=%d pb=%d fpred=%u rem=%u sse=0x%x prob=%u sym=%d nexcl=%d\n",
-                        ctx, pb, freq_pred, rem, sse, prob, sym, nexcl);
-      if (cdbg) fprintf(stderr, "[CSTATE] ctx=%d pred_byte=%d ent_wt=%u cls_idx=%u cum0=%u freqpb=%u | excl[0..3]=%d,%d,%d,%d\n",
-                        ctx, m->pred_byte[ctx], m->ent_wt[ctx], m->cls_idx[ctx], m->cum[ctx][0],
-                        m->freq[ctx][pb & 0xFF],
-                        nexcl>0?m->excl[0]:-1, nexcl>1?m->excl[1]:-1, nexcl>2?m->excl[2]:-1, nexcl>3?m->excl[3]:-1);
-      if (cdbg) fprintf(stderr, "[CSTEP] ctx=%d tstep=%u tstep2=%u\n", ctx, m->tstep[ctx], m->tstep2[ctx]); }
     if (sym == pb) {
         if (uha_rcw_encode(m->w, 0, prob, 0x2000) != 0)
             return -1;

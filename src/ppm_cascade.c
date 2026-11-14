@@ -371,38 +371,10 @@ static int decode_literal_cascade_core(ppm_model *m, uha_rc *r, uint8_t *outp, i
  * global of cascade. This probe imprime these fields at the INPUT of each cascade of
  * literal, some two sides (tag E/D), in there window `UHA_M241RING=lo:hi` (win_pos).
  * No writing : read-only, no effect on the stream. */
-static void m241_ring_dump(const char *tag, ppm_model *m)
+static inline void m241_ring_dump(const char *tag, ppm_model *m)
 {
-    static int on = -1;
-    static uint32_t lo = 0, hi = 0;
-    if (on < 0) {
-        const char *e = getenv("UHA_M241RING");
-        on = 0;
-        if (e && e[0] && e[0] != '0') {
-            unsigned long a = 0, b = 0;
-            if (sscanf(e, "%lu:%lu", &a, &b) == 2) { lo = (uint32_t)a; hi = (uint32_t)b; on = 1; }
-            else { lo = 0; hi = 0xFFFFFFFFu; on = 1; }
-        }
-    }
-    if (!on || !m)
-        return;
-    if (m->win_pos < lo || m->win_pos > hi)
-        return;
-    fprintf(stderr,
-            "[M241RING %s] wp=%u cls=%u c48=%08x c40=%u s41=%u nexcl=%u br18=%u rk=%u"
-            " rp=%d ring=%u,%u,%u,%u best_pred=%u bc0=%u bc1=%u bf=%u conf=%u pred=%u wpos=%u"
-            " best=%d last_best=%d rran=%d\n",
-            tag, (unsigned)m->win_pos, (unsigned)m->flag3934, (unsigned)m->c48,
-            (unsigned)m->c40, (unsigned)m->s41, (unsigned)m->nexcl, (unsigned)m->br18,
-            (unsigned)m->rank_small[m->rank_ptr_small],
-            (int)ppm_bc1_st.ring_ptr,
-            (unsigned)ppm_bc1_st.ring[0], (unsigned)ppm_bc1_st.ring[1],
-            (unsigned)ppm_bc1_st.ring[2], (unsigned)ppm_bc1_st.ring[3],
-            (unsigned)ppm_bc1_st.best_pred, (unsigned)ppm_bc1_st.best_c0,
-            (unsigned)ppm_bc1_st.best_c1, (unsigned)ppm_bc1_st.best_flags,
-            (unsigned)ppm_bc1_st.conf[m->c48 & 0xFF], (unsigned)ppm_bc1_st.pred[m->c48 & 0xFF],
-            (unsigned)ppm_bc1_st.wpos, (int)ppm_bc1_st.best, (int)ppm_bc1_st.last_best,
-            ppm_bc1_ring_ran);
+    (void)tag;
+    (void)m;
 }
 
 int ppm_decode_literal_cascade(ppm_model *m, uha_rc *r, uint8_t *outp, int *outlen,
@@ -423,19 +395,7 @@ int ppm_decode_literal_cascade(ppm_model *m, uha_rc *r, uint8_t *outp, int *outl
     m->c48 = literal_context(m);
     g_c48_site = 2; g_c40_site = 2;
     m->c38 = (m->c48 ^ (m->c48 >> 0x0D)) & 0x7FFF;
-    /* [GATED UHA_C40ONE, defautOFF, M207] formule UNIQUE of legacy (0x41a2a1) :
-     *   c40 = (c48 & 0xFFFF) + ((bc==0 && novel[(c48>>16)&0xFF]) ? 0x10000 : 0)
-     * The two sites " nus " (here and more low) ecrasaient c40 without the +0x10000, this which the rendait
-     * false of has literal (measured : 117 446 au lieu of 120 272 at the input of the block 2). */
-    { static int c1g = -1;
-      if (c1g < 0) { const char *e = getenv("UHA_C40ONE"); c1g = (e && e[0] != '0') ? 1 : 0; }
-      if (c1g) {
-          uint32_t d = m->c48 & 0xFFFFu;
-          if (m->byte_class == 0 && m->novel[(m->c48 >> 16) & 0xFF] != 0)
-              d += 0x10000u;
-          m->c40 = d;
-      } else
-          m->c40 = m->c48 & 0xFFFF; }
+    m->c40 = m->c48 & 0xFFFF;
     ppm_update_head_rank_ptrs(m);
     ppm_lastsym_predict(m);
 
@@ -768,8 +728,6 @@ static int decode_literal_cascade_core(ppm_model *m, uha_rc *r, uint8_t *outp, i
             c550_ctx = 0x100 + m->window[(m->win_pos - m->br18) & m->win_mask];
         else
             c550_ctx = ctx;
-        { static int u = -1; if (u < 0) { const char *e = getenv("UHA_C550DBG"); u = (e && e[0] != '0') ? 1 : 0; }
-          if (u) { int idx = (m->win_pos - m->br18) & m->win_mask; fprintf(stderr, "[CCTX] D pb_gate=%d winpos=%u br18=%u mask=%u idx=%u wval=%u ctx=%d\n", pb_gate, m->win_pos, m->br18, m->win_mask, idx, m->window[idx], c550_ctx); } }
         if (!ppm_c550_decode(m, r, c550_ctx, 0x301, &res))
             return 0;
     }
@@ -1061,15 +1019,8 @@ static int encode_literal_cascade_core(ppm_model *m, uint8_t *outp, int *outlen,
             c550_ctx = 0x100 + m->window[(m->win_pos - m->br18) & m->win_mask];
         else
             c550_ctx = ctx;
-        { static int u = -1; if (u < 0) { const char *e = getenv("UHA_C550DBG"); u = (e && e[0] != '0') ? 1 : 0; }
-          if (u) { int idx = (m->win_pos - m->br18) & m->win_mask; fprintf(stderr, "[CCTX] E pb_gate=%d winpos=%u br18=%u mask=%u idx=%u wval=%u ctx=%d\n", pb_gate, m->win_pos, m->br18, m->win_mask, idx, m->window[idx], c550_ctx); } }
         if (!ppm_c550_encode(m, c550_ctx, 0x301, target, &res))
             return 0;
-        { static int pt2 = -1;
-          if (pt2 < 0) { const char *e = getenv("UHA_PPMTRACE"); pt2 = (e && e[0] == '2') ? 1 : 0; }
-          if (pt2)
-              fprintf(stderr, "[TR2 c550enc] tgt=%u ctx=%d c550ctx=%d wpf=%d win=%u\n",
-                      (unsigned)target, ctx, c550_ctx, wp_fired, (unsigned)m->win_pos); }
     }
     if (wp_fired) {
         if (wp_mirror)
@@ -1109,19 +1060,7 @@ int ppm_encode_literal_cascade(ppm_model *m, uint8_t *outp, int *outlen,
     m->c48 = literal_context(m);
     g_c48_site = 3; g_c40_site = 3;
     m->c38 = (m->c48 ^ (m->c48 >> 0x0D)) & 0x7FFF;
-    /* [GATED UHA_C40ONE, defautOFF, M207] formule UNIQUE of legacy (0x41a2a1) :
-     *   c40 = (c48 & 0xFFFF) + ((bc==0 && novel[(c48>>16)&0xFF]) ? 0x10000 : 0)
-     * The two sites " nus " (here and more low) ecrasaient c40 without the +0x10000, this which the rendait
-     * false of has literal (measured : 117 446 au lieu of 120 272 at the input of the block 2). */
-    { static int c1g = -1;
-      if (c1g < 0) { const char *e = getenv("UHA_C40ONE"); c1g = (e && e[0] != '0') ? 1 : 0; }
-      if (c1g) {
-          uint32_t d = m->c48 & 0xFFFFu;
-          if (m->byte_class == 0 && m->novel[(m->c48 >> 16) & 0xFF] != 0)
-              d += 0x10000u;
-          m->c40 = d;
-      } else
-          m->c40 = m->c48 & 0xFFFF; }
+    m->c40 = m->c48 & 0xFFFF;
     ppm_update_head_rank_ptrs(m);
     ppm_lastsym_predict(m);
 

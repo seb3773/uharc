@@ -3,47 +3,9 @@
 #include <stdio.h>
 #include "ppm_priv.h"
 
-extern int g_upd_route;
-extern int g_promo_silent;   /* [M211] 1 = the warm-up of promotion bc1 not touche not rec_globals */
-
-long g_recg_calls = 0;   /* [M211] nombre d'calls of rec_globals (diagnostic) */
-
 static void rec_globals(ppm_model *m)
 {
     uint32_t edx = (m->dcg + 2) & PPM_M32;
-    g_recg_calls++;
-    /* [M212 GATED UHA_RECGRID] grille of 4096 bytes in [937 696, 1 071 004] : there first
-     * divergence d'calls with the legacy engine designe the path fautif (matches courts ? literals ?). */
-    /* [M213 GATED UHA_RECGTRACE="lo:hi"] has line by call in there range (out, dcg, c4g) :
-     * sequence comparable 1:1 to legacy (sites 0x418a5e and 0x418f4b reunis). */
-    { static long tlo = -1, thi = -1;
-      if (tlo == -1) {
-          const char *e = getenv("UHA_RECGTRACE");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              tlo = atol(e); thi = c ? atol(c + 1) : tlo + 10;
-          } else { tlo = 0; thi = -2; }
-      }
-      if (thi >= tlo && (long)m->out_count >= tlo && (long)m->out_count <= thi)
-          fprintf(stderr, "[RECGT] out=%u dcg=%u c4g=%u a8g=%u\n",
-                  m->out_count, (unsigned)m->dcg, (unsigned)m->c4g, (unsigned)m->a8g); }
-    /* [M214 GATED UHA_RECS] creations of record in there range : counter + has line by cas. */
-    { static long slo = -1;
-      if (slo == -1) {
-          const char *e = getenv("UHA_RECS");
-          if (e && e[0] != '0') {
-              slo = atol(e);
-          } else { slo = 0; }
-      } }
-    { static int rg = -1; static uint32_t next = 937696u;
-      if (rg < 0) { const char *e = getenv("UHA_RECGRID"); rg = (e && e[0] != '0') ? 1 : 0; }
-      if (rg && m->out_count >= next && m->out_count <= 1071004u) {
-          fprintf(stderr, "[RECGRID] out=%u dcg=%u c4g=%u a8g=%u recg=%ld\n",
-                  m->out_count, (unsigned)m->dcg, (unsigned)m->c4g, (unsigned)m->a8g, g_recg_calls);
-          next += 4096u;
-      } }
-    if (g_promo_silent)
-        return;
     m->dcg = edx;
     if (edx > 0x800) {
         m->dcg = edx >> 1;
@@ -110,25 +72,6 @@ static void rec1_special(ppm_model *m, int sym, uint32_t c38)
     m->rec1s[idx][0x1F] = (uint8_t)((m->c48 >> 24) & 0xFF);
     m->c38 = ctx;
     m->link_tab[m->link_ptr] = m->rec1s[idx][0x1A];
-    /* [M208 GATED UHA_RECNEW, default-OFF] creation of has record : position + index + sym. C'is
-     * there single path of creation (c38 >= 0x40000) ; the diff dec/enc designe the context fautif. */
-    { static long slo = -1, shi = -1;
-      if (slo == -1) {
-          const char *e = getenv("UHA_RECS");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              slo = atol(e); shi = c ? atol(c + 1) : slo + 10;
-          } else { slo = 0; shi = -2; }
-      }
-      if (shi >= slo && (long)m->out_count >= slo && (long)m->out_count <= shi)
-          fprintf(stderr, "[RECS] out=%u idx=%u sym=%u\n",
-                  m->out_count, (unsigned)idx, (unsigned)(sym & 0xFF)); }
-    { static int rn = -1;
-      if (rn < 0) { const char *e = getenv("UHA_RECNEW"); rn = (e && e[0] != '0') ? 1 : 0; }
-      if (rn && m->out_count < 45337u)
-          fprintf(stderr, "[RECNEW] pos=%u win=%u c38=%u ctx=%u idx=%u sym=%u del=%u\n",
-                  m->out_count, m->win_pos, (unsigned)c38, (unsigned)ctx, (unsigned)idx,
-                  (unsigned)(sym & 0xFF), edx < 0x38000 ? (unsigned)(ctx + edx + 0x8000) : 0u); }
 }
 
 static int rec1_main(ppm_model *m, uint8_t *r, int sym, int s47_hint, int *bump_c4)
@@ -148,16 +91,20 @@ static int rec1_main(ppm_model *m, uint8_t *r, int sym, int s47_hint, int *bump_
         ah = PPMS_REC1THR[r[0]] < m->c1c;
         if (ah)
             for (i = 0; i <= 0xC; i++)
-                r[i] = (uint8_t)(((r[i] + 1) >> 1) & 0xFF);
+                r[i] = (uint8_t)(((r[i] + 1) & 0xFF) >> 1);
         r[0] = (uint8_t)((r[0] + 2) & 0xFF);
         r[0x1B] >>= 1;
         fcl = 1;
         while (fcl < 0xB && r[1 + fcl] != 0)
             fcl++;
-        newcnt = (m->s48 + 2) & 0xFF;
-        r[1 + fcl] = (uint8_t)newcnt;
-        r[0xD + fcl] = (uint8_t)(sym & 0xFF);
-        r[0x1A] = (uint8_t)fcl;
+        if (r[1 + fcl] < 6) {
+            newcnt = (m->s48 + 2) & 0xFF;
+            r[1 + fcl] = (uint8_t)newcnt;
+            r[0xD + fcl] = (uint8_t)(sym & 0xFF);
+            r[0x1A] = (uint8_t)fcl;
+        } else {
+            fcl = 0;
+        }
         low6 = r[0x19] & 0x3F;
         r[0x19] = (uint8_t)((r[0x19] & 0xC0) | (low6 >> 1));
         return rec1_sort(r, fcl);
@@ -175,7 +122,7 @@ static int rec1_main(ppm_model *m, uint8_t *r, int sym, int s47_hint, int *bump_
     run_cond = (cl != 0) && ((r[0x1A] >> 4) >= 4) && ((r[0x1A] & 0xF) == (uint32_t)cl);
     if (run_cond || ah)
         for (i = 0; i <= 0xC; i++)
-            r[i] = (uint8_t)(((r[i] + 1) >> 1) & 0xFF);
+            r[i] = (uint8_t)(((r[i] + 1) & 0xFF) >> 1);
     r[1 + cl] = (uint8_t)((r[1 + cl] + 2) & 0xFF);
     low6 = r[0x19] & 0x3F;
     if (low6 < 0x3F)
@@ -192,10 +139,6 @@ static int rec1_main(ppm_model *m, uint8_t *r, int sym, int s47_hint, int *bump_
     return rec1_sort(r, cl);
 }
 
-long g_special_calls = 0;   /* [M214] calls of rec1_special (path without rec_globals) */
-long g_rec1_calls = 0;      /* [M215] calls of ppm_rec1_apply (input) */
-
-/* [M216] acces public has rec_globals for tester the path " end of match ". */
 void ppm_rec_globals_pub(ppm_model *m) { rec_globals(m); }
 
 void ppm_rec1_apply(ppm_model *m, int sym, uint32_t c38, int s47_hint)
@@ -203,37 +146,8 @@ void ppm_rec1_apply(ppm_model *m, int sym, uint32_t c38, int s47_hint)
     int slot, aslot, bump_c4;
     uint32_t q, base_cnt;
 
-    g_rec1_calls++;
-    { static long rlo = -1, rhi = -1;
-      if (rlo == -1) {
-          const char *e = getenv("UHA_REC1TRACE");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              rlo = atol(e); rhi = c ? atol(c + 1) : rlo + 10;
-          } else { rlo = 0; rhi = -2; }
-      }
-      if (rhi >= rlo && (long)m->out_count >= rlo && (long)m->out_count <= rhi)
-          fprintf(stderr, "[REC1T] out=%u c38=%u special=%d\n",
-                  m->out_count, (unsigned)c38, (c38 >= 0x40000u) ? 1 : 0);
-    }
-
-    /* [M208 GATED UHA_LASTSYM, default-OFF] which calls rec1_apply au bord of the member 1 ? */
-    { static int ls = -1;
-      if (ls < 0) { const char *e = getenv("UHA_LASTSYM"); ls = (e && e[0] != '0') ? 1 : 0; }
-      if (ls && m->out_count >= 45330u && m->out_count <= 45340u)
-          fprintf(stderr, "[LASTSYM] pos=%u win=%u route=%d c38=%u s47h=%d sym=%u f38=%u f3b=%u bc=%u\n",
-                  m->out_count, m->win_pos, g_upd_route, (unsigned)c38, s47_hint,
-                  (unsigned)(sym & 0xFF), (unsigned)m->flag3938, (unsigned)m->flag393b,
-                  (unsigned)m->byte_class); }
-
     if (c38 >= 0x40000) {
         rec1_special(m, sym, c38);
-        g_special_calls++;
-        /* [M214 GATED UHA_RECGS, default-OFF] the path " new record " calls-t-il also
-         * `rec_globals` in the legacy engine ? Nos 263 literals without `rec_globals` by pass the suggerent. */
-        { static int rg = -1;
-          if (rg < 0) { const char *e = getenv("UHA_RECGS"); rg = (e && e[0] != '0') ? 1 : 0; }
-          if (rg) rec_globals(m); }
         return;
     }
     if (m->flag3938 != 0) {
@@ -243,24 +157,6 @@ void ppm_rec1_apply(ppm_model *m, int sym, uint32_t c38, int s47_hint)
             while (aslot < 0xC && m->rec1s[c38][0xD + aslot] != (sym & 0xFF))
                 aslot++;
         }
-        /* [M211 GATED UHA_A8G] counters : `a8g` ([0x4826a8]) remainder-t-il has 0 at nous then that
-         * son increment legacy (0x418813, condition `(r[slot+1]>>6) > r[0]`) is porte ? */
-        { static long n38 = 0, ninc = 0; static int on = -1;
-          if (on < 0) { const char *e = getenv("UHA_A8G"); on = (e && e[0] != '0') ? 1 : 0; }
-          if (on) {
-              n38++;
-              if (aslot < 0xC && ((m->rec1s[c38][aslot + 1] >> 6) > m->rec1s[c38][0])
-                  && ninc < 5)
-                  fprintf(stderr, "[A8G] pos=%u c38=%u slot=%d r=%u/%u a8g=%u\n",
-                          m->out_count, (unsigned)c38, aslot, m->rec1s[c38][aslot + 1],
-                          m->rec1s[c38][0], (unsigned)m->a8g);
-              if (aslot < 0xC && ((m->rec1s[c38][aslot + 1] >> 6) > m->rec1s[c38][0]))
-                  ninc++;
-              if ((m->out_count & 0x3FFFFu) == 0)
-                  fprintf(stderr, "[A8G] pos=%u flag38=%ld inc=%ld a8g=%u dcg=%u c4g=%u\n",
-                          m->out_count, n38, ninc, (unsigned)m->a8g,
-                          (unsigned)m->dcg, (unsigned)m->c4g);
-          } }
         if (aslot < 0xC && ((m->rec1s[c38][aslot + 1] >> 6) > m->rec1s[c38][0]))
             m->a8g = (m->a8g + 4) & PPM_M32;
     }
@@ -388,26 +284,11 @@ void ppm_rec2_apply_heavy(ppm_model *m, int sym)
             r[0x13] = (uint8_t)ci;
             cl = rec2_sort(r, ci);
         } else {
-            r[ci + 1] = 4;
-            r[ci + 9] = (uint8_t)ch;
-            r[0x13] = (uint8_t)ci;
-            cl = rec2_sort(r, 0);
+            cl = 0;
         }
     }
     m->s49 = (uint8_t)(cl & 0xFF);
-    { static long hlo = -1, hhi = -1;
-      if (hlo == -1) {
-          const char *e = getenv("UHA_REC2TH");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              hlo = atol(e); hhi = c ? atol(c + 1) : hlo + 10;
-          } else { hlo = 0; hhi = -2; }
-      }
-      if (hhi >= hlo && (long)m->out_count >= hlo && (long)m->out_count <= hhi)
-          fprintf(stderr, "[REC2H] out=%u\n", m->out_count); }
-    { static int r2n = -1;
-      if (r2n < 0) { const char *e = getenv("UHA_REC2NO"); r2n = (e && e[0] != '0') ? 1 : 0; }
-      if (!r2n) rec_globals(m); }
+    rec_globals(m);
     (void)i;
 }
 
@@ -425,9 +306,6 @@ void ppm_rec2_apply_light(ppm_model *m, int sym)
         r[1] = 2;
         r[0x12] = 4;
         r[9] = (uint8_t)ch;
-        { static int rl = -1;
-          if (rl < 0) { const char *e = getenv("UHA_REC2LG"); rl = (e && e[0] != '0') ? 1 : 0; }
-          if (rl) rec_globals(m); }
         return;
     }
     m->s49 = 0;
@@ -458,31 +336,12 @@ void ppm_rec2_apply_light(ppm_model *m, int sym)
         while (ci < 7 && r[ci + 1] != 0)
             ci++;
         dh = r[ci + 1];
-        if (dh < 0xC)
+        if (dh < 0xC) {
             r[0x12] = (uint8_t)((r[0x12] + ((1 - dh) & 0xFF)) & 0xFF);
-        r[ci + 1] = 1;
-        r[ci + 9] = (uint8_t)ch;
-        r[0x13] = (uint8_t)ci;
-        m->s49 = (uint8_t)(rec2_sort(r, ci) & 0xFF);
+            r[ci + 1] = 1;
+            r[ci + 9] = (uint8_t)ch;
+            r[0x13] = (uint8_t)ci;
+            m->s49 = (uint8_t)(rec2_sort(r, ci) & 0xFF);
+        }
     }
-    /* [M215 GATED UHA_REC2LG, default-OFF] the path LIGHT of rec2 calls-t-il also rec_globals
-     * in the legacy engine ? Nos 728 calls (356 rec1 + 372 rec2-heavy) contre 1 013 at lui the suggerent. */
-    { static int rl = -1;
-      if (rl < 0) { const char *e = getenv("UHA_REC2LG"); rl = (e && e[0] != '0') ? 1 : 0; }
-      if (rl) rec_globals(m); }
-    /* [M215 GATED UHA_REC2BUMP, default-OFF] the path LIGHT bump-il `c4g += 5` as the heavy ?
-     * `c4g` legacy = 2 006 contre 1 309 with the model " 1 call/literal " : il manque ~139 bumps. */
-    { static int rb = -1;
-      if (rb < 0) { const char *e = getenv("UHA_REC2BUMP"); rb = (e && e[0] != '0') ? 1 : 0; }
-      if (rb && cl < 8) m->c4g = (m->c4g + 5) & PPM_M32; }
-    { static long llo = -1, lhi = -1;
-      if (llo == -1) {
-          const char *e = getenv("UHA_REC2T");
-          if (e && e[0] != '0') {
-              const char *c = strchr(e, ':');
-              llo = atol(e); lhi = c ? atol(c + 1) : llo + 10;
-          } else { llo = 0; lhi = -2; }
-      }
-      if (lhi >= llo && (long)m->out_count >= llo && (long)m->out_count <= lhi)
-          fprintf(stderr, "[REC2T] out=%u\n", m->out_count); }
 }

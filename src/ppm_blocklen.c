@@ -65,22 +65,8 @@ void ppm_blocklen_roll(ppm_blocklen_ctx *c)
      * table perime : at the cut `start = 937 440` (1re divergence of the corps, `firstdiv =
      * 178 540`) the port affiche `t == t5 == [6662 7020 7570 6844 7428]` then that there value
      * issue of the scan previous was `[4978 5066 4970 5046 5172]`. `=1` applies the direction ASM. */
-    {
-        static int pr = -1;
-        if (pr < 0) { const char *e = getenv("UHA_PBLROLL"); pr = (e && e[0] == '0') ? 0 : 1; }
-        if (pr) {
-            for (i = 0; i < PBL_NCLS; i++)
-                c->t[i] = c->t5[i];
-            return;
-        }
-    }
-    if (pbl_v1) {
-        for (i = 0; i < PBL_NCLS; i++)
-            c->t[i] = c->t5[i];
-    } else {
-        for (i = 0; i < PBL_NCLS; i++)
-            c->t5[i] = c->t[i];
-    }
+    for (i = 0; i < PBL_NCLS; i++)
+        c->t[i] = c->t5[i];
 }
 
 uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
@@ -152,57 +138,17 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
      * cellules NEVER incrementees : `fo = 0` -> `fc = 0-1 = 0xFFFFFFFF` -> `t` explose.
      * Signature mesuree (`work/t171_blk_gt`) : `t` = +1606 has +2458 (+35 %) then that `t5` is
      * presque juste. `=1` recalcule `f` (and `t`) sure `d[0..0x800)` after there pass 2. */
-    {
-        static int f2 = -1;
-        if (f2 < 0) { const char *e = getenv("UHA_PBL_F2048"); f2 = (e && e[0] != '0') ? 1 : 0; }
-        if (f2) {
-            for (cls = 0; cls < PBL_NCLS; cls++) {
-                uint32_t *fc = c->f[cls];
-                uint8_t *dc = c->d[cls];
-                uint32_t acc = 0;
-                memset(fc, 0, 256u * sizeof(uint32_t));
-                for (k = 0; k < PBL_RING; k++)
-                    fc[dc[k]]++;
-                for (j = 0; j < 256; j++)
-                    acc += fc[j] * fc[j];
-                c->t[cls] = acc;
-            }
-        }
-    }
-
-    /* [M170b] bound mesuree : the counter of position is compares AFTER incrementation
-     * (0x422cce `inc ebp` / 0x422cdb `cmp ebp,edx` / `jb`), therefore the scan couvre
-     * pos = 0x800 .. len-1 (there version M169 allait up to len inclus : has iteration
-     * of too, visible sure the t5 d'image.raw). */
-    {
-        static int ia = -1, ib = -1, fb = -1, gb = -1;
-        if (ia < 0) { const char *e = getenv("UHA_PBL_IA"); ia = (e && e[0] == '1') ? 1 : 0; }
-        if (ib < 0) { const char *e = getenv("UHA_PBL_IB"); ib = (e && e[0] == '0') ? 0 : 1; }
-        if (fb < 0) { const char *e = getenv("UHA_PBL_FB"); fb = (e && e[0] == '0') ? 0 : 1; }
-        if (gb < 0) { const char *e = getenv("UHA_PBL_GB"); gb = (e && e[0] == '0') ? 0 : 1; }
-        const int use_fb = fb;
-        const int use_gb = gb;
     for (pos = 0x800u; pbl_v1 ? (pos <= len) : (pos < len); pos++) {
         uint8_t w0 = window[pos];
-#ifdef PBL_TRACE
-        if (pos == 0x800u)
-            fprintf(stderr, "[PBL] AV  pos=%u t=[%u %u %u %u %u] t5=[%u %u %u %u %u]\n",
-                    pos, c->t[0], c->t[1], c->t[2], c->t[3], c->t[4],
-                    c->t5[0], c->t5[1], c->t5[2], c->t5[3], c->t5[4]);
-#endif
         i = pos & (PBL_RING - 1u);
-        ia_ = (uint32_t)(ia ? ((i + 0x400u) & (PBL_RING - 1u)) : i);
-        ib_ = (uint32_t)(ib ? ((i + 0x400u) & (PBL_RING - 1u)) : i);
+        ia_ = i;
+        ib_ = (uint32_t)((i + 0x400u) & (PBL_RING - 1u));
 
         for (cls = 0; cls < PBL_NCLS; cls++) {
             uint32_t *fc = c->f[cls];
             uint32_t *gc = c->g[cls];
             uint8_t *dc = c->d[cls];
 
-            /* [M170c] HYPOTHESE MESUREE : the retrait of `f` porte sure the SAME slot that the one of
-             * `g` (S1 : (i+0x400)&0x7ff), of sorte that t and t5 suivent there SAME window and
-             * convergent en end of scan (GT : the two valent [5082..5334] after the block 2 of
-             * mixed). To read dc[i] laissait t ~40 % au-dessus (7652 vs 5082). */
             old = dc[ia_];
             fo = fc[old];
             c->t[cls] -= (2u * fo - 1u);
@@ -211,12 +157,12 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
             newv = w0;
             if (cls)
                 newv = (uint8_t)(w0 - window[pos - (uint32_t)cls]);
-            addv = use_fb ? dc[ib_] : newv;
+            addv = dc[ib_];
             fn = fc[addv];
             c->t[cls] += (2u * fn + 1u);
             fc[addv] = fn + 1u;
 
-            v = use_gb ? dc[ib_] : dc[ia_];
+            v = dc[ib_];
             gv = gc[v];
             c->t5[cls] -= (2u * gv - 1u);
             gc[v] = gv - 1u;
@@ -231,8 +177,8 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
         /* [M170b] Mapper MEASURES some two tables : l'argmax `bestA` reads 0x480390 (= notre
          * loop 2, t5) and `bestB` reads 0x4803a4 (= notre loop 1, t). L'old mapper
          * (M169 : bestA sure t, bestB sure t5) is disponible via ppm_blocklen_set_v1(1). */
-        ta = pbl_v1 ? c->t : c->t5;
-        tb = pbl_v1 ? c->t5 : c->t;
+        ta = pbl_v1 ? c->t5 : c->t;
+        tb = pbl_v1 ? c->t : c->t5;
 
         /* argmax no signe sure 0..4, init 0, strict superiorite */
         bestA = 0;
@@ -269,7 +215,6 @@ uint32_t ppm_blocklen(ppm_blocklen_ctx *c, const uint8_t *window, uint32_t len)
         }
         cur = (uint8_t)bestA;
         c->cur = cur;
-    }
     }
 
     return len;

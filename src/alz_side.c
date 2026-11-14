@@ -479,3 +479,51 @@ void alz_side_post_update(alz_dec *d, uint8_t output_byte)
         st->side_secondary = AlzSelectorSecondaryBase[st->escape_selector] + 4;
     st->side_dir = st->slot_dir[new_edi & 0xF];
 }
+
+void alz_side_mm_step_sim(alz_dec *d, uint8_t output_byte, uint8_t delta_byte)
+{
+    alz_state *st = &d->st;
+    int sel = (int)st->escape_selector;
+
+    st->output_pos++;
+    if (sel == 5 || sel == 6) {
+        if (sel == 5)
+            mm_slot_update6(d, (uint8_t)(output_byte ^ 0x80), delta_byte);
+        else
+            mm_slot_update6(d, output_byte, delta_byte);
+        st->mm_out_count++;
+        st->side_mod_count = st->side_primary ? (st->output_pos % st->side_primary) : 0;
+        mm_score6(d, sel);
+    } else if (sel == 7) {
+        int old_edi = (int)st->side_mod_count & 0xF;
+        int new_edi, base7;
+        mm_slot_update(d, old_edi, (uint8_t)(output_byte ^ 0x80), delta_byte);
+        st->mm_out_count++;
+        new_edi = st->side_primary ? (int)(st->output_pos % st->side_primary) : 0;
+        st->side_mod_count = (uint32_t)new_edi;
+        mm_score(d, new_edi);
+        st->side_bias = (uint8_t)(st->side_bias + 0x80);
+        base7 = 0x3E9 + new_edi;
+        if (st->slot_hash[new_edi & 0xF] == 0)
+            base7 += 2;
+        else if (st->slot_hash74[new_edi & 0xF] == 0)
+            base7 += 4;
+        else if (st->slot_hash78[new_edi & 0xF] == 0)
+            base7 += 6;
+        st->side_secondary = (uint32_t)base7;
+        st->side_dir = st->slot_dir[new_edi & 0xF];
+    } else if (sel == 8 || sel == 9) {
+        int old_edi = (int)st->side_mod_count & 0xF;
+        int new_edi;
+        mm_slot_update(d, old_edi, output_byte, delta_byte);
+        st->mm_out_count++;
+        new_edi = st->side_primary ? (int)(st->output_pos % st->side_primary) : 0;
+        st->side_mod_count = (uint32_t)new_edi;
+        mm_score(d, new_edi);
+        if (st->slot_hash[new_edi & 0xF] != 0)
+            st->side_secondary = AlzSelectorSecondaryBase[sel] + (uint32_t)new_edi;
+        else
+            st->side_secondary = AlzSelectorSecondaryBase[sel] + 4;
+        st->side_dir = st->slot_dir[new_edi & 0xF];
+    }
+}

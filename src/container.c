@@ -5,6 +5,7 @@
 
 #include "uha.h"
 #include "lzp.h"
+#include "crc32.h"
 
 static const uint8_t uha_init_sbox[256] = {
     0xc3,0xae,0x65,0x6b,0x78,0x47,0xf2,0x91,0xd6,0x50,0xcb,0x65,0x20,0xbd,0x75,0xbf,
@@ -25,6 +26,11 @@ static const uint8_t uha_init_sbox[256] = {
     0xb9,0xfd,0xb9,0xaf,0x61,0x31,0x70,0x46,0x0d,0xfa,0x44,0x08,0xb3,0x34,0xb2,0xe5
 };
 
+static uint16_t le16(const uint8_t *p)
+{
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
 static uint32_t le24(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
@@ -39,13 +45,14 @@ static uint32_t le32(const uint8_t *p)
 static void descramble(uint8_t *buf, size_t n)
 {
     uint8_t S[256];
-    int i, j, k;
+    int i, j;
+    size_t k;
     uint8_t b, t;
 
     memcpy(S, uha_init_sbox, 256);
     i = 0;
     j = (0 - 2) & 0xFF;
-    for (k = 0; k < (int)n; k++) {
+    for (k = 0; k < n; k++) {
         j = (j + 1) & 0xFF;
         i = (i + 1) & 0xFF;
         b = S[i];
@@ -60,33 +67,80 @@ int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
 {
     uint8_t dec[UHA_HDR_LEN];
     uint8_t seed;
+    uint16_t check16;
+    uint64_t crc_ofs64, names_ofs64, attrs_ofs64, end64;
+    size_t sfx_ofs = 0;
+    const uint8_t *hdr = raw;
     int i;
 
     if (!raw || !h || rawlen < UHA_HDR_LEN)
         return -2;
-    if (raw[0] != 'U' || raw[1] != 'H' || raw[2] != 'A')
-        return -1;
 
-    memcpy(dec, raw, UHA_HDR_LEN);
-    seed = raw[0x25];
+    if (raw[0] == 'M' && raw[1] == 'Z') {
+        size_t off;
+        int found = 0;
+        for (off = 0; off + UHA_HDR_LEN <= rawlen; off++) {
+            if (raw[off] == 'U' && raw[off + 1] == 'H' && raw[off + 2] == 'A' && raw[off + 3] == 6) {
+                uint8_t test_dec[UHA_HDR_LEN];
+                uint8_t test_seed = raw[off + 0x25];
+                uint16_t test_chk = le16(raw + off + 37);
+                int k;
+                for (k = 0; k < 31; k++)
+                    test_dec[4 + k] = (uint8_t)(raw[off + 4 + k] ^ ((test_seed + (uint32_t)k * (uint32_t)k) & 0xFF));
+                if (test_chk == (uint16_t)(uha_crc32(test_dec + 4, 31) & 0xFFFFu)) {
+                    sfx_ofs = off;
+                    hdr = raw + off;
+                    found = 1;
+                    break;
+                }
+            }
+        }
+        if (!found)
+            return -1;
+    } else {
+        if (raw[0] != 'U' || raw[1] != 'H' || raw[2] != 'A')
+            return -1;
+        if (raw[3] != 6)
+            return -1;
+    }
+
+    memcpy(dec, hdr, UHA_HDR_LEN);
+    seed = hdr[0x25];
     for (i = 0; i < 31; i++)
-        dec[4 + i] = (uint8_t)(raw[4 + i] ^ ((seed + (uint32_t)i * (uint32_t)i) & 0xFF));
+        dec[4 + i] = (uint8_t)(hdr[4 + i] ^ ((seed + (uint32_t)i * (uint32_t)i) & 0xFF));
+
+    check16 = le16(hdr + 37);
+    if (check16 != (uint16_t)(uha_crc32(dec + 4, 31) & 0xFFFFu))
+        return -2;
 
     memset(h, 0, sizeof(*h));
-    h->version        = raw[3];
+    h->version        = hdr[3];
     h->family         = dec[9];
     h->order          = dec[10];
     h->flags          = dec[8];
+    h->ndirs          = le16(dec + 11);
     h->usize          = le32(dec + 13);
     h->psize          = le32(dec + 17);
     h->file_count     = le24(dec + 21);
     h->names_unpacked = le24(dec + 24);
     h->names_packed   = le24(dec + 27);
     h->attrs_packed   = le24(dec + 30);
-    h->data_ofs       = UHA_HDR_LEN;
-    h->crc_ofs        = h->data_ofs + h->psize;
-    h->names_ofs      = h->crc_ofs + (size_t)h->file_count * 4;
-    h->attrs_ofs      = h->names_ofs + h->names_packed;
+    h->w33            = le16(dec + 33);
+    h->w35            = le16(dec + 35);
+    h->check16        = check16;
+
+    crc_ofs64   = (uint64_t)sfx_ofs + (uint64_t)UHA_HDR_LEN + h->psize;
+    names_ofs64 = crc_ofs64 + (uint64_t)h->file_count * 4ULL;
+    attrs_ofs64 = names_ofs64 + h->names_packed;
+    end64       = attrs_ofs64 + h->attrs_packed;
+    if (end64 > (uint64_t)SIZE_MAX)
+        return -2;
+
+    h->header_ofs     = sfx_ofs;
+    h->data_ofs       = sfx_ofs + UHA_HDR_LEN;
+    h->crc_ofs        = (size_t)crc_ofs64;
+    h->names_ofs      = (size_t)names_ofs64;
+    h->attrs_ofs      = (size_t)attrs_ofs64;
     return 0;
 }
 
@@ -94,8 +148,12 @@ const char *uha_codec_name(const uha_header *h)
 {
     if (!h)
         return "?";
-    if (h->family == 0 || (h->usize == 0 && h->order == 0))
+    if (h->order == UHA_ORDER_STORE)
         return "STORE";
+    if (h->order == UHA_ORDER_RLE)
+        return "RLE";
+    if (h->order >= UHA_ORDER_LZ78_MIN && h->order <= UHA_ORDER_LZ78_MAX)
+        return "LZ78";
     if (h->order >= UHA_ORDER_LZP_MIN && h->order <= UHA_ORDER_LZP_MAX)
         return "LZP";
     if (h->order >= UHA_ORDER_PPM_MIN && h->order <= UHA_ORDER_PPM_MAX)
@@ -113,12 +171,14 @@ static int decode_meta_block(const uint8_t *raw, size_t rawlen,
     uint8_t *plain;
     int rc;
 
-    if (ofs + pklen > rawlen)
+    if ((uint64_t)ofs + pklen > rawlen)
         return -2;
     if (unpacked == 0) {
         *out = NULL;
         return 0;
     }
+    if (pklen == 0)
+        return -2;
 
     blk = malloc(pklen);
     plain = malloc(unpacked);
@@ -160,12 +220,13 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
     uha_header h;
     uint8_t *names = NULL;
     uint8_t *attrs = NULL;
-    uint32_t alen;
-    int rc, f, p, i, j, ln, ndirs;
+    uint8_t *aux = NULL;
+    char **dirs = NULL;
+    char *dir_pool = NULL;
+    uint32_t alen, fc, ndirs, f, i, p;
     uint32_t prev, v, sz;
-    uint32_t base;
-    const uint8_t *didx;
-    char dirs[256][512];
+    uint32_t base, w33_state;
+    int rc;
 
     if (!out)
         return -2;
@@ -175,9 +236,20 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
     rc = uha_parse_header(raw, rawlen, &h);
     if (rc != 0)
         return rc;
-    if (h.file_count == 0 || h.names_packed == 0)
+    if ((uint64_t)h.names_ofs + h.names_packed + h.attrs_packed > rawlen)
+        return -2;
+    if (h.file_count == 0)
         return 0;
-    if (h.names_ofs + h.names_packed + h.attrs_packed > rawlen)
+    if (h.names_packed == 0 || h.attrs_packed == 0 || h.names_unpacked == 0)
+        return -2;
+
+    fc = h.file_count;
+    ndirs = h.ndirs;
+    if (ndirs == 0 || (uint64_t)ndirs + fc > h.names_unpacked)
+        return -2;
+    if ((uint64_t)fc * 11ULL > SIZE_MAX)
+        return -2;
+    if (h.crc_ofs + (uint64_t)fc * 4ULL > rawlen)
         return -2;
 
     rc = decode_meta_block(raw, rawlen, h.names_ofs, h.names_packed,
@@ -185,125 +257,165 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
     if (rc != 0)
         return rc;
 
-    alen = 14 * h.file_count + 16;
+    alen = 11u * fc;
     rc = decode_meta_block(raw, rawlen, h.attrs_ofs, h.attrs_packed, alen, &attrs);
     if (rc != 0) {
         free(names);
         return rc;
     }
-    if (getenv("UHA_DUMP_META")) {
-        uint32_t q;
-        fprintf(stderr, "[attrs fc=%u alen=%u]\n", h.file_count, alen);
-        for (q = 0; q < alen; q++)
-            fprintf(stderr, "%02x%s", attrs[q], (q % 16 == 15) ? "\n" : " ");
-        fprintf(stderr, "\n[names upk=%u]\n", h.names_unpacked);
-        for (q = 0; q < h.names_unpacked; q++)
-            fprintf(stderr, "%02x%s", names[q], (q % 16 == 15) ? "\n" : " ");
-        fprintf(stderr, "\n");
+
+    if ((uint16_t)(uha_crc32(attrs, alen) & 0xFFFFu) != h.w35) {
+        free(names);
+        free(attrs);
+        return -2;
     }
 
-    out->items = calloc(h.file_count, sizeof(uha_entry));
-    if (!out->items) {
+    aux = malloc((size_t)fc * 4u);
+    if (!aux) {
         free(names);
         free(attrs);
         return -4;
     }
-    out->count = (int)h.file_count;
+    memcpy(aux, raw + h.crc_ofs, (size_t)fc * 4u);
+    descramble(aux, (size_t)fc * 4u);
 
-    didx = attrs + 4 * h.file_count;
-    ndirs = 0;
-    for (f = 0; f < (int)h.file_count; f++) {
-        int d = didx[f];
-        if (d + 1 > ndirs)
-            ndirs = d + 1;
+    w33_state = uha_crc32_update(0xFFFFFFFFu, aux, (size_t)fc * 4u);
+    w33_state = uha_crc32_update(w33_state, names, h.names_unpacked);
+    if ((uint16_t)((w33_state ^ 0xFFFFFFFFu) & 0xFFFFu) != h.w33) {
+        free(aux);
+        free(names);
+        free(attrs);
+        return -2;
     }
-    if (ndirs > 256)
-        ndirs = 256;
+
+    dirs = malloc((size_t)ndirs * sizeof(char *));
+    dir_pool = malloc((size_t)h.names_unpacked + ndirs + 1u);
+    out->items = calloc(fc, sizeof(uha_entry));
+    if (!dirs || !dir_pool || !out->items) {
+        free(dirs);
+        free(dir_pool);
+        free(aux);
+        free(names);
+        free(attrs);
+        uha_entrylist_free(out);
+        return -4;
+    }
+    out->count = (int)fc;
 
     p = 0;
-    for (i = 0; i < ndirs; i++) {
-        ln = 0;
-        j = 0;
-        if (p < (int)h.names_unpacked)
+    {
+        size_t pool_ofs = 0;
+        for (i = 0; i < ndirs; i++) {
+            uint32_t ln = 0, j;
+            dirs[i] = dir_pool + pool_ofs;
+            if (p >= h.names_unpacked) {
+                free(dirs);
+                free(dir_pool);
+                free(aux);
+                free(names);
+                free(attrs);
+                uha_entrylist_free(out);
+                return -2;
+            }
             ln = names[p++];
-        for (; j < ln && p < (int)h.names_unpacked && j < 511; j++) {
-            char c = (char)names[p++];
-            if (c == '\\')
-                c = '/';
-            dirs[i][j] = c;
-        }
-        dirs[i][j] = 0;
-    }
-
-    for (f = 0; f < (int)h.file_count; f++) {
-        char nm[512];
-        char full[1024];
-        int nmlen = 0;
-        int d;
-
-        nm[0] = 0;
-        if (p < (int)h.names_unpacked) {
-            ln = names[p++];
-            for (i = 0; i < ln && p < (int)h.names_unpacked && nmlen < 511; i++) {
+            if (p + ln > h.names_unpacked) {
+                free(dirs);
+                free(dir_pool);
+                free(aux);
+                free(names);
+                free(attrs);
+                uha_entrylist_free(out);
+                return -2;
+            }
+            for (j = 0; j < ln; j++) {
                 char c = (char)names[p++];
                 if (c == '\\')
                     c = '/';
-                nm[nmlen++] = c;
+                dir_pool[pool_ofs++] = c;
             }
-            nm[nmlen] = 0;
+            dir_pool[pool_ofs++] = '\0';
         }
-        d = didx[f];
-        if (d >= 0 && d < ndirs && dirs[d][0])
-            snprintf(full, sizeof(full), "%s%s", dirs[d], nm);
-        else
-            snprintf(full, sizeof(full), "%s", nm);
-        out->items[f].name = strdup(full);
     }
 
-    base = 6 * h.file_count;
+    for (f = 0; f < fc; f++) {
+        uint32_t ln, j, d;
+        size_t dlen;
+        char *full;
+
+        if (p >= h.names_unpacked) {
+            free(dirs);
+            free(dir_pool);
+            free(aux);
+            free(names);
+            free(attrs);
+            uha_entrylist_free(out);
+            return -2;
+        }
+        ln = names[p++];
+        if (p + ln > h.names_unpacked) {
+            free(dirs);
+            free(dir_pool);
+            free(aux);
+            free(names);
+            free(attrs);
+            uha_entrylist_free(out);
+            return -2;
+        }
+        d = (uint32_t)attrs[4u * fc + f] | ((uint32_t)attrs[5u * fc + f] << 8);
+        if (d >= ndirs) {
+            free(dirs);
+            free(dir_pool);
+            free(aux);
+            free(names);
+            free(attrs);
+            uha_entrylist_free(out);
+            return -2;
+        }
+        dlen = strlen(dirs[d]);
+        full = malloc(dlen + ln + 1u);
+        if (!full) {
+            free(dirs);
+            free(dir_pool);
+            free(aux);
+            free(names);
+            free(attrs);
+            uha_entrylist_free(out);
+            return -4;
+        }
+        if (dlen > 0)
+            memcpy(full, dirs[d], dlen);
+        for (j = 0; j < ln; j++) {
+            char c = (char)names[p++];
+            if (c == '\\')
+                c = '/';
+            full[dlen + j] = c;
+        }
+        full[dlen + ln] = '\0';
+        out->items[f].name = full;
+    }
+
+    base = 6u * fc;
     prev = 0;
-    for (f = 0; f < (int)h.file_count; f++) {
+    for (f = 0; f < fc; f++) {
         v = (uint32_t)attrs[base + f]
-          | ((uint32_t)attrs[base + h.file_count + f] << 8)
-          | ((uint32_t)attrs[base + 2 * h.file_count + f] << 16)
-          | ((uint32_t)attrs[base + 3 * h.file_count + f] << 24);
+          | ((uint32_t)attrs[base + fc + f] << 8)
+          | ((uint32_t)attrs[base + 2u * fc + f] << 16)
+          | ((uint32_t)attrs[base + 3u * fc + f] << 24);
         sz = (prev - v) & 0xFFFFFFFFu;
         out->items[f].size = sz;
         prev = sz;
+
+        out->items[f].dos_date = le16(attrs + 2u * f);
+        out->items[f].dos_time = le16(attrs + 2u * fc + 2u * f);
+        out->items[f].dos_attr = attrs[10u * fc + f];
+        out->items[f].psize    = 0;
+        out->items[f].crc      = le32(aux + 4u * f);
+        out->items[f].has_crc  = 1;
     }
 
-    /* [M194 UHA_XLIST] read-only of columns already dechiffrees (attrs/crc) for affichage.
-     * ENTIEREMENT under there gate : out gate, no byte n'is lu nor writes -> decodage
-     * byte-identical (difftest 88 OK preserve).
-     * [M195 CORRECTION Portee sure the rendu of M194] There table of CRC n'is NOT in plaintext sure
-     * disque : `encode.c` l.351-354 there construit in plaintext (`uha_crc32(member.data, size)`) then
-     * l'writes **brouillee** (`scramble(aux_disk, fc*4)`, same S-box/cameleon that names/attrs).
-     * There reading raw of M194 rendait therefore has key of stream, not some CRC : mesurablement false
-     * (0/34 members correspondant au crc32 of the contenu, sure the 17 archives legacy AS sure nos
-     * clean archives - `OUT/m195_order_data_m194.md` S2). The rendu is fixes here : copier,
-     * `descramble()` (involution), to read. The gate remainder read-only. */
-    if (getenv("UHA_XLIST") && getenv("UHA_XLIST")[0] == '1') {
-        uint32_t fc = h.file_count;
-        uint8_t *aux = NULL;
-        /* NEGATIF measures (ALL__mx) : no some 4-columns transposees of attrs not cumule
-         * towards h.psize ; single there column [6*fc..10*fc) cumule towards usize (table size). therefore
-         * the packed-size BY MEMBER n'is NOT stores in has archive solide UHA. psize=0. */
-        for (f = 0; f < (int)fc; f++)
-            out->items[f].psize = 0;
-        if (fc && h.crc_ofs + (size_t)4 * fc <= rawlen)
-            aux = malloc((size_t)4 * fc);
-        if (aux) {
-            memcpy(aux, raw + h.crc_ofs, (size_t)4 * fc);
-            descramble(aux, (size_t)4 * fc);
-            for (f = 0; f < (int)fc; f++)
-                out->items[f].crc = le32(aux + 4 * f);
-            free(aux);
-        } else {
-            for (f = 0; f < (int)fc; f++)
-                out->items[f].crc = 0;
-        }
-    }
-
+    free(dirs);
+    free(dir_pool);
+    free(aux);
     free(names);
     free(attrs);
     return out->count;

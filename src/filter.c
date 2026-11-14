@@ -2,21 +2,14 @@
 #include <string.h>
 #include "filter.h"
 
-static int32_t asr_i(int32_t v, uint8_t n)
-{
-    if (v < 0)
-        return (int32_t)~((uint32_t)~(uint32_t)v >> n);
-    return v >> n;
-}
-
 static int32_t sext16(uint16_t w)
 {
-    if (w & 0x8000)
+    if (w & 0x8000u)
         return (int32_t)w - 0x10000;
     return (int32_t)w;
 }
 
-static uint32_t rd32(const uint8_t *buf, int32_t p)
+static uint32_t rd32(const uint8_t *buf, size_t p)
 {
     return (uint32_t)buf[p]
          | ((uint32_t)buf[p + 1] << 8)
@@ -24,12 +17,12 @@ static uint32_t rd32(const uint8_t *buf, int32_t p)
          | ((uint32_t)buf[p + 3] << 24);
 }
 
-static uint16_t rd16(const uint8_t *buf, int32_t p)
+static uint16_t rd16(const uint8_t *buf, size_t p)
 {
     return (uint16_t)((uint16_t)buf[p] | ((uint16_t)buf[p + 1] << 8));
 }
 
-static void wr32(uint8_t *buf, int32_t p, uint32_t v)
+static void wr32(uint8_t *buf, size_t p, uint32_t v)
 {
     buf[p]     = (uint8_t)v;
     buf[p + 1] = (uint8_t)(v >> 8);
@@ -37,7 +30,7 @@ static void wr32(uint8_t *buf, int32_t p, uint32_t v)
     buf[p + 3] = (uint8_t)(v >> 24);
 }
 
-static void wr16(uint8_t *buf, int32_t p, uint16_t v)
+static void wr16(uint8_t *buf, size_t p, uint16_t v)
 {
     buf[p]     = (uint8_t)v;
     buf[p + 1] = (uint8_t)(v >> 8);
@@ -46,22 +39,25 @@ static void wr16(uint8_t *buf, int32_t p, uint16_t v)
 static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
                              uint32_t start, int ppm_byte_swap)
 {
-    int32_t i, n, ecx, se, idx, k, al, found, skip;
+    int64_t i, n, lim = (int64_t)limit;
+    size_t ecx;
+    int32_t idx, k, al, found, skip, steps;
     uint32_t eax, swapped;
+    int32_t se;
     uint16_t hi, lo, key, tv;
     uint16_t tbl[128];
 
     if (size <= 15)
         return;
     memset(tbl, 0, sizeof(tbl));
-    n = (int32_t)size - 15;
-    i = (int32_t)start;
+    n = (int64_t)size - 15;
+    i = (int64_t)start;
     while (i < n) {
         if (buf[i] != 0xE8 && buf[i] != 0xE9) {
             i++;
             continue;
         }
-        ecx = i + 1;
+        ecx = (size_t)(i + 1);
         eax = rd32(buf, ecx);
         if (eax == 0) {
             i += 4;
@@ -72,25 +68,25 @@ static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
             swapped = (eax & 0xFF00FF00u)
                     | ((eax >> 16) & 0xFFu)
                     | ((eax << 16) & 0xFF0000u);
-            if (((int32_t)eax >= -i && (int32_t)eax < (int32_t)limit)
-             || ((int32_t)swapped >= -i && (int32_t)swapped < (int32_t)limit)) {
+            if (((int64_t)(int32_t)eax >= -i && (int64_t)(int32_t)eax < lim)
+             || ((int64_t)(int32_t)swapped >= -i && (int64_t)(int32_t)swapped < lim)) {
                 eax = swapped;
                 wr32(buf, ecx, eax);
                 skip = 5;
             }
         }
         se = (int32_t)eax;
-        if (se > 0 && eax < limit) {
-            if (eax == (uint32_t)i)
+        if (se > 0 && (int64_t)eax < lim) {
+            if ((int64_t)eax == i)
                 eax = 0;
-            eax = eax - (uint32_t)i;
+            eax = (uint32_t)((int64_t)eax - i);
             wr32(buf, ecx, eax);
             i += 5;
             continue;
         }
         if (se < 0) {
-            if (se >= -i) {
-                wr32(buf, ecx, eax + limit);
+            if ((int64_t)se >= -i) {
+                wr32(buf, ecx, (uint32_t)((int64_t)eax + lim));
                 i += 5;
                 continue;
             }
@@ -100,11 +96,11 @@ static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
             i += skip;
             continue;
         }
-        if (hi == (uint16_t)((int32_t)(limit - 1) >> 16)) {
+        if (hi == (uint16_t)((limit - 1u) >> 16)) {
             i += skip;
             continue;
         }
-        if (hi == (uint16_t)asr_i(-i, 16)) {
+        if (hi == (uint16_t)((uint64_t)(-i) >> 16)) {
             i += skip;
             continue;
         }
@@ -112,7 +108,7 @@ static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
         if (((uint32_t)lo + 0xFFFF8000u) < 0x80u) {
             idx = (int32_t)lo - 0x8000;
             tv = tbl[idx];
-            wr16(buf, ecx, (uint16_t)((sext16(tv) - i) & 0xFFFF));
+            wr16(buf, ecx, (uint16_t)(((int64_t)sext16(tv) - i) & 0xFFFF));
             if (idx != 0) {
                 for (k = idx; k >= 1; k--)
                     tbl[k] = tbl[k - 1];
@@ -121,8 +117,9 @@ static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
             i += skip;
             continue;
         }
-        key = (uint16_t)(((int32_t)lo + i) & 0xFFFF);
-        for (;;) {
+        key = (uint16_t)(((int64_t)lo + i) & 0xFFFF);
+        steps = 0;
+        for (; steps < 256; steps++) {
             found = -1;
             al = 0;
             while (al < 0x80) {
@@ -134,7 +131,7 @@ static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
             }
             if (found >= 0) {
                 wr16(buf, ecx, (uint16_t)(0x8000 | found));
-                key = (uint16_t)(((0x8000 | found) + i) & 0xFFFF);
+                key = (uint16_t)(((int64_t)(0x8000 | found) + i) & 0xFFFF);
                 continue;
             }
             if (sext16(key) < sext16(0x8080))
@@ -143,6 +140,94 @@ static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
                 tbl[k] = tbl[k - 1];
             tbl[0] = key;
             break;
+        }
+        i += skip;
+    }
+}
+
+static void apply_forward_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
+                                     uint32_t start, int ppm_byte_swap)
+{
+    int64_t i, n, lim = (int64_t)limit;
+    size_t ecx;
+    int32_t k, al, found, skip, steps;
+    uint32_t eax, swapped;
+    int64_t target;
+    uint16_t hi, lo, key;
+    uint16_t tbl[128];
+
+    if (size <= 15)
+        return;
+    memset(tbl, 0, sizeof(tbl));
+    n = (int64_t)size - 15;
+    i = (int64_t)start;
+    while (i < n) {
+        if (buf[i] != 0xE8 && buf[i] != 0xE9) {
+            i++;
+            continue;
+        }
+        ecx = (size_t)(i + 1);
+        eax = rd32(buf, ecx);
+        if (eax == 0) {
+            i += 4;
+            continue;
+        }
+        skip = 4;
+        target = (int64_t)(int32_t)eax + i;
+        if (target >= 0 && target < lim) {
+            uint32_t outv = (target == 0) ? (uint32_t)i : (uint32_t)target;
+            wr32(buf, ecx, outv);
+            skip = 5;
+        } else if ((int32_t)eax > 0 && (int64_t)eax < lim) {
+            wr32(buf, ecx, (uint32_t)((int64_t)eax - lim));
+            skip = 5;
+        } else {
+            hi = rd16(buf, ecx + 2);
+            if (hi != 0 &&
+                hi != (uint16_t)((limit - 1u) >> 16) &&
+                hi != (uint16_t)((uint64_t)(-i) >> 16)) {
+                lo = rd16(buf, ecx);
+                key = (uint16_t)(((int64_t)lo + i) & 0xFFFF);
+                found = -1;
+                for (al = 0; al < 0x80; al++) {
+                    if (tbl[al] == key) {
+                        found = al;
+                        break;
+                    }
+                }
+                if (found >= 0) {
+                    wr16(buf, ecx, (uint16_t)(0x8000 | found));
+                    if (found != 0) {
+                        for (k = found; k >= 1; k--)
+                            tbl[k] = tbl[k - 1];
+                        tbl[0] = key;
+                    }
+                } else {
+                    for (steps = 0; steps < 256; steps++) {
+                        uint16_t cur = rd16(buf, ecx);
+                        if (((uint32_t)cur + 0xFFFF8000u) >= 0x80u)
+                            break;
+                        int idx = (int)cur - 0x8000;
+                        wr16(buf, ecx, (uint16_t)(((int64_t)tbl[idx] - i) & 0xFFFF));
+                    }
+                    if (sext16(key) >= sext16(0x8080)) {
+                        for (k = 0x7F; k >= 1; k--)
+                            tbl[k] = tbl[k - 1];
+                        tbl[0] = key;
+                    }
+                }
+            }
+        }
+        if (ppm_byte_swap) {
+            eax = rd32(buf, ecx);
+            swapped = (eax & 0xFF00FF00u)
+                    | ((eax >> 16) & 0xFFu)
+                    | ((eax << 16) & 0xFF0000u);
+            if (((int64_t)(int32_t)eax >= -i && (int64_t)(int32_t)eax < lim)
+             || ((int64_t)(int32_t)swapped >= -i && (int64_t)(int32_t)swapped < lim)) {
+                wr32(buf, ecx, swapped);
+                skip = 5;
+            }
         }
         i += skip;
     }
@@ -178,7 +263,7 @@ static int classify_exe(const uint8_t *buf, uint32_t usize,
         word18 = 0;
         if (usize >= 0x1A)
             word18 = (uint32_t)buf[0x18] | ((uint32_t)buf[0x19] << 8);
-        if (word18 >= 0x1C && (word18 + word67 * 4) < usize)
+        if (word18 >= 0x1C && (uint64_t)word18 + (uint64_t)word67 * 4u < usize)
             *mode = 1;
         else
             *mode = 0;
@@ -201,24 +286,63 @@ static int classify_exe(const uint8_t *buf, uint32_t usize,
     return 0;
 }
 
-void uha_restore_filter(uint8_t *buf, uint32_t usize, int ppm_byte_swap)
+int uha_apply_forward_filter(uint8_t *buf, uint32_t usize, int ppm_byte_swap)
+{
+    int mode;
+    uint32_t start_ofs, reloc_ofs, reloc_size, plane, i, j;
+    uint8_t *relocations;
+
+    if (!buf || usize < 1024)
+        return 0;
+    if (!classify_exe(buf, usize, &mode, &start_ofs))
+        return 0;
+    if (mode == 1) {
+        reloc_ofs = (uint32_t)buf[0x18] | ((uint32_t)buf[0x19] << 8);
+        reloc_size = ((uint32_t)buf[6] | ((uint32_t)buf[7] << 8)) * 4u;
+        if ((uint64_t)reloc_ofs + reloc_size <= (uint64_t)usize - 15u) {
+            relocations = (uint8_t *)malloc(reloc_size);
+            if (!relocations)
+                return 1;
+            memcpy(relocations, buf + reloc_ofs, reloc_size);
+            for (i = reloc_size; i > 4u; i -= 2u) {
+                uint32_t idx = i - 2u;
+                uint32_t cur = (uint32_t)relocations[idx] | ((uint32_t)relocations[idx + 1u] << 8);
+                uint32_t prev = (uint32_t)relocations[idx - 4u] | ((uint32_t)relocations[idx - 3u] << 8);
+                uint32_t diff = (cur - prev) & 0xFFFFu;
+                relocations[idx] = (uint8_t)diff;
+                relocations[idx + 1u] = (uint8_t)(diff >> 8);
+            }
+            j = reloc_ofs;
+            for (plane = 0; plane < 4u; plane++) {
+                for (i = plane; i < reloc_size; i += 4u)
+                    buf[j++] = relocations[i];
+            }
+            free(relocations);
+            start_ofs = reloc_ofs + reloc_size;
+        }
+    }
+    apply_forward_exe_filter(buf, usize, usize, start_ofs, ppm_byte_swap);
+    return 1;
+}
+
+int uha_restore_filter(uint8_t *buf, uint32_t usize, int ppm_byte_swap)
 {
     int mode;
     uint32_t start_ofs, reloc_ofs, reloc_size, plane, i, j, v;
     uint8_t *relocations;
 
-    if (!buf || usize <= 15)
-        return;
+    if (!buf || usize < 1024)
+        return 0;
     if (!classify_exe(buf, usize, &mode, &start_ofs))
-        return;
+        return 0;
     if (mode == 1) {
         reloc_ofs = (uint32_t)buf[0x18] | ((uint32_t)buf[0x19] << 8);
-        reloc_size = ((uint32_t)buf[6] | ((uint32_t)buf[7] << 8)) * 4;
-        if (reloc_ofs + reloc_size > usize - 15)
-            return;
+        reloc_size = ((uint32_t)buf[6] | ((uint32_t)buf[7] << 8)) * 4u;
+        if ((uint64_t)reloc_ofs + reloc_size > (uint64_t)usize - 15u)
+            return 1;
         relocations = (uint8_t *)malloc(reloc_size);
         if (!relocations)
-            return;
+            return 1;
         j = reloc_ofs;
         for (plane = 0; plane < 4; plane++) {
             i = plane;
@@ -241,9 +365,10 @@ void uha_restore_filter(uint8_t *buf, uint32_t usize, int ppm_byte_swap)
         start_ofs = reloc_ofs + reloc_size;
     }
     apply_exe_filter(buf, usize, usize, start_ofs, ppm_byte_swap);
+    return 1;
 }
 
-void uha_restore_multimedia(uint8_t *buf, uint32_t usize)
+static int detect_mm_stride(const uint8_t *buf, uint32_t usize)
 {
     static const uint8_t headers[3][36] = {
         {0x42,0x4D,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,
@@ -256,13 +381,10 @@ void uha_restore_multimedia(uint8_t *buf, uint32_t usize)
          0x69,0x6C,0x65,0x1A,0x1A,0x00,0x0A,0x01,0x29,0x11,0x01,0x3F,0x3F,0x3F,0x3F,0x00,
          0x3F,0x3F,0x3F,0x3F}
     };
-    int kind, i, j, stride, phase, shift, matches;
-    int direction[4];
-    uint32_t history;
-    uint8_t raw, delta;
+    int kind, i, j, stride, matches;
 
     if (!buf || usize < 1024)
-        return;
+        return 0;
     kind = -1;
     for (j = 0; j < 3; j++) {
         matches = 1;
@@ -274,28 +396,63 @@ void uha_restore_multimedia(uint8_t *buf, uint32_t usize)
     }
     switch (kind) {
     case 0:
-        stride = 3;
-        break;
+        return 3;
     case 1:
         stride = buf[22];
         if (stride != 1 && stride != 2)
-            return;
+            return 0;
         if (buf[34] == 16)
             stride *= 2;
         else if (buf[34] != 8)
-            return;
-        break;
+            return 0;
+        return stride;
     case 2:
-        stride = 1;
-        break;
+        return 1;
     default:
-        return;
+        return 0;
     }
+}
+
+void uha_apply_forward_multimedia(uint8_t *buf, uint32_t usize)
+{
+    int stride, phase, shift;
+    int direction[4];
+    uint32_t history, i;
+    uint8_t cur, delta, outb;
+
+    stride = detect_mm_stride(buf, usize);
+    if (stride <= 0)
+        return;
     memset(direction, 0, sizeof(direction));
     history = 0;
     shift = stride * 8 - 8;
-    for (i = 36; i < (int)usize; i++) {
-        phase = i % stride;
+    for (i = 36; i < usize; i++) {
+        phase = (int)(i % (uint32_t)stride);
+        cur = buf[i];
+        delta = (uint8_t)(cur - ((history >> shift) & 0xFFu));
+        outb = direction[phase] ? (uint8_t)(-(int)delta) : delta;
+        buf[i] = outb;
+        if (outb >= 0x80)
+            direction[phase] = !direction[phase];
+        history = (history << 8) | cur;
+    }
+}
+
+void uha_restore_multimedia(uint8_t *buf, uint32_t usize)
+{
+    int stride, phase, shift;
+    int direction[4];
+    uint32_t history, i;
+    uint8_t raw, delta;
+
+    stride = detect_mm_stride(buf, usize);
+    if (stride <= 0)
+        return;
+    memset(direction, 0, sizeof(direction));
+    history = 0;
+    shift = stride * 8 - 8;
+    for (i = 36; i < usize; i++) {
+        phase = (int)(i % (uint32_t)stride);
         raw = buf[i];
         delta = raw;
         if (direction[phase])

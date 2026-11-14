@@ -195,7 +195,7 @@ int ppm_entry_decode(ppm_model *m, uha_rc *r, uint32_t rec2_idx, uint32_t *prob_
         } else
             sse |= ((m->c48 & 0xC0) >> 5);
     }
-    if (m->win_pos <= m->t46a[r9 & 0xFF])
+    if (m->byte_class != 0 && m->win_pos <= m->t46a[r9 & 0xFF])
         sse |= 0x8;
     if (m->last_ctx == m->last_sym[r9])
         sse |= 0x10;
@@ -234,7 +234,7 @@ int ppm_entry_encode(ppm_model *m, uint32_t rec2_idx, int target, uint32_t *prob
         } else
             sse |= ((m->c48 & 0xC0) >> 5);
     }
-    if (m->win_pos <= m->t46a[r9 & 0xFF])
+    if (m->byte_class != 0 && m->win_pos <= m->t46a[r9 & 0xFF])
         sse |= 0x8;
     if (m->last_ctx == m->last_sym[r9])
         sse |= 0x10;

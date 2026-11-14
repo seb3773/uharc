@@ -175,6 +175,7 @@ int  alz_encode_literal(alz_dec *d, uint8_t b);
 uint8_t alz_side_decode_literal(alz_dec *d);
 int  alz_side_encode_literal(alz_dec *d, uint8_t b);
 void alz_side_post_update(alz_dec *d, uint8_t output_byte);
+void alz_side_mm_step_sim(alz_dec *d, uint8_t output_byte, uint8_t delta_byte);
 
 int  alz_m_decode_match(alz_dec *d, int token, uint32_t *dist, uint32_t *count);
 int  alz_m_can_encode_match(alz_dec *d, int token, uint32_t dist, uint32_t count);

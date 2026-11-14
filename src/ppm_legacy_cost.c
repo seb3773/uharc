@@ -48,15 +48,12 @@ static uint32_t g_prectx;
  *                equal at the class current (0x422224 `cmp al,ah` / 0x42230e `xor ebp,ebp`). */
 static uint32_t g_bandbase;   /* [0x4803c0] : position of cut of the block */
 static uint32_t g_ctxband;    /* [M266] BAND OF CONTEXT `[esp+0x3c]` = `[0x4803c0]`, NOT `pos` */
-static const char *s_lowpfx;  /* [M269] prefixe of the dump binary some rows 0..512 */
 uint32_t g_m265_ctxmax, g_m265_ctxarm;  /* [M265] ctx max lu by there walk + armement */
 uint32_t g_m265_out, g_m265_outarm;     /* [M267] position of output au moment of the cut */
 
 static int m265out_on(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_M265OUT"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
+    return 0;
 }
 
 void ppm_cost_set_outpos(uint32_t v)
@@ -76,12 +73,6 @@ void ppm_cost_set_ctxband(uint32_t v)
     g_ctxband = v;
 }
 
-static int ctxband_on(void)
-{
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_CTXBAND"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
-}
 static uint32_t g_initctx;    /* [0x4803c4] - CTXBASE[cand] : ctx relatif of the node 0 */
 /* [M170k] FLAG OF DIRECTION initial of the candidate. L'ASM not l'initialise THAT sure the path
  * `cand == [0x483934]` (0x42223d `mov al,ds:0x483932` -> `[esp+0x50]`, 0x422242) ; sure l'other
@@ -112,16 +103,7 @@ void ppm_cost_arena_reset(ppm_cost_arena *a)
      * (= t_after  0x20), which not suivent not the `t_after` reels. Gate TOT0 conservee
      * for balayage.
      */
-    static int tot0_init = 0;
-    static uint32_t s_t0 = 1u;
-    uint32_t t0;
-    if (!tot0_init) {
-        const char *e = getenv("UHA_PPM_COST_TOT0");
-        if (e && e[0])
-            s_t0 = (uint32_t)strtoul(e, NULL, 0);
-        tot0_init = 1;
-    }
-    t0 = s_t0;
+    uint32_t t0 = 1u;
     memset(a->freq, 0, sizeof a->freq);
     /* [M141] `escape` initial = **1**, NOT 0 (measured : `escape_avant` in {1, 33, 65, ...} = 1+32k).
      * with the 2e term without `+1`, the all first node tombe sure `(1<<14)/1 = 16384` => `LUT = 0`
@@ -207,15 +189,6 @@ static void ppm_cost_rescale(ppm_cost_arena *a, uint32_t ctx)
  * l'exces was Has row `ctx` of the last node BY walk tronquee (16/16 predites) and il
  * tombe has ZERO to the five cuts saines, `escape` 0/96, without changer no cost.
  * `UHA_PPM_CUTNOFEED=0` restores the behavior historique (node cut nourri integralement). */
-static int cutnofeed_on(void)
-{
-    static int cn = -1;
-    if (cn < 0) {
-        const char *e = getenv("UHA_PPM_CUTNOFEED");
-        cn = (e && e[0] == '0') ? 0 : 1;
-    }
-    return cn;
-}
 
 /* [M254, GATED UHA_M252TIE, default-OFF] PREDICAT OF PROMOTION OF THE MRU OF DISTANCE.
  * L'ASM some TWO copies of the machine (LIVE `0x4190d1..0x4190ed` and ESTIMATOR
@@ -240,22 +213,7 @@ static int cutnofeed_on(void)
  * nourri as en `CUTNOFEED=0`. No other behavior n'is modifie.
  * Judge d'order : mono `an_m246_costscore` 16/16 and `an_m155` 12/12 (contrainte dure) BEFORE
  * d'esperer has mouvement of `an_m259_costall` (0/54). */
-static int nofeedhead_on(void)
-{
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_NOFEEDHEAD"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
-}
 
-static int c08tie_strict(void)
-{
-    static int tv = -1;
-    if (tv < 0) {
-        const char *e = getenv("UHA_M252TIE");
-        tv = (e && e[0]) ? atoi(e) : 0;
-    }
-    return tv;
-}
 
 /* [M254, PROMUE the 2026-10-29] Not NOT boucler the regard en arriere of the pass LIVE sure there
  * size of l'ring of 64 Ko when the buffer indexe is the MEMBER entier : voir the block of
@@ -266,16 +224,7 @@ static int c08tie_strict(void)
  * `UHA_PPM_C08RING=0` = behavior historique (mask applies au member). */
 static int c08_no_livemask(void)
 {
-    static int rv = -1;
-    if (rv < 0) {
-        const char *e = getenv("UHA_PPM_C08RING");
-        /* DEFAULT = 1 (path promue : of-bouclage some regards en arriere). `=0` = historique ;
-         * `=2` adds there law of bord of the seed by stream absolu - TESTEE AND REFUTEE (costs
-         * 15/16 au lieu of 16/16 and `an_costcmp` casse sure `zeros.bin`), laissee as level
-         * explicite of diagnostic. */
-        rv = (e && e[0] == '0') ? 0 : (e && e[0] == '2') ? 2 : 1;
-    }
-    return rv;
+    return 1;
 }
 
 /* [M254] LEVEL 2 of `UHA_PPM_C08RING` : traiter the BORD of the seed (`i < k*c08`) by the STREAM
@@ -293,30 +242,9 @@ static int c08_border_flux(void)
  * Rend `f`/`t` LUS BEFORE the feed (same registres that the BP legacy `0x422426`), the cost of the node,
  * the cumul AFTER ajout and l'incumbent : c'is there donnee which departage " the master nourrit the node
  * cut " of " il not the nourrit not ", cut by cut, without captures. no effect on l'arithmetique. */
-static int g_m252cut = -1;
-/* [M252] armement of the probe d'image rechargee (voir `ppm_legacy_cost_live`). */
-static int g_m252reload = -1;
-#define M252CUT_ARM() \
-    do { if (g_m252cut < 0) { const char *e_ = getenv("UHA_M252CUT"); \
-           g_m252cut = (e_ && e_[0] != '0') ? 1 : 0; } } while (0)
-#define M252CUT(cand_, ctx_, err_, f_, t_, node_, cum_, inc_, i_, tag_) \
-    do { M252CUT_ARM(); \
-        if (g_m252cut) \
-            fprintf(stderr, "[M252CUT] pos=%u cand=%u %c i=%zu ctx=%u err=%u f=%u t=%u "\
-                    "node=%u cumul=%llu inc=%llu len=%zu\n", \
-                    (unsigned)g_bandbase, (unsigned)(cand_), (tag_), (size_t)(i_), \
-                    (unsigned)((ctx_) & 0xffu), (unsigned)((err_) & 0xffu), (unsigned)(f_), \
-                    (unsigned)(t_), (unsigned)(node_), (unsigned long long)(cum_), \
-                    (unsigned long long)(inc_), len); \
-    } while (0)
-#define M252CUT_END(cand_, cum_, inc_) \
-    do { M252CUT_ARM(); \
-        if (g_m252cut) \
-            fprintf(stderr, "[M252CUT] pos=%u cand=%u n i=END ctx=0 err=0 f=0 t=0 "\
-                    "node=0 cumul=%llu inc=%llu len=%zu\n", \
-                    (unsigned)g_bandbase, (unsigned)(cand_), \
-                    (unsigned long long)(cum_), (unsigned long long)(inc_), len); \
-    } while (0)
+#define M252CUT_ARM() do {} while (0)
+#define M252CUT(cand_, ctx_, err_, f_, t_, node_, cum_, inc_, i_, tag_) do {} while (0)
+#define M252CUT_END(cand_, cum_, inc_) do {} while (0)
 
 uint32_t ppm_cost_node_cost(const ppm_cost_arena *a, uint32_t ctx, uint32_t err, int override)
 {
@@ -333,21 +261,6 @@ uint32_t ppm_cost_node_cost(const ppm_cost_arena *a, uint32_t ctx, uint32_t err,
     cell = (ctx << 8) + err;
     f = a->freq[cell];
     t = a->total[ctx];
-    /* [M274k, GATED UHA_PPM_TOTESC, default 0 = historique] DENOMINATEUR OF THE COST HOT.
-     * Measures `m274i`/`m274j` : has `start = 937 440` the cost of family equals `4 334 512` at nous
-     * and `10 133 783` at the master ; has 11 froids identical near, the cost hot by node is
-     * `16 011` contre `39 681`, i.e. `f/t = 0,51` contre `0,187` -> the DENOMINATEUR is ~2,7x
-     * too small. `=1` adds `escape[ctx]` au total of the node. */
-    { static int te = -1;
-      if (te < 0) { const char *e = getenv("UHA_PPM_TOTESC"); te = (e && e[0] != '0') ? 1 : 0; }
-      if (te)
-          t = (uint32_t)(t + a->escape[ctx]); }
-    /* [GATED UHA_COSTDBG4, defautOFF, M130] state VU by the node (autocontrole vs peek). */
-    { static int c4 = -1; static unsigned long n4 = 0;
-      if (c4 < 0) { const char *e = getenv("UHA_COSTDBG4"); c4 = (e && e[0] != '0') ? 1 : 0; }
-      if (c4 && n4 < 12) { fprintf(stderr, "[CN] n=%lu ctx=%u err=%u f=%u t=%u tot0=%u tot7=%u ov=%d\n",
-                                  n4, ctx, err, f, t, a->total[0], a->total[7], override); n4++; } }
-
     if (override)
         cost = PPM_COST_OVERRIDE;
     else if (f == 0) {
@@ -365,30 +278,11 @@ uint32_t ppm_cost_node_cost(const ppm_cost_arena *a, uint32_t ctx, uint32_t err,
             cost = alz_score_cost((uint32_t)a->prior[err], a->prior_total)
                  + alz_score_cost((uint32_t)a->escape[ctx], t);
         else {
-            static int cold_leg = -1;
-            if (cold_leg < 0)
-                cold_leg = getenv("UHA_PPM_COLD_LEGACY") ? 1 : 0;
-            if (cold_leg)
-                cost = alz_score_cost(PPM_COST_PRIOR, t);
-            else
-                cost = alz_score_cost(PPM_COST_PRIOR, 2048u)
-                     + alz_score_cost((uint32_t)a->escape[ctx], t);   /* [M141] ESCAPE_AVANT, without +1 */
+            cost = alz_score_cost(PPM_COST_PRIOR, 2048u)
+                 + alz_score_cost((uint32_t)a->escape[ctx], t);
         }
     } else
         cost = alz_score_cost(f, t);
-
-    /* [M222, GATED UHA_PPM_ROWNOESC, default OFF] PROBE : the denominateur of the cost HOT serait
-     * `Sigma freq` (= `total  escape`) and no `total` (which inclut l'echappement). Measures which motive
-     * there probe : has `937 696` (cand 0, arena neuve, `d=1`) the number of nodes FROIDS is **20**
-     * contre **22,66** en GT (848 447 / 37 440) => the term cold is juste, but there QUEUE coute
-     * 123/node at nous and 8/node en GT. There queue not depend that of `f/t` : if `t = Sigma freq`, then
-     * `f/t -> 1` some there 2 visite and there queue disparait. Never promotable. */
-    if (!override && f != 0) {
-        static int ne = -1;
-        if (ne < 0) { const char *e = getenv("UHA_PPM_ROWNOESC"); ne = (e && e[0] != '0') ? 1 : 0; }
-        if (ne && t > (uint32_t)a->escape[ctx] && t > (uint32_t)a->escape[ctx] + f)
-            cost = alz_score_cost(f, t - (uint32_t)a->escape[ctx]);
-    }
 
     return cost;
 }
@@ -438,22 +332,8 @@ void ppm_cost_node_feed(ppm_cost_arena *a, uint32_t ctx, uint32_t err, uint32_t 
          *   escape' = ceil(ceil(e/2)/2) = (e>>2)+1   for e  1 (mod 4)   (65 -> 33 -> 17)
          *   total'  = Sigma freq' + escape'  = 8160 + 17 = 8177   (NOT (t+1)>>1 - refute M153)
          * L'invariant total == Sigma freq + escape is verified to the 3 instants (M153). */
-        { static int sl2 = -1; if (sl2 < 0) { const char *e = getenv("UHA_PPM_SEEDLAW"); sl2 = (e && e[0] != '0') ? 1 : 0; }
-          if (sl2) {
-              uint32_t k, sum = 0u, e2;
-              for (k = 0; k < 256u; k++) {
-                  uint16_t *p = &a->freq[(ctx << 8) + k];
-                  uint32_t h = ((uint32_t)*p + 1u) >> 1;
-                  *p = (uint16_t)h;
-                  sum += h;
-              }
-              e2 = ((uint32_t)a->escape[ctx] >> 2) + 1u;
-              a->escape[ctx] = (uint16_t)e2;
-              a->total[ctx] = (uint16_t)(sum + e2);
-          } else {
-              a->total[ctx] = (uint16_t)nt;
-              ppm_cost_rescale(a, ctx);
-          } }
+        a->total[ctx] = (uint16_t)nt;
+        ppm_cost_rescale(a, ctx);
     } else {
         a->total[ctx] = (uint16_t)nt;
     }
@@ -526,9 +406,7 @@ static size_t g_payn, g_payusize;
 
 uint64_t ppm_legacy_cost(const uint8_t *win, size_t len, uint32_t cls, uint64_t incumbent)
 {
-    /* [GATED UHA_COSTENTRY, defautOFF, M130] probe d'input (auto-controle of the path). */
-    { static int ce = -1; if (ce < 0) { const char *e = getenv("UHA_COSTENTRY"); ce = (e && e[0] != '0') ? 1 : 0; }
-      if (ce) fprintf(stderr, "[CE] cls=%u len=%zu inc=0x%llx\n", cls, len, (unsigned long long)incumbent); }
+
     g_pay = NULL; g_payusize = 0;      /* selecteur : behavior historique */
     /* generateur of cost frombytes some 5 candidates (laws closes M45/M45B..G, validated
      * boutenbout : argmin cand0..4 -> class ; gap = leaf7, no bloquant). */
@@ -600,15 +478,7 @@ static uint32_t seed_byte(const uint8_t *d, size_t n, long p, long off)
  * `UHA_PPM_LAW256=0` restores the behavior historique, at the identical. */
 static int law256(void)
 {
-    static int lv = -1;
-    if (lv < 0) {
-        const char *e = getenv("UHA_PPM_LAW256");
-        /* [M177, PROMUE the 2026-10-25] Default = 3 : the bord of the seed relit the STREAM ABSOLU
-         * (`nb = ~data[(wpos - c08) & 0xffff]`), measured sure 102 nodes of bord (block 3 of `mixed`).
-         * N'agit that if there geometrie of the member is armee (`pay_active()`). 0 = historique (Has/B). */
-        lv = (e && e[0]) ? atoi(e) : 3;
-    }
-    return lv;
+    return 3;
 }
 
 /* [M154] bytes reellement lisibles au-dela of `win` (the legacy engine reads son buffer, which
@@ -657,14 +527,20 @@ static uint32_t flux_byte(const uint8_t *d, size_t n, uint32_t wpos, long back)
  * => some zeros (observe : `00 00 00 00 00` then the payload). */
 static int payload_law(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_PAYLOAD"); v = (e && e[0]) ? atoi(e) : 1; }
-    return v;
+    return 1;
 }
 
 static size_t ppm_cost_payload_shift(void)
 {
-    return (16u - (uint32_t)(g_payusize % 16u)) % 16u;
+    return 5u;
+}
+
+static long ppm_cost_entree_base(uint32_t bandbase)
+{
+    size_t off = (size_t)bandbase + 256u;
+    if (g_payusize && off > g_payusize)
+        off = g_payusize;
+    return (long)off;
 }
 
 void ppm_cost_set_payload(const uint8_t *pay, size_t paylen, size_t usize)
@@ -697,12 +573,7 @@ static uint32_t entree_byte(const uint8_t *d, size_t n, long abs)
  * nodes). Gate `UHA_PPM_SEEDOFF256`, default OFF. */
 static long seed_off(void)
 {
-    static long off = -1;
-    if (off < 0) {
-        const char *e = getenv("UHA_PPM_SEEDOFF256");
-        off = (e && e[0] != '0') ? 256 : 0;
-    }
-    return off;
+    return 0;
 }
 
 /* [M170o, GATED UHA_PPM_C08ABS, defautOFF] Base of position of the machine MRU.
@@ -718,9 +589,7 @@ static long seed_off(void)
  * pos = 0 not teste not the states d'input "). */
 static int c08abs(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_C08ABS"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
+    return 0;
 }
 
 /* [M170o, GATED UHA_PPM_C08LIVE, defautOFF] STATE PERSISTANT of the machine MRU.
@@ -735,9 +604,7 @@ static int c08abs(void)
  * parcours of l'estimator ; the matchs between blocks not there touchent not). */
 static int c08live(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_C08LIVE"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
+    return 0;
 }
 
 /* [M170o, GATED UHA_PPM_C08NB, defautOFF] OFFSET of the reading `nb` (byte of controle of the
@@ -748,9 +615,7 @@ static int c08live(void)
  * Gate SEPAREE of `UHA_PPM_SEEDOFF256` (which pilote also l'error of seed, 0x422628/0x422644). */
 static int c08nb0(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_C08NB"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
+    return 0;
 }
 
 /* [M170o, GATED UHA_PPM_C08FLOW, defautOFF]  model EXACT (static `0x418fc0` vs `0x4226f3`) :
@@ -764,14 +629,7 @@ static int c08nb0(void)
  * complete, positions absolues, output only for `[start, start+len)`. */
 static int c08flow(void)
 {
-    static int v = -1;
-    /* [M170r] LEVEL (and no booleen) : 1 = old model STREAM monoloi (`nb` always +256),
-     * 2 = TWO PHASES (live offset 0 then estimator +256 with frontier). */
-    /* [M177, PROMUE the 2026-10-25] Default = 2 (TWO PHASES). validation : state d'input exact has two
-     * frontiers (30004 -> c08 15, 34747 -> c08 102), 85/85 nodes of bord, 23 393 nodes `(freq,total)`
-     * and 20 480 nodes of cost identical to legacy. 0 = old behavior (Has/B). */
-    if (v < 0) { const char *e = getenv("UHA_PPM_C08FLOW"); v = (e && e[0]) ? atoi(e) : 2; }
-    return v;
+    return 2;
 }
 
 typedef struct {
@@ -820,20 +678,9 @@ static void c08_phase(const uint8_t *d, size_t n, size_t i0, size_t i1,
      * `12 -> 8` observee at the tete some walks `init` has partir of the cut `76 806` : if elle tombe
      * near of `0x10000` (mask of positions) there cause is l'arithmetique of bouclage, otherwise elle
      * is in the data. no effect on there machine. */
-    static long m252c08 = -2;
-    static int c08tail_cfg = 0;
-    int c08trk = 0, c08tail;
-    const int no_mask = c08_no_livemask();
-    const int tie = c08tie_strict();
-    if (m252c08 == -2) {
-        const char *e = getenv("UHA_M252C08");
-        m252c08 = (e && e[0]) ? atol(e) : -1;
-        /* `UHA_M252C08` recu as chain NO numerique (ex. `tail`) : rend only l'STATE FINAL of
-         * each pass, for all cuts. */
-        c08tail_cfg = (e && e[0] && !((e[0] >= '0' && e[0] <= '9') || e[0] == '-')) ? 1 : 0;
-    }
-    if (m252c08 >= 0 && (long)g_bandbase == m252c08) c08trk = 1;
-    c08tail = c08tail_cfg;
+    const int no_mask = 1;
+    const int tie = 0;
+    int c08trk = 0, c08tail = 0;
     for (i = i0; i < i1; i++) {
         const uint32_t pos = (uint32_t)i;
         uint32_t bl = (~d[i]) & 0xffu;
@@ -854,7 +701,7 @@ static void c08_phase(const uint8_t *d, size_t n, size_t i0, size_t i1,
                 long q;
                 /* `NB_LAW_EST` : `0x422793 jl 0x42285a` => frontier if `i - c08 < 0` (index RELATIF). */
                 if (law == NB_LAW_EST && ((long)i - (long)blk0 - (long)s->c08) >= 0)
-                    q = (long)i - (long)s->c08 + 256;      /* 0x422799 : no mask */
+                    q = ppm_cost_entree_base((uint32_t)blk0) + ((long)i - (long)blk0) - (long)s->c08;      /* 0x422799 : no mask */
                 else if (no_mask)
                     /* [M254] same rule au **bord of start of block** : reading directe. */
                     q = (long)i - (long)s->c08;
@@ -908,15 +755,7 @@ static void c08_machine(const uint8_t *d, size_t n, uint32_t *c08_out,
     size_t i; int b; unsigned k;
     /* [GATED UHA_PPM_C08DBG, defautOFF, M139] trace internal of the machine MRU
      * (`i c08 c04 c00 d bl nb cnt_c08 cnt_d found`) - diagnostic node has node only. */
-    static int dbg_init = 0;
-    static const char *dbg_path = NULL;
     FILE *dbg = NULL;
-    if (!dbg_init) {
-        const char *p = getenv("UHA_PPM_C08DBG");
-        dbg_path = (p && p[0]) ? p : NULL;
-        dbg_init = 1;
-    }
-    if (dbg_path) dbg = fopen(dbg_path, "a");
     if (live_mode && s_c08.init) {
         memcpy(lastpos, s_c08.lastpos, sizeof lastpos);
         memcpy(cnt, s_c08.cnt, sizeof cnt);
@@ -1044,9 +883,7 @@ uint32_t ppm_cost_get_flag(void)
 
 static int rowsel_on(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_PPM_ROWSEL"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
+    return 0;
 }
 
 int ppm_cost_rowsel_on(void)
@@ -1171,12 +1008,15 @@ int ppm_cost_rowsel(ppm_cost_arena *a, const uint8_t *win, const uint8_t *flux,
     sym   = (~win[i]) & 0xffu;              /* bl = stream[pos] (0x4223cb) */
     /* 0x4225a1..0x4225d4 : predictions to the distances `d` and `2d` ; index RELATIF negatif
      * -> STREAM ABSOLU (0x422628 / 0x422644), law measured M170r. */
-    cl = ((long)i - (long)d < 0)
-       ? flux_byte(flux, fn, pos, (long)d)
-       : ((~entree_byte(flux, fn, (long)bandbase + (long)i - (long)d + 256L)) & 0xffu);
-    b2 = ((long)i - 2L * (long)d < 0)
-       ? flux_byte(flux, fn, pos, 2L * (long)d)
-       : ((~entree_byte(flux, fn, (long)bandbase + (long)i - 2L * (long)d + 256L)) & 0xffu);
+    {
+        long ebase = ppm_cost_entree_base(bandbase);
+        cl = ((long)i - (long)d < 0)
+           ? flux_byte(flux, fn, pos, (long)d)
+           : ((~entree_byte(flux, fn, ebase + (long)i - (long)d)) & 0xffu);
+        b2 = ((long)i - 2L * (long)d < 0)
+           ? flux_byte(flux, fn, pos, 2L * (long)d)
+           : ((~entree_byte(flux, fn, ebase + (long)i - 2L * (long)d)) & 0xffu);
+    }
     delta = (cl - b2) & 0xffu;
     /* 0x4225e2 : `[esp+0x40] = 0` at each node, then 0x4225e8 decoupe sure `reg08`. */
     if (d == 4u) {
@@ -1218,7 +1058,7 @@ void ppm_cost_rowsel_step(ppm_cost_arena *a, const uint8_t *win, const uint8_t *
         /* 0x422785..0x4227a1 : there prediction by `reg08` retombe-t-elle sure the symbole ? */
         pred = ((long)i - (long)a->reg08 < 0)
              ? flux_byte(flux, fn, pos, (long)a->reg08)
-             : ((~entree_byte(flux, fn, (long)bandbase + (long)i - (long)a->reg08 + 256L)) & 0xffu);
+             : ((~entree_byte(flux, fn, ppm_cost_entree_base(bandbase) + (long)i - (long)a->reg08)) & 0xffu);
         rs_body(a->dhist, &a->reg00, &a->reg04, &a->reg08, d, pred == sym);
     }
     a->last[sym] = pos;                     /* 0x42284e : at each node */
@@ -1255,11 +1095,7 @@ void ppm_cost_rowsel_feed_live(ppm_cost_arena *a, const uint8_t *mem, size_t upt
     a->reg00 = r00;
     a->reg04 = r04;
     a->reg08 = r08;
-    /* [M220] probe of causalite : `UHA_PPM_RSD=<n>` forces there distance of start
-     * (`[0x481c08]`) that the master had has this frontier. Never promotable. */
-    { static long fdr = -2;
-      if (fdr == -2) { const char *e = getenv("UHA_PPM_RSD"); fdr = (e && e[0]) ? atol(e) : -1; }
-      if (fdr >= 0) a->reg08 = (uint32_t)fdr; }
+
     a->rowsel_armed = 1;
 }
 
@@ -1272,11 +1108,8 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
     static uint32_t *s_errs = NULL, *s_c08 = NULL, *s_ess = NULL;
     static size_t s_errs_cap = 0, s_c08_cap = 0, s_ess_cap = 0;
     ppm_cost_arena *const arena = ap;
-    { static int mc = -1;
-      if (mc < 0) { const char *e = getenv("UHA_M265CTX"); mc = (e && e[0] != '0') ? 1 : 0; }
-      g_m265_ctxarm = (uint32_t)mc; g_m265_ctxmax = 0u; }
+    g_m265_ctxarm = 0u; g_m265_ctxmax = 0u;
     uint64_t cumul = 0;
-    unsigned long cold_n = 0;
     size_t i;
     const size_t need = len ? len : 1u;
     uint32_t *c08 = NULL;
@@ -1332,11 +1165,7 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
     /* [M130c->M170k] flag of direction : `[esp+0x50]` = `g_flag_in` (voir ppm_cost_set_flag).
      * Source legacy : `BYTE[0x483932]` = m->cls_neg for the candidate equal at the class current,
      * heritage of the cadre of stack (flag final of the candidate previous) otherwise. */
-    if (!g_flag_set) {
-        static int env_done;
-        if (!env_done) { const char *e = getenv("UHA_PPM_PRED_FLAG");
-                         env_done = 1; if (e && e[0]) g_flag_in = (e[0] != '0') ? 1u : 0u; }
-    }
+
     int flag = g_flag_in ? 1 : 0;
     if (cand == 0u) {
         const long soff = seed_off();
@@ -1357,15 +1186,16 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
                 uint32_t cl, b2;
                 const uint32_t wpos = g_bandbase + (uint32_t)i;
                 if (c08_flux) {
+                    long ebase = p_act ? ppm_cost_entree_base(g_bandbase) : 256L;
                     cl = ((long)i - (long)c < 0)
                        ? flux_byte(flux, fn, wpos, (long)c)
                        : ((p_act
-                          ? entree_byte(flux, fn, (long)g_bandbase + (long)i - (long)c + 256L)
+                          ? entree_byte(flux, fn, ebase + (long)i - (long)c)
                           : law_byte(win, len, (long)i - (long)c + 256L)) ^ 0xffu);
                     b2 = ((long)i - 2L * (long)c < 0)
                        ? flux_byte(flux, fn, wpos, 2L * (long)c)
                        : ((p_act
-                          ? entree_byte(flux, fn, (long)g_bandbase + (long)i - 2L * (long)c + 256L)
+                          ? entree_byte(flux, fn, ebase + (long)i - 2L * (long)c)
                           : law_byte(win, len, (long)i - 2L * (long)c + 256L)) ^ 0xffu);
                 } else {
                     cl = (i >= (size_t)c)
@@ -1419,117 +1249,42 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
     const int rs = rowsel_on();
     if (rs) { arena->dctr = 0u; arena->dma = 0u; arena->bias = 0u; }
     {
-        static int ec = -1;
-        static long cs = -2;
-        static int ni = -1;
-        static long mn = -2;
-        static int mnc = -1;
-        static unsigned long mnn = 0;
-        static int cs_seq = -1;
-        static FILE *csf = NULL;
-        static unsigned long csn = 0;
-        static long only = -2;
-        static long rb = -2;
-        static unsigned char *bm = NULL, *be = NULL;
-        static int c5 = -1;
-        static int nc = -1;
-        static FILE *nf = NULL;
-        static int c2 = -1;
-        static int c2lim = 8;
-        static FILE *fd = NULL;
-        static int fd_ini = 0;
-        static int c6 = -1;
-        static int c3 = -1;
-
-        if (ec < 0) { const char *e = getenv("UHA_PPM_ERRCOST"); ec = (e && e[0] != '0') ? 1 : 0; }
-        if (cs == -2) {
-            const char *e = getenv("UHA_PPM_CTXSAVE");
-            const char *n2 = getenv("UHA_PPM_CTXNOINC");
-            cs = (e && e[0]) ? atol(e) : 0;
-            ni = (n2 && n2[0] != '0') ? 1 : 0;
-        }
-        if (mn == -2) {
-            const char *e = getenv("UHA_M252NODES");
-            const char *c2e = getenv("UHA_M252NODES_CAND");
-            mn = (e && e[0]) ? atol(e) : -1;
-            mnc = (c2e && c2e[0]) ? (int)atol(c2e) : 0;
-        }
-        if (cs_seq < 0) {
-            const char *e = getenv("UHA_COSTSEQ");
-            cs_seq = (e && e[0]) ? 1 : 0;
-            if (cs_seq) csf = fopen(e, "w");
-            if (cs_seq && !csf) cs_seq = 0;
-        }
-        if (cs_seq && only == -2) {
-            const char *e2 = getenv("UHA_COSTSEQ_POS");
-            only = (e2 && e2[0]) ? atol(e2) : -1;
-        }
-        if (rb == -2) { const char *e = getenv("UHA_PPM_RSDBG"); rb = (e && e[0]) ? atol(e) : -1; }
-        if (c5 < 0) { const char *e = getenv("UHA_COSTDBG5"); c5 = (e && e[0] != '0') ? 1 : 0; }
-        if (nc < 0) { const char *p = getenv("UHA_PPM_NODECOST"); nc = (p && p[0]) ? 1 : 0; if (nc) nf = fopen(p, "w"); }
-        if (c2 < 0) {
-            const char *e = getenv("UHA_COSTDBG2");
-            const char *L = getenv("UHA_COSTDBG2_N");
-            c2 = (e && e[0] != '0') ? 1 : 0;
-            if (L && atoi(L) > 0) c2lim = atoi(L);
-        }
-        if (!fd_ini) {
-            const char *p = getenv("UHA_PPM_NODEDUMP");
-            fd_ini = 1;
-            fd = (p && p[0]) ? fopen(p, "a") : NULL;
-        }
-        if (c6 < 0) { const char *e = getenv("UHA_COSTDBG6"); c6 = (e && e[0] != '0') ? 1 : 0; }
-        if (c3 < 0) { const char *e = getenv("UHA_COSTDBG3"); c3 = (e && e[0] != '0') ? 1 : 0; }
-        M252CUT_ARM();
-
-        const int cb_on = ctxband_on();
-        const int cnf = cutnofeed_on();
-        const int cnf_cut = cnf && !(nofeedhead_on() && incumbent == 0xffffffffu);
-        const int rb_hit = (rb >= 0 && (long)g_bandbase == rb);
-        const int mn_hit = (mn >= 0 && (long)g_bandbase == mn && (int)cand == mnc);
-        const int any_probe = (mn_hit || (cs_seq && csf) || rb_hit || c5 || (nc && nf)
-                               || c2 || (fd != NULL) || c6 || c3 || g_m252cut);
-        const uint32_t bi0 = cb_on ? g_ctxband : (uint32_t)((long)g_bandbase - cs);
-        const int fast_bi3 = (cand == 3u && !ni && ((uint64_t)bi0 + (uint64_t)len <= 0xffffffffULL));
+        const uint32_t bi0 = (uint32_t)g_bandbase;
+        const int fast_bi3 = (cand == 3u && ((uint64_t)bi0 + (uint64_t)len <= 0xffffffffULL));
         uint32_t bi3 = fast_bi3 ? (bi0 % 3u) : 0u;
         uint32_t acc = 0, order = 0, ctx = g_initctx;
-
         for (i = 0; i < len; i++) {
             uint32_t c = (cand == 0u) ? (c08[i] ? c08[i] : 1u) : 0u;
             uint32_t bh, ctx_here = 0, err = errs[i], ov = 0u, f = 0u, t = 0u, node;
             uint32_t rs_bias = 0u;
             int      rs_use = 0;
             if (cand == 0u && rs) {
-                /* [M220, UHA_PPM_ROWSEL] path 2D EXACT (0x42259d..0x422623). */
                 ppm_cost_rowsel(arena, win, win - g_bandbase, (size_t)g_bandbase + len,
                                 (uint32_t)i, g_bandbase, &ctx_here, &err, &rs_bias);
                 bh = errs[i];
                 ov = 0u;
                 rs_use = 1;
             } else if (cand == 0u) {
-                bh = errs[i];                                   /* = (e1  e2) & 0xff  = err_seed */
-                ctx_here = ctx;                                 /* == T2CC[err_seed(i)] (errs decale) */
+                bh = errs[i];
+                ctx_here = ctx;
                 ctx = PPM_T2CC[bh];
                 if (law && ess) {
-                    /* [M154] `ctx` and `acc`/`order` read `err_seed` au same node. */
                     bh = ess[i];
                     ctx_here = PPM_T2CC[bh];
                     ctx = ctx_here;
                 }
-                if (__builtin_expect(ec, 0)) {
-                    uint32_t e1 = ring_byte(win, len, (long)i - (long)c);
-                    err = (i < (size_t)c) ? ((255u - (uint32_t)win[i]) & 0xffu)
-                                          : ((e1 - (uint32_t)win[i]) & 0xffu);
-                }
-                if (c == 4u) { int32_t es = (int32_t)bh; if (es >= 128) es -= 256;
+                if (c == 4u) {
+                    int32_t es = (int32_t)bh;
+                    if (es >= 128) es -= 256;
                     acc = ((uint32_t)((es < 0 ? -es : es) + acc) >> 1);
-                    ov = (acc <= 3u) ? ((acc << 10) + 0x800u) : 0u; }
-                else if (c > 4u) { order = (bh == 0u) ? (order + 3u) : (order >> 1);
-                    ov = (order >= 6u) ? 0x800u : 0u; }
+                    ov = (acc <= 3u) ? ((acc << 10) + 0x800u) : 0u;
+                } else if (c > 4u) {
+                    order = (bh == 0u) ? (order + 3u) : (order >> 1);
+                    ov = (order >= 6u) ? 0x800u : 0u;
+                }
             } else {
-                uint32_t bi = cb_on ? (g_ctxband + (uint32_t)i)
-                                    : (uint32_t)((long)g_bandbase + (ni ? 0L : (long)i) - cs);
-                ctx_here = ctx;                                /* cand>=1 : lag 1 (ctx sets au sym. i1) */
+                uint32_t bi = (uint32_t)g_bandbase + (uint32_t)i;
+                ctx_here = ctx;
                 bh = errs[i] & 0xffu;
                 if (cand == 1u) ctx = PPM_T6DC[bh] + ((PPM_T6CC[ctx & 0xfu] & 0xffu) << 4);
                 else if (cand == 2u) ctx = PPM_T6DC[bh] + ((bi & 1u) << 4);
@@ -1540,129 +1295,27 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
                     if (bi3 == 3u) bi3 = 0u;
                 }
             }
-            if (__builtin_expect(any_probe, 0)) {
-                ppm_cost_peek(arena, ctx_here & 0xffu, err, &f, &t);
-                if (mn_hit && mnn < 20000ul) {
-                    fprintf(stderr, "[M252NODES] i=%zu row=%u err=%u f=%u\n",
-                            i + 1u, (unsigned)(ctx_here & 0xffu), (unsigned)(err & 0xffu),
-                            (unsigned)f);
-                    mnn++;
-                }
-                if (cs_seq && csf && csn < 4000000ul && (only < 0 || (long)g_bandbase == only)) {
-                    fprintf(csf, "%u %u %zu %u %u %u\n", (unsigned)g_bandbase, cand, i,
-                            ctx_here & 0xffu, err & 0xffu, ov);
-                    csn++;
-                }
-                if (rb_hit) {
-                    if (!bm) bm = (unsigned char *)calloc(8192u, 1u);
-                    if (!be) be = (unsigned char *)calloc(256u, 1u);
-                    if (bm && be) {
-                        uint32_t kk = ((ctx_here & 0xffu) << 8) | (err & 0xffu);
-                        bm[kk >> 3] |= (unsigned char)(1u << (kk & 7u));
-                        be[err & 0xffu] = 1u;
-                        if (i + 1u == len) {
-                            uint32_t nb = 0, nbd = 0, n2;
-                            for (n2 = 0; n2 < 8192u; n2++)
-                                nb += (uint32_t)__builtin_popcount(bm[n2]);
-                            for (n2 = 0; n2 < 256u; n2++)
-                                nbd += (uint32_t)be[n2];
-                            fprintf(stderr, "[RSDIST] pos=%u cand=%u pairs=%u flag_in=%u nerr=%u\n",
-                                    (unsigned)g_bandbase, (unsigned)cand, (unsigned)nb,
-                                    (unsigned)g_flag_in, (unsigned)nbd);
-                            memset(bm, 0, 8192u);
-                            memset(be, 0, 256u);
-                        }
-                    }
-                }
-            }
-            node = cnf
-                ? ppm_cost_node_cost(arena, ctx_here & 0xffu, err, ov != 0u)
-                : ppm_cost_node(arena, ctx_here & 0xffu, err, ov != 0u);
+            node = ppm_cost_node_cost(arena, ctx_here & 0xffu, err, ov != 0u);
             if (rs_use && rs_bias != 0u)
                 node = rs_bias;
-            if (__builtin_expect(any_probe, 0)) {
-                if (rb_hit &&
-                    (i < 6u || i == 100u || i == 1000u || i == 6000u || i + 1u == len))
-                    fprintf(stderr, "[RSDBG] rs=%d use=%d i=%u cand=%u d=%u ctx=%u err=%u f=%u t=%u bias=%u node=%u w=%u,%u,%u,%u\n",
-                            rs, rs_use,
-                            (unsigned)i, (unsigned)cand, (unsigned)arena->reg08,
-                            (unsigned)(ctx_here & 0xffu), (unsigned)(err & 0xffu),
-                            (unsigned)f, (unsigned)t, (unsigned)rs_bias, (unsigned)node,
-                            (unsigned)win[0], (unsigned)win[1], (unsigned)win[2], (unsigned)win[3]);
-            }
             if (cand == 0u && rs)
                 ppm_cost_rowsel_step(arena, win, win - g_bandbase, (size_t)g_bandbase + len,
                                      (uint32_t)i, g_bandbase);
-            if (__builtin_expect(any_probe, 0)) {
-                if (c5 && ((i % 1024u) == 0u || i + 24u >= len))
-                    fprintf(stderr, "[C5] cand=%u i=%zu ctx=%u err=%u f=%u t=%u node=%u cum=%llu"
-                                    " tot0=%u esc0=%u\n",
-                            cand, i, ctx_here & 0xffu, err, f, t, node,
-                            (unsigned long long)cumul, arena->total[0], arena->escape[0]);
-            }
-            if (ov != 0u) node = ov;                           /* cost node = override otherwise LUT */
-            if (__builtin_expect(any_probe, 0)) {
-                if (nc && nf)
-                    fprintf(nf, "%zu\t%u\t%u\t%u\t%u\t%llu\t%u\t%u\t%u\n", i,
-                            ctx_here & 0xffu, err, ov, node,
-                            (unsigned long long)cumul, cand, f, t);
-                if (c2 && i < (size_t)c2lim)
-                    fprintf(stderr, "[C2] cand=%u i=%zu ctx=%u err=%u ov=%u f=%u t=%u node=%u"
-                                    " win=%u bh=%u c=%u nz=%u\n",
-                            cand, i, ctx_here & 0xffu, err, ov, f, t, node,
-                            win[i], bh, (cand == 0u) ? (c08 && c08[i] ? c08[i] : 1u) : 0u,
-                            (unsigned)(win[0] | win[1] | win[2] | win[3]));
-            }
+            if (ov != 0u) node = ov;
             cumul += node;
-            if (cnf_cut) {
-                if (cumul > incumbent) {
-                    if (!any_probe)
-                        ppm_cost_peek(arena, ctx_here & 0xffu, err, &f, &t);
-                    if (f == 0u)
-                        ppm_cost_feed_esc(arena, ctx_here & 0xffu, PPM_COST_STEP);
-                    M252CUT(cand, ctx_here, err, f, t, node, cumul, incumbent, i, 'c');
-                    g_flag_out = (uint32_t)flag;
-                    return cumul;
-                }
-                ppm_cost_node_feed(arena, ctx_here & 0xffu, err, PPM_COST_STEP);
-            }
-            if (__builtin_expect(any_probe, 0)) {
-                if (fd) fprintf(fd, "%zu\t%u\t%u\n", i, ctx_here & 0xffu, err);
-                if (f == 0u) {
-                    cold_n++;
-                    if (c6)
-                        fprintf(stderr, "[C6] cand=%u i=%zu ctx=%u err=%u f=%u t=%u esc=%u node=%u\n",
-                                cand, i, ctx_here & 0xffu, err, f, t,
-                                arena->escape[ctx_here & 0xffu], node);
-                }
-            }
             if (cumul > incumbent) {
-                M252CUT(cand, ctx_here, err, f, t, node, cumul, incumbent, i, 'e');
+                ppm_cost_peek(arena, ctx_here & 0xffu, err, &f, &t);
+                if (f == 0u)
+                    ppm_cost_feed_esc(arena, ctx_here & 0xffu, PPM_COST_STEP);
                 g_flag_out = (uint32_t)flag;
                 return cumul;
             }
+            ppm_cost_node_feed(arena, ctx_here & 0xffu, err, PPM_COST_STEP);
         }
     }
     g_flag_out = (uint32_t)flag;
     M252CUT_END(cand, cumul, incumbent);
-    /* [GATED UHA_COSTDBG3, defautOFF, M122p] number of visites COLD of the candidate. */
-    { static int c3 = -1; if (c3 < 0) { const char *e = getenv("UHA_COSTDBG3"); c3 = (e && e[0] != '0') ? 1 : 0; }
-      if (c3) fprintf(stderr, "[C3] cand=%u len=%zu cold=%lu cumul=%llu\n",
-                      cand, len, cold_n, (unsigned long long)cumul); }
-    {
-        static long rdbg2 = -2;
-        if (rdbg2 == -2) { const char *e = getenv("UHA_PPM_RSDBG"); rdbg2 = (e && e[0]) ? atol(e) : -1; }
-        if (rdbg2 >= 0 && (long)g_bandbase == rdbg2)
-            fprintf(stderr, "[RSCOLD] pos=%u cand=%u len=%zu cold=%lu cumul=%llu pernode=%.1f\n",
-                    (unsigned)g_bandbase, (unsigned)cand, len, cold_n, (unsigned long long)cumul,
-                    len ? (double)cumul / (double)len : 0.0);
-    }
-    if (g_m265_ctxarm)
-        fprintf(stderr, "[M265CTX] pos=%u cand=%u len=%zu ctxmax=%u ctxband=%u\n", (unsigned)g_bandbase,
-                (unsigned)cand, len, (unsigned)g_m265_ctxmax, (unsigned)g_ctxband);
-    if (g_m265_outarm)
-        fprintf(stderr, "[M265OUT] pos=%u cand=%u len=%zu out=%u\n", (unsigned)g_bandbase,
-                (unsigned)cand, len, (unsigned)g_m265_out);
+
     return cumul;
 }
 
@@ -1679,9 +1332,7 @@ static uint64_t ppm_legacy_cost_gen(const uint8_t *win, size_t len, uint32_t can
  * `0x422282`). no effect on l'arithmetique : two `fprintf` bounds by l'environnement. */
 static int m265copy_on(void)
 {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UHA_M265COPY"); v = (e && e[0] != '0') ? 1 : 0; }
-    return v;
+    return 0;
 }
 
 static void m265copy_dump(ppm_cost_arena *a, const ppm_live_arena *L, uint32_t cand)
@@ -1699,35 +1350,6 @@ static void m265copy_dump(ppm_cost_arena *a, const ppm_live_arena *L, uint32_t c
         for (i = 0; i < 32u; i++)
             fprintf(stderr, " %u", (unsigned)L->prior_freq[i]);
     fprintf(stderr, "\n");
-    /* [M265] mode FULL (`UHA_M265FULL=1`) : the `n` lines entieres (256 words chacune) of the SRC,
-     * in l'order memory = `freq[rel][sym]` - pair direct of `m265_freq_gt.tsv`. */
-    { static int fu = -1;
-      if (fu < 0) { const char *e = getenv("UHA_M265FULL"); fu = (e && e[0] != '0') ? 1 : 0; }
-      if (fu) {
-          uint32_t r;
-          fprintf(stderr, "[M265FULL] pos=%u cand=%u n=%u", (unsigned)g_bandbase,
-                  (unsigned)cand, (unsigned)L->n);
-          for (r = 0; r < L->n; r++)
-              for (i = 0; i < 256u; i++)
-                  fprintf(stderr, " %u", (unsigned)L->freq[(size_t)(L->base + r) * 256u + i]);
-          fprintf(stderr, "\n"); } }
-    /* [M269] dump BINARY some rows 0..512 (model d'EMISSION) at the instant of the copie :
-     * `UHA_M265LOW=<prefixe>` writes `<prefixe>_freq.bin` (513x256 u16), `_t25c.bin` (idem) and
-     * `_t268.bin` (513 u16) - pairs directs of `m269_*_p937440.bin`. Has single writing. */
-    { static int lo = -1; static unsigned long ln = 0; static long lp = -2;
-      if (lo < 0) { const char *e = getenv("UHA_M265LOW"); lo = (e && e[0]) ? 1 : 0;
-                    if (lo) s_lowpfx = e;
-                    const char *p2 = getenv("UHA_M265LOW_POS"); lp = (p2 && p2[0]) ? atol(p2) : -1; }
-      if (lo && ln == 0 && L->cum && L->ent && (lp < 0 || (long)g_bandbase == lp)) {
-          char p[512];
-          FILE *f;
-          snprintf(p, sizeof p, "%s_freq.bin", s_lowpfx);
-          if ((f = fopen(p, "wb")) != NULL) { fwrite(L->freq, 2, 513u * 256u, f); fclose(f); }
-          snprintf(p, sizeof p, "%s_t25c.bin", s_lowpfx);
-          if ((f = fopen(p, "wb")) != NULL) { fwrite(L->cum, 2, 513u * 256u, f); fclose(f); }
-          snprintf(p, sizeof p, "%s_t268.bin", s_lowpfx);
-          if ((f = fopen(p, "wb")) != NULL) { fwrite(L->ent, 2, 513u, f); fclose(f); }
-          ln++; } }
 }
 
 /* [M170g] Variante " arena live " : no reset (0x42230e reutilise l'state in place) ;
@@ -1744,23 +1366,6 @@ uint64_t ppm_legacy_cost_live(ppm_cost_arena *a, const uint8_t *win, size_t len,
         m265copy_dump(a, L, cand);     /* [M265] state BEFORE there copie (site 0x422282) */
     if (feed && L && !ppm_cost_arena_load_live(a, L))
         return 0;
-    /* [M252, GATED UHA_M252RELOAD, default-OFF, read-only] 96 `total[]` AFTER there recharge and
-     * BEFORE there walk = l'instant EXACT of the BP legacy `0x422392` (GT
-     * `OUT/m252_recharge_calls.tsv`, 80 hits). C'is there single facon of juger l'IMAGE rechargee
-     * separement some feeds of the walk : the probes d'input d'call (`BLKARENA`/`M250B`) voient
-     * l'state LEAVES by the candidate previous, not the one of the candidate which va tourner.
-     * `n` = number of rows of the domaine recharge. no effect on l'arithmetique. */
-    if (feed && L && (g_m252reload < 0
-            ? (g_m252reload = (getenv("UHA_M252RELOAD") &&
-                               getenv("UHA_M252RELOAD")[0] != '0') ? 1 : 0)
-            : g_m252reload)) {
-        uint32_t kr;
-        fprintf(stderr, "[M252RELOAD] pos=%u cand=%u n=%u", (unsigned)g_bandbase,
-                (unsigned)cand, (unsigned)L->n);
-        for (kr = 0; kr < 96u; kr++)
-            fprintf(stderr, " %u", (unsigned)a->total[kr]);
-        fprintf(stderr, "\n");
-    }
     return ppm_cost_gen_a(a, win, len, cand, incumbent, 0);
 }
 
@@ -1784,17 +1389,7 @@ uint64_t ppm_legacy_cost_live(ppm_cost_arena *a, const uint8_t *win, size_t len,
 uint32_t ppm_bc_from_restant(uint32_t usize)
 {
     long A = 0, B = 0, C = 0, S = 0, restant;
-    const char *e;
-    if ((e = getenv("UHA_PPM_RESTANT"))) {           /* injection directe (test of cable) */
-        restant = strtol(e, NULL, 0);
-    } else {
-        if ((e = getenv("UHA_PPM_A"))) A = strtol(e, NULL, 0);
-        if ((e = getenv("UHA_PPM_B"))) B = strtol(e, NULL, 0);
-        if ((e = getenv("UHA_PPM_C"))) C = strtol(e, NULL, 0);
-        if ((e = getenv("UHA_PPM_S"))) S = strtol(e, NULL, 0);
-        /* TODO(M80) : S = Sigma(buckets T1/T2) calcules since `usize`/input ; Has/B/C idem. */
-        restant = (long)usize - A - B - C - S;
-    }
+    restant = (long)usize - A - B - C - S;
     return (restant == 0) ? 1u : 0u;
 }
 
@@ -2001,36 +1596,12 @@ uint32_t ppm_legacy_cost_select_class(const uint8_t *win, size_t len, uint32_t c
     /* seed evaluates without elagage (incumbent 0xffffffff), then candidates vs meilleur current */
     {
         uint64_t inc = 0xffffffffull;
-        /* [GATED UHA_PPM_NOPRUNE, defautOFF, M130] desactive l'elagage : indispensable for
-         * dumper there suite COMPLETE (ctx,err) some 5 candidates and there to compare at the GT
-         * `OUT/m41_pattern_ctxerr_freq_total_delta.tsv`. Out dump, l'elagage is faithful. */
-        static int noprune = -1;
-        if (noprune < 0) { const char *e = getenv("UHA_PPM_NOPRUNE"); noprune = (e && e[0] != '0') ? 1 : 0; }
-        static int sh_on = -1;
-        if (sh_on < 0) { const char *sh = getenv("UHA_PPM_COST_SHARED"); sh_on = (sh && sh[0] != '0') ? 1 : 0; }
-        if (sh_on) {
-            /* [GATED UHA_PPM_COST_SHARED, defautOFF, M125] Has SINGLE arena for the 5
-             * candidates (reset au first only) : the legacy engine HERITE l'state of has
-             * candidate at the other (no reset intermediaire observe). */
-            ppm_cost_arena a;
-            for (k = 0; k < n; k++) {
-                uint64_t c = ppm_cost_gen_a(&a, win, len, cands[k], inc, k == 0);
-                costs[k] = c;
-                if (c < inc) { inc = c; best = k; }
-            }
-        } else {
-            for (k = 0; k < n; k++) {
-                uint64_t c = cost_fn(win, len, cands[k], noprune ? 0xffffffffull : inc);
-                costs[k] = c;
-                if (c < inc) { inc = c; best = k; }
-            }
+        for (k = 0; k < n; k++) {
+            uint64_t c = cost_fn(win, len, cands[k], inc);
+            costs[k] = c;
+            if (c < inc) { inc = c; best = k; }
         }
     }
-    /* [GATED UHA_PPM_COSTDBG, default-OFF, M122] marge by candidate (diagnostic). */
-    { static int cd = -1; if (cd < 0) { const char *e = getenv("UHA_PPM_COSTDBG"); cd = (e && e[0] != '0') ? 1 : 0; }
-      if (cd) { fprintf(stderr, "[COSTDBG] len=%zu cands=", len);
-               for (k = 0; k < n; k++) fprintf(stderr, "%u:0x%llx ", cands[k], (unsigned long long)costs[k]);
-               fprintf(stderr, "-> cls=%u\n", cands[best]); } }
     if (out_cost) *out_cost = costs[best];
     return cands[best];
 }

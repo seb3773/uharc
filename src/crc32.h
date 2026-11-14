@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 uint32_t uha_crc32(const uint8_t *buf, size_t len);
+uint32_t uha_crc32_update(uint32_t state, const uint8_t *buf, size_t len);
 
 /* UHARC 0.6b native CRC-32 (reflected, poly 0xEDB88320, init 0xFFFFFFFF,
  * output XOR 0x46BE298E). Used for the per-member CRC field in the archive. */

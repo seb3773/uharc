@@ -12,6 +12,53 @@
 #include "alz_parse_score.h"
 #include "ppm.h"
 #include "crypto.h"
+#include "filter.h"
+#include "rle.h"
+
+static int g_dict_kb = 0; /* 0 = default (4096 KB cap), <0 = -md- disabled, >0 = explicit KB */
+static int g_nomm = -1;   /* -1 = unset, 0 = -mm+, 1 = -mm- */
+static int g_path_mode = -1; /* -1 = default canonical, 0 = -p-, 1 = -pr, 2 = -pf, 3 = -pe */
+
+static const char *g_encode_pw = NULL;
+static int g_encode_ph = 1;
+
+void uha_set_password(const char *pw, int header_encrypt)
+{
+    g_encode_pw = pw;
+    g_encode_ph = header_encrypt;
+}
+
+void uha_set_dict_kb(int dict_kb)
+{
+    g_dict_kb = dict_kb;
+}
+
+int uha_get_dict_kb(void)
+{
+    return g_dict_kb;
+}
+
+void uha_set_nomm(int nomm)
+{
+    g_nomm = nomm ? 1 : 0;
+}
+
+int uha_get_nomm(void)
+{
+    if (g_nomm >= 0)
+        return g_nomm;
+    return 0;
+}
+
+void uha_set_path_mode(int mode)
+{
+    g_path_mode = mode;
+}
+
+int uha_get_path_mode(void)
+{
+    return g_path_mode;
+}
 
 static const uint8_t uha_init_sbox[256] = {
     0xc3,0xae,0x65,0x6b,0x78,0x47,0xf2,0x91,0xd6,0x50,0xcb,0x65,0x20,0xbd,0x75,0xbf,
@@ -119,9 +166,8 @@ static int build_names(const uha_member *members, int count,
      * In -p- (path_none) mode: emits exactly ONE empty directory entry (0x00),
      * and all members share didx = 0.
      */
-    const char *pm = getenv("UHA_PATH_MODE");
-    int path_none = (pm && (strcmp(pm, "none") == 0 || strcmp(pm, "-") == 0));
-    int path_with_dir = (pm && (strcmp(pm, "rel") == 0 || strcmp(pm, "full") == 0));
+    int path_none = (g_path_mode == 0);
+    int path_with_dir = (g_path_mode == 1 || g_path_mode == 2 || g_path_mode == 3);
     uint8_t ndirs = path_none ? 1 : (uint8_t)count;
     uint32_t n = 0;
     int f;
@@ -188,7 +234,7 @@ static int build_names(const uha_member *members, int count,
             buf[p++] = (uint8_t)dirlen;
             for (i = 0; i < dirlen; i++) {
                 char c = dir[i];
-                if (c == '/' && pm && strcmp(pm, "full") == 0)
+                if (c == '/' && g_path_mode == 2)
                     c = '\\';
                 buf[p++] = (uint8_t)c;
             }
@@ -237,45 +283,16 @@ static void dos_timestamp(struct tm *lt, uint16_t *out_time, uint16_t *out_date)
  *      = values historiquement codees en dur, conservees for there GT scellee. */
 static void attrs_dos_stamp(uint32_t mtime, uint16_t *out_time, uint16_t *out_date)
 {
-    static int parsed = 0;
-    static uint16_t pin_t = 0, pin_d = 0;
-
-    if (!parsed) {
-        const char *e = getenv("UHA_ATTR_TIME");
-        parsed = 1;
-        if (e && e[0]) {
-            unsigned dd = 0, tt = 0;
-            if (sscanf(e, "dos:%x:%x", &dd, &tt) == 2) {
-                pin_d = (uint16_t)dd;
-                pin_t = (uint16_t)tt;
-            } else {
-                int Y = 0, M = 0, D = 0, h = 0, mi = 0, s = 0;
-                if (sscanf(e, "%d-%d-%d %d:%d:%d", &Y, &M, &D, &h, &mi, &s) == 6) {
-                    struct tm lt;
-                    memset(&lt, 0, sizeof lt);
-                    lt.tm_year = Y - 1900; lt.tm_mon = M - 1; lt.tm_mday = D;
-                    lt.tm_hour = h; lt.tm_min = mi; lt.tm_sec = s;
-                    dos_timestamp(&lt, &pin_t, &pin_d);
-                }
-            }
-        }
-    }
-    if (pin_d || pin_t) {
-        *out_time = pin_t; *out_date = pin_d;
-        return;
-    }
     if (mtime) {
-        /* [M241] LAW MESUREE of legacy : the DOS date/heure some members = mtime converti en
-         * **UTC+1 FIXE** (the legacy engine ignores the DST). Preuves : code.c 2010-07-15 12:34:56
-         * (CEST) -> 0x5C5C = 11:34:56 ; hello.txt 1999-12-31 23:59:58 (THIS) -> 0xBF7D =
-         * 23:59:58 ; GT ALL has mtimes 2026-09-23 01:35:44 -> 0x0476 = 00:35:44. Has
-         * `localtime_r` (DST correct) rendrait 0x0C76 and casse there GT scellee. */
         struct tm gt;
         time_t t = (time_t)mtime + 3600;
-        if (gmtime_r(&t, &gt)) {
-            dos_timestamp(&gt, out_time, out_date);
-            return;
-        }
+#if defined(_WIN32)
+        gmtime_s(&gt, &t);
+#else
+        gmtime_r(&t, &gt);
+#endif
+        dos_timestamp(&gt, out_time, out_date);
+        return;
     }
     *out_date = 0x5D37;   /* 2026-09-23 */
     *out_time = 0x0C76;   /* 01:35:44 */
@@ -293,28 +310,20 @@ static int build_attrs(const uha_member *members, int count,
     if (!a)
         return -4;
     for (f = 0; f < fc; f++) {
-        /* [M241] DATE then HEURE DOS of the member, ENTRELACEES (law mesuree :
-         * OUT/m241_container.md S2, three files has mtimes distincts) :
-         *   has[2f], has[2f+1]        = date DOS (THE)
-         *   has[2fc+2f], has[2fc+2f+1] = heure DOS (THE)
-         * `UHA_ATTR_TIME` gele l'instant ("dos:0x5D37:0x0C76" now "YYYY-MM-DD HH:MM:SS") ;
-         * without mtime nor gel, repli sure l'instant some archives of the corpus. */
-        { uint16_t t16 = 0, d16 = 0;
-          attrs_dos_stamp(members[f].mtime, &t16, &d16);
-          a[2 * f] = (uint8_t)(d16 & 0xFF);
-          a[2 * f + 1] = (uint8_t)(d16 >> 8);
-          a[2 * fc + 2 * f] = (uint8_t)(t16 & 0xFF);
-          a[2 * fc + 2 * f + 1] = (uint8_t)(t16 >> 8); }
         {
-            const char *pm = getenv("UHA_PATH_MODE");
-            int path_none = (pm && (strcmp(pm, "none") == 0 || strcmp(pm, "-") == 0));
-            if (path_none)
-                a[4 * fc + f] = 0;
-            else
-                a[4 * fc + f] = (uint8_t)members[f].cmd_rank;  /* [FRONTIER] didx = rank of COMMANDE ; cmd_rank=f by default (without gate) => identical has (uint8_t)f */
+            uint16_t t16 = 0, d16 = 0;
+            attrs_dos_stamp(members[f].mtime, &t16, &d16);
+            a[2 * f] = (uint8_t)(d16 & 0xFF);
+            a[2 * f + 1] = (uint8_t)(d16 >> 8);
+            a[2 * fc + 2 * f] = (uint8_t)(t16 & 0xFF);
+            a[2 * fc + 2 * f + 1] = (uint8_t)(t16 >> 8);
         }
+        if (g_path_mode == 0)
+            a[4 * fc + f] = 0;
+        else
+            a[4 * fc + f] = (uint8_t)members[f].cmd_rank;
         a[5 * fc + f] = 0;
-        a[10 * fc + f] = 0x20;        /* DOS archive attribute (real UHARC) */
+        a[10 * fc + f] = members[f].dos_attr ? members[f].dos_attr : 0x20;
     }
     prev = 0;
     for (f = 0; f < fc; f++) {
@@ -325,26 +334,6 @@ static int build_attrs(const uha_member *members, int count,
         a[8 * fc + f] = (uint8_t)(v >> 16);
         a[9 * fc + f] = (uint8_t)(v >> 24);
         prev = sz;
-    }
-    /* [A5.3-t12 diag] override gated of the plaintext attrs : if UHA_ATTRS_HEX
-     * fournit exactement `alen` bytes, on the injecte for to validate that the
-     * +3 provient well some columns 11-13 + zone 16 o no remplies. */
-    {
-        const char *oh = getenv("UHA_ATTRS_HEX");
-        if (oh && alen && strlen(oh) >= 2 * alen) {
-            uint32_t q;
-            for (q = 0; q < alen; q++) {
-                unsigned bv = 0;
-                sscanf(oh + 2 * q, "%2x", &bv);
-                a[q] = (uint8_t)bv;
-            }
-        }
-    }
-    if (getenv("UHA_ATTRSDUMP")) {
-        uint32_t q;
-        fprintf(stderr, "[attrs-plain alen=%u] ", alen);
-        for (q = 0; q < alen; q++) fprintf(stderr, "%02x", a[q]);
-        fprintf(stderr, "\n");
     }
     *out = a;
     *outlen = alen;
@@ -384,13 +373,6 @@ static void write_header(uint8_t *raw, uint8_t seed,
     int i;
 
     now = time(NULL);
-    {
-        /* [A5.3 t13] Override gated of l'horodatage of CREATION of l'archive
-         * (dec[4..7]) : enables of to reproduce byte-for-byte has archive
-         * legacy en injectant son instant of creation. Default-inerte. */
-        const char *se = getenv("UHA_EPOCH");
-        if (se) now = (time_t)strtoll(se, NULL, 10);
-    }
 #ifdef _WIN32
     lt = *localtime(&now);
 #else
@@ -496,12 +478,6 @@ static int encode_archive(const uha_member *members, int count,
         free(npk);
         return rc;
     }
-    if (getenv("UHA_ATTRSDUMP")) {
-        size_t q;
-        fprintf(stderr, "[apk pre-scramble len=%zu] ", apklen);
-        for (q = 0; q < apklen; q++) fprintf(stderr, "%02x", apk[q]);
-        fprintf(stderr, "\n");
-    }
     scramble(npk, npklen);
     scramble(apk, apklen);
 
@@ -539,11 +515,10 @@ static int encode_archive(const uha_member *members, int count,
     }
     {
         uint8_t flags = 0;
-        const char *pw = getenv("UHA_PASSWORD");
+        const char *pw = g_encode_pw;
         if (pw && pw[0]) {
-            const char *ph = getenv("UHA_HEADER_ENCRYPT");
             flags = UHA_FLAG_PW_DATA;
-            if (!ph || strcmp(ph, "0") != 0)
+            if (g_encode_ph)
                 flags |= UHA_FLAG_PW_HDR;
         }
         write_header(raw, 0x40, family, order, flags, usize, psize, fc, nup,
@@ -613,6 +588,45 @@ int uha_encode_store(const uha_member *members, int count,
     return rc;
 }
 
+int uha_encode_rle(const uha_member *members, int count,
+                   uint8_t **out, size_t *outlen)
+{
+    uint8_t *payload, *rle_buf = NULL;
+    size_t rle_len = 0;
+    uint32_t usize = 0, f, ofs;
+    int rc;
+
+    if (!members || count <= 0 || !out || !outlen)
+        return -2;
+    *out = NULL;
+    *outlen = 0;
+    for (f = 0; f < (uint32_t)count; f++)
+        usize += members[f].size;
+    if (usize == 0)
+        return encode_archive(members, count, 1, 0, NULL, 0, out, outlen);
+
+    payload = malloc(usize);
+    if (!payload)
+        return -4;
+    ofs = 0;
+    for (f = 0; f < (uint32_t)count; f++) {
+        if (members[f].size)
+            memcpy(payload + ofs, members[f].data, members[f].size);
+        ofs += members[f].size;
+    }
+
+    rc = uha_rle_encode(payload, usize, &rle_buf, &rle_len);
+    if (rc != 0) {
+        free(payload);
+        return rc;
+    }
+
+    rc = encode_archive(members, count, 0, UHA_ORDER_RLE, rle_buf, (uint32_t)rle_len, out, outlen);
+    free(rle_buf);
+    free(payload);
+    return rc;
+}
+
 int uha_encode_lzp(const uha_member *members, int count, int order,
                    uint8_t **out, size_t *outlen)
 {
@@ -635,16 +649,7 @@ int uha_encode_lzp(const uha_member *members, int count, int order,
     for (f = 0; f < (uint32_t)count; f++)
         usize += members[f].size;
 
-    /* [GATED UHA_MZ_ORDERLAW, default-ON en autonomie native] LAW 1 d'order LZP of the master, MESUREE by #2 (M372) :
-     * dict = puissance of 2 STRICTEMENT greater has usize (plancher 1024); order = log2(dict)-2;
-     * ring = 1<<(order+2) = dict. (L'old law " halver 4096 by usize " was false, retiree.)
-     * Active by default ; UHA_MZ_ORDERLAW=0 retablit l'historique without law. */
-    int mz_orderlaw = 1;
-    { const char *e = getenv("UHA_MZ_ORDERLAW"); if (e) mz_orderlaw = (e[0] != '0'); }
-    if (mz_orderlaw && usize > 0) {
-        /* LAW 1 reelle (M372 #2, mesuree): dict = more small puissance of 2 STRICTEMENT
-         * greater has usize (plancher 1024); order = log2(dict)-2; ring = 1<<(order+2)=dict.
-         * Replaces l'old law erronee (halver 4096 by usize). */
+    if (usize > 0) {
         unsigned k = 10u;
         while (k < 25u && ((uint64_t)1u << k) <= (uint64_t)usize)
             k++;
@@ -655,12 +660,7 @@ int uha_encode_lzp(const uha_member *members, int count, int order,
             order = 23;
     }
 
-    /* [GATED UHA_MZ_EMPTY, default-ON en autonomie native] LAW 4 (M372 #2): archive entierement empty (usize==0)
-     * = path degene: no dictionnaire, order emis 0, NO payload range coder (the master
-     * not demarre not the codeur). UHA_MZ_EMPTY=0 retablit the flush range coder. */
-    int mz_empty = 1;
-    { const char *e = getenv("UHA_MZ_EMPTY"); if (e) mz_empty = (e[0] != '0'); }
-    if (usize == 0 && mz_empty) {
+    if (usize == 0) {
         rc = encode_archive(members, count, 3, 0, NULL, 0, out, outlen);
         return rc;
     }
@@ -732,9 +732,8 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
             k++;
             d = 1u << (k + 10);
         }
-        const char *mde = getenv("UHA_ALZ_DICT_KB");
-        if (mde && atoi(mde) > 0) {
-            int req_kb = atoi(mde);
+        if (g_dict_kb > 0) {
+            int req_kb = g_dict_kb;
             int req_k = 0;
             uint32_t rd = 1;
             while (rd < (uint32_t)req_kb && req_k < 15) {
@@ -747,14 +746,7 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
         order = base + k;
     }
 
-    /* [GATED UHA_ALZ_EMPTY, default-ON en autonomie native] LAW 4 (M372 #2), already cablee for LZP in
-     * uha_encode_lzp etendue here has ALZ : archive entierement empty (usize==0) = path
-     * degene, NO payload range coder. MEASURES #1 M411 : the master rend 71 o en
-     * -m0/-mz/-mx (port already has 71, 0 diff) AND 71 o en -m1/-m2/-m3.
-     * UHA_ALZ_EMPTY=0 retablit l'historique (+5 o). */
-    int alz_empty = 1;
-    { const char *e = getenv("UHA_ALZ_EMPTY"); if (e) alz_empty = (e[0] != '0'); }
-    if (usize == 0 && alz_empty)
+    if (usize == 0)
         return encode_archive(members, count, 1, (uint8_t)order, NULL, 0, out, outlen);
 
     plain = malloc(usize ? usize : 1);
@@ -771,26 +763,10 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
         ofs += members[f].size;
         ends[f] = ofs;
     }
-    /* Selection deterministe en passe unique : min_len=2, tok2_min=2, lazy=1,
-     * selecteur d'echappement derive dans uha_alz_encode (a3_sel_derive). */
     pk = NULL;
     pklen = 0;
-    if (getenv("UHA_FORCESCFG")) {
-        const char *fc = getenv("UHA_FORCESCFG");
-        int f_sel = 0, f_min = 2, f_t2 = 2, f_lz = 1;
-        sscanf(fc, "%d:%d:%d:%d", &f_sel, &f_min, &f_t2, &f_lz);
-        rc = uha_alz_encode(plain, usize, order, ends, count,
-                            f_sel, f_min, f_t2, f_lz, &pk, &pklen);
-        if (rc == 0 && pk && getenv("UHA_GRIDDBG"))
-            fprintf(stderr, "[FORCESCFG] sel=%d min=%d t2=%d lz=%d -> %zu\n",
-                    f_sel, f_min, f_t2, f_lz, pklen);
-    } else if (getenv("UHA_TRUEPARSE") || getenv("UHA_ORACLE") || getenv("UHA_DP")) {
-        rc = uha_alz_encode(plain, usize, order, ends, count,
-                            3, 2, 2, 1, &pk, &pklen);
-    } else {
-        rc = uha_alz_encode(plain, usize, order, ends, count,
-                            0, 2, 2, 1, &pk, &pklen);
-    }
+    rc = uha_alz_encode(plain, usize, order, ends, count,
+                        0, 2, 2, 1, &pk, &pklen);
     free(plain);
     free(ends);
     if (rc != 0) {
@@ -863,207 +839,91 @@ int uha_encode_ppm(const uha_member *members, int count, int order,
      * is decodable. cls=0 remainder candidate -> no input not peut regresser. */
     {
         extern int uharc_ppm_class;
-        uint8_t *best = NULL; size_t bestlen = 0;
-        int best_bc = 0, best_cls = 0, have = 0;
-        const char *fb = getenv("UHA_PPM_BC");
-        const char *fc = getenv("UHA_PPMCLASS");
-        int bc_lo = 0, bc_hi = 1, cls_lo = 0, cls_hi = 9;
-        int cost2_on = 1;          /* [M195] argmin-cost legacy : default ON, UHA_PPM_COST2=0 the restores */
-        if (fb) bc_lo = bc_hi = (fb[0] == '1');
-        if (fc) cls_lo = cls_hi = atoi(fc);
-        /* [GATED UHA_PPM_CANDSET, default-OFF, M25port] the legacy engine (0x43b2c2 + loop
-         * candidates 0x421cf7) n'enumere THAT {seed=0}  {1,2,3,4} en block of data
-         * (never cls 5..9, reservees au WP d'others contexts). The clone testait 0..9
-         * and retombait sure cls 5/6 (window-predictor) -> mauvaise class. Imposer the
-         * TRUE ensemble of candidates of legacy (measured #2, 10/10), not has reglage. */
-        { const char *cs = getenv("UHA_PPM_CANDSET"); if (cs && !fc) cls_hi = atoi(cs); }
-        /* [GATED UHA_PPM_COST2, PROMU default-ON the 2026-10-27 (M195), M45-port] Selection of class by
-         * ARGMIN-COST legacy (`0x4221c0`) au lieu of argmin-length+roundtrip. Borner there search at the
-         * class choisie by the model of cost. THERE PROMOTION is MESUREE, not declarative :
-         * `an_m155_payload.py` rend **12/12** d'identite byte `arc[39..]` with this gate and **5/12** without
-         * (`OUT/m195_baseline.md` S4) : the path " default " historique (essayer 0..9, to keep the more short
-         * + roundtrip) is has PROXY of length, explicitement forbids (S0bis-4-3 of the prompt). L'old
-         * behavior remainder disponible by `UHA_PPM_COST2=0` (Has/B possible, no value codee en dur).
-         * The " 0 call if pos<threshold " (files <window) is respecte : if `usize` < window, on keeps
-         * cls0/bc0 without call of cost (hello/code.c). */
-        { const char *c2 = getenv("UHA_PPM_COST2"); cost2_on = !(c2 && c2[0] == '0'); }
-        if (cost2_on && !fc) {
-            extern uint32_t ppm_legacy_cost_select_class(const uint8_t *, size_t, uint32_t,
-                                                         uint64_t (*)(const uint8_t *, size_t, uint32_t, uint64_t),
-                                                         uint64_t *);
-            extern uint64_t ppm_legacy_cost(const uint8_t *win, size_t len, uint32_t cls, uint64_t inc);
-            extern void ppm_cost_set_avail(size_t n);
-            const size_t FEN = 0x3100;               /* window legacy 12544 */
-            /* [M154] There law of the seed reads the buffer model has `ic+256` : au-dela of the
-             * window of selection, this are the bytes REELS of the file (measured
-             * 99,984 % sure `eng.txt`, window 12 544 sure has file of 20 359 o). */
-            ppm_cost_set_avail((size_t)usize);
-            uint32_t first_sz = (uint32_t)usize;
-            if (count > 0 && ends) {
-                for (int mi = 0; mi < count; mi++) {
-                    uint32_t msz = mi ? (ends[mi] - ends[mi - 1]) : ends[mi];
-                    if (msz > 0) {
-                        first_sz = msz;
-                        break;
-                    }
+        extern uint32_t ppm_legacy_cost_select_class(const uint8_t *, size_t, uint32_t,
+                                                     uint64_t (*)(const uint8_t *, size_t, uint32_t, uint64_t),
+                                                     uint64_t *);
+        extern uint64_t ppm_legacy_cost(const uint8_t *win, size_t len, uint32_t cls, uint64_t inc);
+        extern void ppm_cost_set_avail(size_t n);
+        extern uint32_t ppm_bc_law(const uint8_t *d, uint32_t usize);
+
+        uint8_t *best = NULL;
+        size_t bestlen = 0;
+        int have = 0;
+        int bc_lo = 0, bc_hi = 1, cls_lo = 0, cls_hi = 0;
+        const size_t FEN = 0x3100;               /* window legacy 12544 */
+
+        ppm_cost_set_avail((size_t)usize);
+        uint32_t first_sz = (uint32_t)usize;
+        if (count > 0 && ends) {
+            for (int mi = 0; mi < count; mi++) {
+                uint32_t msz = mi ? (ends[mi] - ends[mi - 1]) : ends[mi];
+                if (msz > 0) {
+                    first_sz = msz;
+                    break;
                 }
             }
-            if ((size_t)first_sz >= FEN) {              /* threshold : call otherwise (small file -> seed 0) */
-                uint64_t sel_cost = 0;
-                /* [GATED UHA_PPM_CLSCUR, default-OFF, M188] class current entretenue au sein of
-                 * l'call of selection (`cls_courant` of `ppm_legacy_cost_select_class`). the legacy engine
-                 * part of `cl = TBL[0x43b2c2][cur]` and there bound d'eclairage is `cost[this start]`
-                 * (acquis 3.1-9 : has under-cost ecrete the others) - therefore `cur` change the winner.
-                 * The port forces 0 here : this probe enables of balayer `cur` OUT line without toucher au
-                 * default (0 = behavior actuel, no-regresse). 0..9. */
-                int clscur = getenv("UHA_PPM_CLSCUR")
-                    ? atoi(getenv("UHA_PPM_CLSCUR")) & 15 : 0;
-                uint32_t sel_cls = ppm_legacy_cost_select_class(
-                        plain, (size_t)usize < FEN ? (size_t)usize : FEN, (uint32_t)clscur,
-                        ppm_legacy_cost, &sel_cost);
-                if (getenv("UHA_PPM_SEL"))
-                    fprintf(stderr, "[PPMCOST2] argmin-cout -> cls=%u cost=0x%llx\n",
-                            sel_cls, (unsigned long long)sel_cost);
-                cls_lo = cls_hi = (int)sel_cls;      /* borner there search at the class cost */
-            } else {
-                cls_lo = cls_hi = 0;                 /* hello/code.c : seed 0, 0 call */
-            }
         }
-        /* [GATED UHA_PPM_BC_PREDICATE, defautOFF, M45ao] Selection of `bc` by the predicat
-         * measured `restant` : `bc = (restant==0)?1:0` with `restant = usize  Has  B  C  S`
-         * (full.asm 0x404815..845, chain chainee/recoupee #2). The operandes Has/B/C/S (semantique
-         * en cours #2 M68) are injectes via UHA_PPM_RESTANT for to validate there chain of cablage of
-         * bout en bout BEFORE leur computation since the quantites clone. Gate OFF => behavior unchanged. */
-        /* [GATED UHA_PPM_BC_PREDICATE, defautOFF, M45ao/M80/M122] Selection of `bc` by there partition
-         * VERIFIED `restant = usize  Has  B  C  S` ; `bc = (restant==0)`. Has/B/C/S are calcules
-         * since the bytes (M122, law validated 4/4 + recoupee by the `ratio` legacy) via
-         * `ppm_bc_from_bytes`. Limit connue : the predicat " texte " of legacy (detecteur `0x404510`,
-         * mission M124) n'is NOT still transcrit => sure the binary (restant>0) this gate rend 0
-         * then that the legacy engine emits 1. Gate OFF => behavior unchanged (banque/ancre). */
-        {
-            const char *rp = getenv("UHA_PPM_BC_PREDICATE");
-            if (rp && !fc && !getenv("UHA_PPM_BC")) {
-                extern uint32_t ppm_bc_from_bytes(const uint8_t *d, uint32_t usize);
-                bc_lo = bc_hi = (int)ppm_bc_from_bytes(plain, (uint32_t)usize);
-            }
+        if ((size_t)first_sz >= FEN) {
+            uint64_t sel_cost = 0;
+            uint32_t sel_cls = ppm_legacy_cost_select_class(
+                    plain, (size_t)usize < FEN ? (size_t)usize : FEN, 0,
+                    ppm_legacy_cost, &sel_cost);
+            cls_lo = cls_hi = (int)sel_cls;
+        } else {
+            cls_lo = cls_hi = 0;
         }
-        /* [GATED UHA_PPM_BCLAW, PROMUE defautON, M159/M160] `bc` by there TRANSCRIPTION of the detecteur
-         * legacy `0x404510` (`ppm_bc_law`, `ppm_legacy_cost.c`). Law measured : engagement => bc=0,
-         * otherwise 1 (M157 11/11 + M158 predicat local 7/7 + M160 porte `32*textcount > n`).
-         * result : **bc reproduces 12/12 sure the corpus since the bytes single, without no
-         * information external**. L'old default of the port (" essayer 0 and 1, to keep the more
-         * short ") is REFUTE as law : sure `eng.txt` il selects 0 and produces 2509 o then that
-         * the legacy engine writes bc=1 and 2564 o. `UHA_PPM_BCLAW=0` restores l'old behavior, and
-         * `UHA_PPM_BC` remainder prioritaire for to forces has value. */
-        {
-            const char *bl = getenv("UHA_PPM_BCLAW");
-            int off = (bl && bl[0] == '0');
-            if (!off && !fc && !getenv("UHA_PPM_BC")) {
-                extern uint32_t ppm_bc_law(const uint8_t *d, uint32_t usize);
-                bc_lo = bc_hi = (int)ppm_bc_law(plain, (uint32_t)usize);
+
+        uint32_t e0 = 0u;
+        int i, hdr_bc = -1;
+        for (i = 0; i < count; i++) {
+            uint32_t b;
+            if (members[i].size == 0u)
+                continue;
+            b = ppm_bc_law(members[i].data, members[i].size);
+            if (hdr_bc < 0) {
+                hdr_bc = (int)b;
+                if (b) { e0 = 0xFFFFFFFFu; break; }
             }
+            if (b) break;
+            e0 = ends[i];
         }
-        /* [M185, GATED UHA_PPM_E0LAW, default-ON en autonomie native] Piece (has) of the LAW B (M181/M184, spec
-         * OUT/m185_e0law_plan.md 1). when there gate is ON and that the bc n'is not forces :
-         *   - byte_class d'en-tete = bc of the first member no empty (`ppm_bc_law` member by member),
-         *   - e0_blk_len = end of the last member consecutif of bc=0 ; M32 (PPM_M32) if the 1er is
-         *     bc=1 ; usize if all bc=0.
-         * Has member of size 0 (empty.dat) is NEUTRE (continue the prefixe).
-         * UHA_PPM_E0LAW=0 desactive there law B. */
-        {
-            const char *env_el = getenv("UHA_PPM_E0LAW");
-            int el = env_el ? atoi(env_el) : 1;
-            if (!el || getenv("UHA_PPM_BC")
-                || (getenv("UHA_PPM_BCLAW") && getenv("UHA_PPM_BCLAW")[0] == '0')) {
-                uha_ppm_set_e0law(0, 0u);   /* desarmement explicite : there variable is static */
-            } else {
-                extern uint32_t ppm_bc_law(const uint8_t *d, uint32_t usize);
-                uint32_t e0 = 0u;
-                int i, hdr_bc = -1;
-                for (i = 0; i < count; i++) {
-                    uint32_t b;
-                    if (members[i].size == 0u)
-                        continue;                       /* member inert : nothing has detecter */
-                    b = ppm_bc_law(members[i].data, members[i].size);
-                    if (hdr_bc < 0) {                    /* 1er member no empty = en-tete */
-                        hdr_bc = (int)b;
-                        if (el != 2 && b) { e0 = 0xFFFFFFFFu; break; }  /* bc=1 d'input -> M32 */
-                    }
-                    if (el != 2 && b) break;            /* end of the prefixe bc=0 */
-                    e0 = ends[i];
-                }
-                if (hdr_bc < 0) hdr_bc = 0;             /* all empty : corpus not contient not this cas */
-                if (e0 == 0u && hdr_bc == 0) e0 = usize; /* all bc=0 -> usize */
-                bc_lo = bc_hi = (el == 2)
-                    ? (int)ppm_bc_law(plain, (uint32_t)usize) : hdr_bc;
-                uha_ppm_set_e0law(el, e0);
-                if (getenv("UHA_PPM_SEL"))
-                    fprintf(stderr, "[E0LAW] mode=%d hdr_bc=%d e0=%u usize=%u n=%d\n",
-                            el, hdr_bc, e0, usize, count);
-            }
-        }
+        if (hdr_bc < 0) hdr_bc = 0;
+        if (e0 == 0u && hdr_bc == 0) e0 = usize;
+        bc_lo = bc_hi = hdr_bc;
+        uha_ppm_set_e0law(1, e0);
+
         for (int bc = bc_lo; bc <= bc_hi; bc++) {
             for (int cls = cls_lo; cls <= cls_hi; cls++) {
-                uint8_t *pkx = NULL; size_t lx = 0;
+                uint8_t *pkx = NULL;
+                size_t lx = 0;
                 uharc_ppm_class = cls;
-                { extern void uha_cost_reset(void); extern void uha_cost_setcap(uint64_t);
-                  if (getenv("UHA_PPM_COST")) { uha_cost_reset();
-                      const char *cc = getenv("UHA_PPM_COSTCAP");
-                      uha_cost_setcap(cc ? (uint64_t)strtoull(cc,NULL,10) : 0u); } }
                 if (uha_ppm_encode(plain, usize, order, bc, ends, count,
                                    &pkx, &lx) != 0 || !pkx) {
                     free(pkx);
                     continue;
                 }
-                if (getenv("UHA_PPM_COST")) {
-                    extern uint64_t uha_cost_get(void);
-                    fprintf(stderr, "[PPMCOST] bc=%d cls=%d len=%zu cost=%llu mode=%s\n",
-                            bc, cls, lx, (unsigned long long)uha_cost_get(),
-                            getenv("UHA_PPM_COST"));
-                }
-                /* t14e : there detransformee bc0 compacte desormais (dictionnaire of
-                 * words). There confiance historique " bc0 cls0 = ok aveugle " n'is
-                 * MORE justifiee : all combinaison (y c. bc0 cls0) exige has
-                 * auto-verification roundtrip bit-has-bit via notre decoder faithful. */
-                int ok;
-                {
-                    uint8_t *chk = malloc(usize ? (size_t)usize : 1);
-                    ok = 0;
-                    if (chk) {
-                        int drc = uha_ppm_decode(pkx, lx, order, usize,
-                                                 ends, count, chk, usize);
-                        ok = (drc == 0 && memcmp(chk, plain, usize) == 0);
-                        /* [M178, GATED UHA_PPM_SEL, defautOFF] why has candidate is rejete :
-                         * the multimembre sortait en `encode error -1` without no trace. */
-                        if (!ok && getenv("UHA_PPM_SEL")) {
-                            size_t k = 0;
-                            while (k < usize && chk[k] == plain[k]) k++;
-                            fprintf(stderr, "[PPMCHK] bc=%d cls=%d len=%zu drc=%d 1er_ecart=%zu/%u\n",
-                                    bc, cls, lx, drc, k, usize);
-                        }
-                        /* [M178, GATED UHA_PPM_SEL] dump of the payload candidate : enables of to compares
-                         * the stream monomembre and the stream multimembre byte has byte. */
-                        if (getenv("UHA_PPM_PAYDUMP")) {
-                            FILE *pf = fopen(getenv("UHA_PPM_PAYDUMP"), "wb");
-                            if (pf) { fwrite(pkx, 1, lx, pf); fclose(pf); }
-                        }
-                        free(chk);
-                    }
+                int ok = 0;
+                uint8_t *chk = malloc(usize ? (size_t)usize : 1);
+                if (chk) {
+                    int drc = uha_ppm_decode(pkx, lx, order, usize,
+                                             ends, count, chk, usize);
+                    ok = (drc == 0 && memcmp(chk, plain, usize) == 0);
+                    free(chk);
                 }
                 if (ok && (!have || lx < bestlen)) {
                     free(best);
-                    best = pkx; bestlen = lx;
-                    best_bc = bc; best_cls = cls; have = 1;
+                    best = pkx;
+                    bestlen = lx;
+                    have = 1;
                 } else {
                     free(pkx);
                 }
             }
         }
         uharc_ppm_class = 0;
-        pk = best; pklen = bestlen; rc = have ? 0 : -1;
-        if (getenv("UHA_PPM_SEL"))
-            fprintf(stderr, "[PPMSEL] usize=%u chosen_bc=%d chosen_cls=%d have=%d len=%zu\n",
-                    usize, best_bc, best_cls, have, bestlen);
+        pk = best;
+        pklen = bestlen;
+        rc = have ? 0 : -1;
     }
     free(plain);
     free(ends);

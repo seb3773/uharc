@@ -14,6 +14,9 @@
 /* returns 1 if the member is adds (in P), 0 otherwise (repos / without level / arret). */
 int uha_frontier_addoue(const uint8_t *octets, uint32_t n);
 
+/* returns frontier level (PAL_H/PAL_M/PAL_L/PAL_B) if uha_frontier_addoue != 0, else 0. */
+uint32_t uha_frontier_pal(const uint8_t *octets, uint32_t n);
+
 /* m370 : tete of l'arrangement = adds (cumul) UNION chemin_court (count=0 / annulus size-0). */
 int uha_frontier_promu(const uint8_t *octets, uint32_t n);
 

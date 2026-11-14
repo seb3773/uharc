@@ -40,19 +40,25 @@ static const uint32_t s_crc32_table[256] = {
     0xB3667A2Eu, 0xC4614AB8u, 0x5D681B02u, 0x2A6F2B94u, 0xB40BBE37u, 0xC30C8EA1u, 0x5A05DF1Bu, 0x2D02EF8Du,
 };
 
-static inline uint32_t crc32_core(const uint8_t *buf, size_t len)
+static inline uint32_t crc32_core_init(uint32_t c, const uint8_t *buf, size_t len)
 {
-    uint32_t c = 0xFFFFFFFFu;
     size_t i;
+    if (!buf || len == 0)
+        return c;
     for (i = 0; i < len; i++) {
         c = (c >> 8) ^ s_crc32_table[(c ^ buf[i]) & 0xFFu];
     }
     return c;
 }
 
+uint32_t uha_crc32_update(uint32_t state, const uint8_t *buf, size_t len)
+{
+    return crc32_core_init(state, buf, len);
+}
+
 uint32_t uha_crc32(const uint8_t *buf, size_t len)
 {
-    return crc32_core(buf, len) ^ 0xFFFFFFFFu;
+    return crc32_core_init(0xFFFFFFFFu, buf, len) ^ 0xFFFFFFFFu;
 }
 
 /*
@@ -62,5 +68,5 @@ uint32_t uha_crc32(const uint8_t *buf, size_t len)
  */
 uint32_t uha_crc32_uharc(const uint8_t *buf, size_t len)
 {
-    return crc32_core(buf, len) ^ 0x46BE298Eu;
+    return crc32_core_init(0xFFFFFFFFu, buf, len) ^ 0x46BE298Eu;
 }

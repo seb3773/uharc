@@ -52,7 +52,8 @@ static void derive_table(uint8_t T[256], const char *pw)
 static void stream_xor(uint8_t *buf, size_t n, const uint8_t T0[256])
 {
     uint8_t S[256];
-    int i, j, k;
+    int i, j;
+    size_t k;
     uint8_t b, t;
 
     if (!buf || n == 0)
@@ -60,7 +61,7 @@ static void stream_xor(uint8_t *buf, size_t n, const uint8_t T0[256])
     memcpy(S, T0, 256);
     i = 0;
     j = (0 - 2) & 0xFF;
-    for (k = 0; k < (int)n; k++) {
+    for (k = 0; k < n; k++) {
         j = (j + 1) & 0xFF;
         i = (i + 1) & 0xFF;
         b = S[i];
@@ -81,7 +82,7 @@ int uha_decrypt(uint8_t *raw, size_t rawlen, const uha_header *h, const char *pa
     uint8_t user[256];
     uint8_t def[256];
     size_t crc_len;
-    size_t end;
+    uint64_t end64;
 
     if (!raw || !h)
         return -2;
@@ -91,14 +92,14 @@ int uha_decrypt(uint8_t *raw, size_t rawlen, const uha_header *h, const char *pa
         return -5;
 
     crc_len = (size_t)h->file_count * 4;
-    end = h->attrs_ofs + h->attrs_packed;
-    if (end > rawlen)
+    end64 = (uint64_t)h->attrs_ofs + h->attrs_packed;
+    if (end64 > rawlen)
         return -2;
 
     derive_table(user, password);
 
     if ((h->flags & UHA_FLAG_PW_DATA) && h->psize > 0) {
-        if (h->data_ofs + h->psize > rawlen)
+        if ((uint64_t)h->data_ofs + h->psize > rawlen)
             return -2;
         stream_xor(raw + h->data_ofs, h->psize, user);
     }
