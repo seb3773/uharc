@@ -7,6 +7,7 @@
 #include "ppm.h"
 #include "filter.h"
 #include "rle.h"
+#include "lz78.h"
 
 int uha_decode_payload(const uint8_t *raw, size_t rawlen,
                        const uha_header *h,
@@ -55,6 +56,9 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
     rc = -3;
     if (h->order == UHA_ORDER_RLE)
         rc = uha_rle_decode(raw + h->data_ofs, h->psize, out, h->usize);
+    else if (h->order >= UHA_ORDER_LZ78_MIN && h->order <= UHA_ORDER_LZ78_MAX)
+        rc = uha_lz78_decode(raw + h->data_ofs, h->psize, h->order, h->usize,
+                            ends, n, out, h->usize);
     else if (h->order >= UHA_ORDER_LZP_MIN && h->order <= UHA_ORDER_LZP_MAX)
         rc = uha_lzp_decode(raw + h->data_ofs, h->psize, h->order, h->usize,
                             ends, n, out, h->usize);

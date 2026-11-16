@@ -14,6 +14,7 @@
 #include "crypto.h"
 #include "filter.h"
 #include "rle.h"
+#include "lz78.h"
 
 static int g_dict_kb = 0; /* 0 = default (4096 KB cap), <0 = -md- disabled, >0 = explicit KB */
 static int g_nomm = -1;   /* -1 = unset, 0 = -mm+, 1 = -mm- */
@@ -686,6 +687,48 @@ int uha_encode_lzp(const uha_member *members, int count, int order,
         return rc;
     rc = encode_archive(members, count, 3, (uint8_t)order, pk, (uint32_t)pklen,
                         out, outlen);
+    free(pk);
+    return rc;
+}
+
+int uha_encode_lz78(const uha_member *members, int count,
+                    uint8_t **out, size_t *outlen)
+{
+    uint8_t *plain, *pk = NULL;
+    uint32_t usize = 0, f, ofs;
+    size_t pklen = 0;
+    uint32_t cap;
+    uint8_t order;
+    int kb, rc;
+
+    if (!members || count <= 0 || !out || !outlen)
+        return -2;
+    *out = NULL;
+    *outlen = 0;
+    for (f = 0; f < (uint32_t)count; f++)
+        usize += members[f].size;
+    if (usize == 0)
+        return encode_archive(members, count, 3, 0, NULL, 0, out, outlen);
+
+    plain = malloc(usize);
+    if (!plain)
+        return -4;
+    ofs = 0;
+    for (f = 0; f < (uint32_t)count; f++) {
+        if (members[f].size)
+            memcpy(plain + ofs, members[f].data, members[f].size);
+        ofs += members[f].size;
+    }
+    /* -md absent / -md4096 : cap 32 KiB. -md<pow2> : ce plafond. */
+    kb = uha_get_dict_kb();
+    cap = (kb > 0) ? (uint32_t)kb : 32u;
+    order = uha_lz78_select_order(cap, usize);
+    rc = uha_lz78_encode(plain, usize, order, NULL, 0, &pk, &pklen);
+    free(plain);
+    if (rc != 0)
+        return rc;
+    /* family 3 : masque EXE+MM, comme les GT -mw (hello, code.c, …). */
+    rc = encode_archive(members, count, 3, order, pk, (uint32_t)pklen, out, outlen);
     free(pk);
     return rc;
 }

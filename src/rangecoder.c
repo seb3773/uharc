@@ -147,14 +147,36 @@ int uha_rc_bit12(uha_rc *rc, uint16_t *prob)
     return uha_rc_bit12_shift(rc, prob, 6);
 }
 
-static int rcw_grow(uha_rcw *w, size_t extra)
+#if defined(__GNUC__) || defined(__clang__)
+#define UHA_LIKELY(x)   __builtin_expect(!!(x), 1)
+#define UHA_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define UHA_LIKELY(x)   (x)
+#define UHA_UNLIKELY(x) (x)
+#endif
+
+int uha_rcw_reserve(uha_rcw *w, size_t cap)
+{
+    if (!w)
+        return -1;
+    if (cap <= w->cap)
+        return 0;
+    uint8_t *nbuf = realloc(w->buf, cap);
+    if (!nbuf)
+        return -1;
+    w->buf = nbuf;
+    w->cap = cap;
+    return 0;
+}
+
+static inline int rcw_grow(uha_rcw *w, size_t extra)
 {
     size_t ncap;
     uint8_t *nbuf;
 
-    if (w->pos + extra <= w->cap)
+    if (UHA_LIKELY(w->pos + extra <= w->cap))
         return 0;
-    ncap = w->cap ? w->cap : 64;
+    ncap = w->cap ? w->cap : 65536;
     while (ncap < w->pos + extra) {
         if (ncap > (size_t)-1 / 2)
             return -1;
@@ -172,10 +194,10 @@ static inline int rcw_shift_low(uha_rcw *w)
 {
     uint32_t carry = (uint32_t)(w->low >> 32);
 
-    if ((uint32_t)w->low < 0xFF000000u || carry != 0) {
+    if (UHA_LIKELY((uint32_t)w->low < 0xFF000000u || carry != 0)) {
         uint8_t temp = w->cache;
         uint32_t n = w->ffnum;
-        if (rcw_grow(w, (size_t)n + 1) != 0) {
+        if (UHA_UNLIKELY(rcw_grow(w, (size_t)n + 1) != 0)) {
             w->error = 1;
             return -1;
         }

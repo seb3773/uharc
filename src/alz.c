@@ -3,6 +3,7 @@
 #include <string.h>
 #include "alz.h"
 #include "encode.h"
+#include "simd.h"
 #include "alz_priv.h"
 #include "alz_parse_score.h"   /* [a5-e3 sonde graine] machine ctx cls3 + arène (gated) */
 #include "alz_score.h"          /* [livebud-ring] coût proba->cost (alz_score_proba_to_cost) */
@@ -307,22 +308,7 @@ static uint32_t alz_plain_match_len(alz_dec *d, const uint8_t *plain,
     wstart = (wp - dist) & mask;
     if (wstart + n1 <= d->mode.dict_size) {
         const uint8_t *wsrc = d->window + wstart;
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && (defined(__GNUC__) || defined(__clang__))
-        while (n + 8u <= n1) {
-            uint64_t a, b, diff;
-            memcpy(&a, wsrc + n, 8);
-            memcpy(&b, dst + n, 8);
-            diff = a ^ b;
-            if (diff)
-                return n + (uint32_t)(__builtin_ctzll(diff) >> 3);
-            n += 8u;
-        }
-#endif
-        while (n < n1) {
-            if (wsrc[n] != dst[n])
-                return n;
-            n++;
-        }
+        n = (uint32_t)uha_lcp(wsrc, dst, n1);
     } else {
         while (n < n1) {
             if (d->window[(wp - dist + n) & mask] != dst[n])
@@ -330,21 +316,9 @@ static uint32_t alz_plain_match_len(alz_dec *d, const uint8_t *plain,
             n++;
         }
     }
-    if (n < limit) {
+    if (n == n1 && n < limit) {
         const uint8_t *psrc = dst - dist;
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && (defined(__GNUC__) || defined(__clang__))
-        while (n + 8u <= limit) {
-            uint64_t a, b, diff;
-            memcpy(&a, psrc + n, 8);
-            memcpy(&b, dst + n, 8);
-            diff = a ^ b;
-            if (diff)
-                return n + (uint32_t)(__builtin_ctzll(diff) >> 3);
-            n += 8u;
-        }
-#endif
-        while (n < limit && psrc[n] == dst[n])
-            n++;
+        n += (uint32_t)uha_lcp(psrc + n, dst + n, limit - n);
     }
     return n;
 }
@@ -1111,24 +1085,7 @@ static void alz_bst_insert_only(alz_dec *d, const uint8_t *plain,
         uint8_t pb_p, pb_q;
         if (fast_p && q_id < p) {
             const uint8_t *qp = plain + q_id;
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && (defined(__GNUC__) || defined(__clang__))
-            while (l + 8u <= 0xffu) {
-                uint64_t a, b, diff;
-                memcpy(&a, pp + l, 8);
-                memcpy(&b, qp + l, 8);
-                diff = a ^ b;
-                if (diff) {
-                    l += (uint32_t)(__builtin_ctzll(diff) >> 3);
-                    goto io_diff_fast;
-                }
-                l += 8u;
-            }
-#endif
-            while (l < 0xffu && pp[l] == qp[l])
-                l++;
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && (defined(__GNUC__) || defined(__clang__))
-        io_diff_fast:
-#endif
+            l += (uint32_t)uha_lcp(pp + l, qp + l, 0xffu - l);
             if (l == 0xffu) {
                 *c0_ptr = d->bst_tree[(size_t)nslot * 2u + 0u];
                 *c1_ptr = d->bst_tree[(size_t)nslot * 2u + 1u];
@@ -1200,24 +1157,7 @@ static void alz_bst_search_insert(alz_dec *d, const uint8_t *plain,
         uint8_t pb_p, pb_q;
         if (fast_p && q_id < p) {
             const uint8_t *qp = plain + q_id;
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && (defined(__GNUC__) || defined(__clang__))
-            while (l + 8u <= 0xffu) {
-                uint64_t a, b, diff;
-                memcpy(&a, pp + l, 8);
-                memcpy(&b, qp + l, 8);
-                diff = a ^ b;
-                if (diff) {
-                    l += (uint32_t)(__builtin_ctzll(diff) >> 3);
-                    goto si_diff_fast;
-                }
-                l += 8u;
-            }
-#endif
-            while (l < 0xffu && pp[l] == qp[l])
-                l++;
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && (defined(__GNUC__) || defined(__clang__))
-        si_diff_fast:
-#endif
+            l += (uint32_t)uha_lcp(pp + l, qp + l, 0xffu - l);
             ah = (l <= K) ? l : K;
             if (s_len[ah] == 0u)
                 s_len[ah] = p - q_id;
@@ -1320,9 +1260,10 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
                 if (p + dh >= usize || (p - r + dh) >= usize
                     || plain[p + dh] != plain[p - r + dh])
                     continue;                    /* rejet rapide 0x413974..7a */
-                while (bl < K && p + bl < usize && (p - r + bl) < usize
-                       && plain[p + bl] == plain[p - r + bl])
-                    bl++;
+                {
+                    uint32_t avail = (p + K <= usize) ? K : (usize - p);
+                    bl = (uint32_t)uha_lcp(plain + p, plain + p - r, avail);
+                }
                 if (bl > dh) {
                     dh = bl; ord = dl; cur = r;
                     sel = 2 + (dl != 0);         /* 0x413a37..44 */
@@ -1501,8 +1442,7 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
             uint32_t ln = 1u;
             if (rd == 0u || rd > p) continue;
             if (plain[p] != plain[p - rd]) continue;
-            while (p + ln < usize && plain[p + ln] == plain[p + ln - rd])
-                ln++;
+            ln = (uint32_t)uha_lcp(plain + p, plain + p - rd, usize - p);
             if (bestk < 0 || ln > bestc) { bestk = ri; bestd = rd; bestc = ln; }
         }
         if (bestk >= 0) {
@@ -6208,8 +6148,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
                     uint32_t n = 0, ah;
                     if (dist > ALZ_LEGACY_MAX_DIST)
                         break;
-                    while (n < maxenc && plain[p + n] == plain[pos + n])
-                        n++;
+                    n = (uint32_t)uha_lcp(plain + p, plain + pos, maxenc);
                     ah = (n < maxenc) ? n : maxenc;
                     if (ah > 2 && s_lvl_bucket[ah] == 0) {
                         s_lvl_bucket[ah] = dist;
@@ -6245,8 +6184,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
                             uint8_t db, sb;
                             uint32_t bsrc = (walkp >= 1u) ? (walkp - 1u) : walkp;
                             dist = fp - bsrc;               /* 0x413ac6/0x413ba2 */
-                            while (n < mxfp && plain[bsrc + n] == plain[fp + n])
-                                n++;
+                            n = (uint32_t)uha_lcp(plain + bsrc, plain + fp, mxfp);
                             ah = (n < mxfp) ? n : mxfp;      /* 0x413b80 min(len,maxenc) */
                             if (ah > 2 && b[ah] == 0u) {     /* 0x413b99 write-if-empty */
                                 b[ah] = dist;
@@ -6294,8 +6232,7 @@ static int alz_find_match_legacy(alz_dec *d, const uint8_t *plain, uint32_t usiz
                 uint32_t n = 0, ah;
                 if (dist > ALZ_LEGACY_MAX_DIST)
                     break;                      /* 0x413aca : trop ancien -> stop */
-                while (n < maxenc && plain[p + n] == plain[pos + n])
-                    n++;
+                n = (uint32_t)uha_lcp(plain + p, plain + pos, maxenc);
                 ah = (n < maxenc) ? n : maxenc;
                 if (ah > 2 && s_lvl_bucket[ah] == 0) {
                     s_lvl_bucket[ah] = dist;

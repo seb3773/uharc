@@ -36,5 +36,7 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
                    uint8_t **out, size_t *outlen);
 int uha_encode_ppm(const uha_member *members, int count, int order,
                    uint8_t **out, size_t *outlen);
+int uha_encode_lz78(const uha_member *members, int count,
+                    uint8_t **out, size_t *outlen);
 
 #endif

@@ -5,39 +5,39 @@
 
 static uint32_t halve_rebuild_ex(ppm_model *m, int ctx, int bc1_drop)
 {
-    uint32_t total, hw, f;
+    uint32_t total = 0;
     int i, twok, fourk, a;
+    uint16_t *freq = m->freq[ctx];
+    uint16_t *cum = m->cum[ctx];
 
-    total = 0;
-    for (i = 0; i <= 0xFF; i++) {
-        f = m->freq[ctx][i];
-        if (f == 0)
-            continue;
-        if (bc1_drop && m->byte_class != 0) {
-            if (f > 0x10)
-                hw = f >> 1;
-            else
-                hw = 0;
-        } else {
-            hw = (f + 1) >> 1;
+    if (bc1_drop && m->byte_class != 0) {
+        for (i = 0; i <= 0xFF; i++) {
+            uint32_t f = freq[i];
+            uint32_t hw = (f > 0x10) ? (f >> 1) : 0;
+            freq[i] = (uint16_t)hw;
+            total += hw;
         }
-        m->freq[ctx][i] = (uint16_t)(hw & PPM_M16);
-        total = (total + hw) & PPM_M32;
+    } else {
+        for (i = 0; i <= 0xFF; i++) {
+            uint32_t f = freq[i];
+            uint32_t hw = (f + 1) >> 1;
+            freq[i] = (uint16_t)hw;
+            total += hw;
+        }
     }
-    for (i = 0; i <= 0xFE; i++)
-        m->cum[ctx][i + 1] = m->freq[ctx][i];
-    m->cum[ctx][0] = (uint16_t)(total & PPM_M16);
+    memcpy(&cum[1], freq, 255 * sizeof(uint16_t));
+    cum[0] = (uint16_t)(total & PPM_M16);
     twok = 2;
     while (twok <= 0x80) {
         fourk = 2 * twok;
         a = 0x200 - fourk;
         while (a != 0) {
-            m->cum[ctx][a >> 1] = (uint16_t)((m->cum[ctx][a >> 1] + m->cum[ctx][(a - twok) >> 1]) & PPM_M16);
+            cum[a >> 1] = (uint16_t)((cum[a >> 1] + cum[(a - twok) >> 1]) & PPM_M16);
             a -= fourk;
         }
         twok *= 2;
     }
-    return total;
+    return total & PPM_M32;
 }
 
 uint32_t ppm_halve_rebuild(ppm_model *m, int ctx)

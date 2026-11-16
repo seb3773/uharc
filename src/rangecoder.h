@@ -47,6 +47,7 @@ typedef struct {
 } uha_rcw;
 
 int  uha_rcw_init(uha_rcw *w);
+int  uha_rcw_reserve(uha_rcw *w, size_t cap);
 int  uha_rcw_encode(uha_rcw *w, uint32_t low, uint32_t high, uint32_t total);
 int  uha_rcw_encode_fixed12(uha_rcw *w, uint32_t low, uint32_t high);
 int  uha_rcw_flush(uha_rcw *w);

@@ -1631,25 +1631,14 @@ static int cmd_add(const char *arc, int n_file_args, char **file_args,
             if (arena) {
                 uint64_t armement = 0, tot = 0;
                 uint32_t f;
-                uint8_t *concat;
-                for (f = 0; f < (uint32_t)nfiles; f++)
+                for (f = 0; f < (uint32_t)nfiles; f++) {
                     tot += members[f].size;
+                    if (uha_frontier_addoue(members[f].data, members[f].size))
+                        armement += members[f].size;
+                }
                 if (tot <= 0xFFFFFFFFULL) {
-                    concat = (uint8_t *)malloc(tot ? (size_t)tot : 1);
-                    if (concat) {
-                        size_t off = 0;
-                        for (f = 0; f < (uint32_t)nfiles; f++) {
-                            if (members[f].size) {
-                                memcpy(concat + off, members[f].data, members[f].size);
-                                off += members[f].size;
-                            }
-                            if (uha_frontier_addoue(members[f].data, members[f].size))
-                                armement += members[f].size;
-                        }
-                        uint32_t sel = uha_selclk_delta(concat, (uint32_t)tot, (uint32_t)armement);
-                        uha_selclk_set(sel);
-                        free(concat);
-                    }
+                    uint32_t sel = uha_selclk_delta_members(members, nfiles, (uint32_t)tot, (uint32_t)armement);
+                    uha_selclk_set(sel);
                 }
             }
             free(items);
@@ -1672,6 +1661,9 @@ static int cmd_add(const char *arc, int n_file_args, char **file_args,
     if (method == 4) {
         rc = uha_encode_rle(members, nfiles, &raw, &rawlen);
         mode_str = "RLE";
+    } else if (method == 5) {
+        rc = uha_encode_lz78(members, nfiles, &raw, &rawlen);
+        mode_str = "LZ78";
     } else if (method == 3) {
         int lzorder = 8;
         rc = uha_encode_lzp(members, nfiles, lzorder, &raw, &rawlen);
@@ -1893,6 +1885,9 @@ static int parse_switch_arg(const char *arg, uha_cli_options *opts)
     }
     if (strcasecmp(sw, "mr") == 0) {
         opts->method = 4; return 0;
+    }
+    if (strcasecmp(sw, "mw") == 0) {
+        opts->method = 5; return 0;
     }
     if (strcmp(sw, "m1") == 0) {
         opts->method = 1; opts->alz_class = 0; return 0;

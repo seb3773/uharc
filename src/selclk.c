@@ -3,6 +3,8 @@
  * stream/armement = INPUT (passes by l'appelant under gate). charniere = [0x4826C8] = -1 (constante #2). */
 #include "selclk.h"
 #include "selclk_data.h"
+#include "encode.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* tables indexees by offset-VA in there window .data (constantes d'image) */
@@ -39,7 +41,31 @@ typedef struct {
     int w_out;
     const uint8_t *buf;
     uint32_t len;
+    const uha_member *members;
+    const uint32_t   *offsets;
+    int               nfiles;
+    int               last_f;
 } pk_t;
+
+static inline int selclk_byte_at(pk_t *e, uint32_t offset)
+{
+    if (offset >= e->len)
+        return -1;
+    if (e->buf)
+        return (int)e->buf[offset];
+
+    int f = e->last_f;
+    if (offset >= e->offsets[f] && offset < e->offsets[f] + e->members[f].size)
+        return (int)e->members[f].data[offset - e->offsets[f]];
+
+    for (f = 0; f < e->nfiles; f++) {
+        if (offset >= e->offsets[f] && offset < e->offsets[f] + e->members[f].size) {
+            e->last_f = f;
+            return (int)e->members[f].data[offset - e->offsets[f]];
+        }
+    }
+    return -1;
+}
 
 static void emets(pk_t *e, uint32_t *W, int esp_c)
 {
@@ -110,7 +136,7 @@ static void record_walk_fidele(pk_t *e, uint32_t *W, int esp_c, uint32_t classe,
             int expected, cur;
             if (rb < 0) { rupture = 1; break; }
             expected = rb ^ 0xFF;
-            cur = (ptr < e->len) ? (int)e->buf[ptr] : -1;
+            cur = selclk_byte_at(e, ptr);
             if (cur == expected) {
                 al -= 1; edx += 1; ptr += 1;
                 if (al != 0) continue;
@@ -134,7 +160,7 @@ static void space_walk(pk_t *e, uint32_t *W, int esp_c, uint32_t classe, uint32_
     marche = 1;
     while (marche <= 0x20) {
         int64_t q = (int64_t)e->edi - 1 + (int64_t)marche;
-        if (!(q >= 0 && q < (int64_t)e->len) || e->buf[q] != 0x20) break;
+        if (q < 0 || selclk_byte_at(e, (uint32_t)q) != 0x20) break;
         marche += 1;
     }
     if (marche <= 1) { ed0(e, W, esp_c, classe, marche); return; }
@@ -154,16 +180,19 @@ static void attente0(pk_t *e, uint32_t *W, int esp_c, uint32_t classe, uint32_t 
     if (rest < 4) { ed0(e, W, esp_c, classe, classe); return; }
     if ((int64_t)e->gfd - (int64_t)e->edi < 4) recharge(e, 4);
     p = e->edi;
-    nxt = (p < e->len) ? (int)e->buf[p] : 0;
+    nxt = selclk_byte_at(e, p);
+    if (nxt < 0) nxt = 0;
     if ((esp_c & 0xFF) == 0x0A) {
         if (SEL_TE2E(nxt & 0xFF) == 2) { ed0(e, W, 0x60, classe, 0x60); return; }
         ed0(e, W, esp_c, classe, classe); return;
     }
     if ((esp_c & 0xFF) == 0x0D) {
-        if (nxt == 0x0A && p + 1 < e->len) {
-            int nxt2 = (int)e->buf[p + 1];
+        int nxt2 = selclk_byte_at(e, p + 1);
+        if (nxt2 == 0x0A) {
             if (SEL_TE2E(nxt2 & 0xFF) == 2) { ed0(e, W, 0x61, classe, 0x61); return; }
-            if (nxt2 == 0x20 && nxt2 != ((p + 2 < e->len) ? (int)e->buf[p + 2] : 0))
+            int nxt3 = selclk_byte_at(e, p + 2);
+            if (nxt3 < 0) nxt3 = 0;
+            if (nxt2 == 0x20 && nxt2 != nxt3)
                 { ed0(e, W, 0x62, classe, 0x62); return; }
         }
         ed0(e, W, esp_c, classe, classe); return;
@@ -191,8 +220,8 @@ static void motif(pk_t *e, uint32_t *W, int esp_c, uint32_t garde)
     if ((int64_t)e->fin - (int64_t)e->pos < 5) { emets(e, W, esp_c); return; }
     if (garde < 5) recharge(e, 5);
     p = e->edi;
-    if (p + 4 <= e->len && e->buf[p] == 0 && e->buf[p + 1] == 3 &&
-        e->buf[p + 1] == e->buf[p + 2] && e->buf[p + 3] != 0xFE) {
+    if (p + 4 <= e->len && selclk_byte_at(e, p) == 0 && selclk_byte_at(e, p + 1) == 3 &&
+        selclk_byte_at(e, p + 2) == 3 && selclk_byte_at(e, p + 3) != 0xFE) {
         e->edi += 3; e->pos += 3; e->c0 -= 3;
         *W = 4; emets(e, W, 0xFE); return;
     }
@@ -210,8 +239,10 @@ static int pompe_cellule(pk_t *e, uint32_t *Wout)
     if (dl == 1) { e->relais = 0; *Wout = W; emets(e, &W, (int)(e->att42 & 0xFF)); return 1; }
     if (dl == 0) {
         uint32_t old = e->edi;
+        int b;
         if (e->edi == e->gfd) recharge(e, 1);
-        esp_c = (old < e->len) ? (int)(e->buf[old] & 0xFF) : 0;
+        b = selclk_byte_at(e, old);
+        esp_c = (b >= 0) ? b : 0;
         e->edi = old + 1; e->pos += 1;
     } else {
         e->relais = 0;
@@ -239,6 +270,49 @@ uint32_t uha_selclk_delta(const uint8_t *flux, uint32_t len, uint32_t armement)
         if (!pompe_cellule(&e, &W)) break;
         total += (W - 1u);
     }
+    return total;
+}
+
+uint32_t uha_selclk_delta_members(const uha_member *members, int nfiles, uint32_t len, uint32_t armement)
+{
+    pk_t e;
+    uint32_t cap = 8u * len + 8192u, total = 0;
+    uint32_t stack_offsets[64];
+    uint32_t *offsets = stack_offsets;
+    int f;
+    uint32_t cur_off = 0;
+
+    if (nfiles <= 0)
+        return 0;
+
+    if (nfiles > 64) {
+        offsets = (uint32_t *)malloc((size_t)nfiles * sizeof(uint32_t));
+        if (!offsets)
+            return 0;
+    }
+
+    for (f = 0; f < nfiles; f++) {
+        offsets[f] = cur_off;
+        cur_off += members[f].size;
+    }
+
+    memset(&e, 0, sizeof e);
+    e.fin = len; e.gfd = len; e.charniere = CHARNIERE; e.armement = armement;
+    e.len = len;
+    e.members = members;
+    e.offsets = offsets;
+    e.nfiles = nfiles;
+    e.last_f = 0;
+
+    while (e.n < cap) {
+        uint32_t W;
+        if (!pompe_cellule(&e, &W)) break;
+        total += (W - 1u);
+    }
+
+    if (offsets != stack_offsets)
+        free(offsets);
+
     return total;
 }
 

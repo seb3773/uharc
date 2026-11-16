@@ -48,7 +48,7 @@ Because UHARC 0.6b was distributed exclusively as closed-source 32-bit x86 Windo
   - **Mono-File Encoding**: **72 / 72** bit-identical archives (`arc[39..]`, 0 byte diffs) across all 12 reference corpus files and all 6 modes (`-m0`, `-mz`, `-mx`, `-m1`, `-m2`, `-m3`), plus `-md*`, `-mm-`, `-p-`, `-pr`, and `-pw`/`-ph+`.
   - **Multi-File Solid Encoding**: `0` payload byte diffs for Store (`-m0`), LZP (`-mz`), and PPM-II (`-mx`).
 - **Complete Feature Set**:
-  - **All Compression Modes**: Store (`-m0`), ALZ Fast (`-m1`), ALZ Normal (`-m2`, default), ALZ Best (`-m3`), PPM-II (`-mx`), and LZP (`-mz`).
+  - **All Compression Modes**: Store (`-m0`), ALZ Fast (`-m1`), ALZ Normal (`-m2`, default), ALZ Best (`-m3`), PPM-II (`-mx`), LZP (`-mz`), RLE (`-mr`), and LZ78 (`-mw`).
   - **Multimedia & Text Modeling**: Built-in ALZ in-stream adaptive side-channel prediction (`-mm+` / `-mm-`), PPM `detr` word transform and multimedia classes, plus x86 BCJ & LZP multimedia preprocessing transforms.
   - **Cryptographic Suite**: Stream cipher encryption for archive payload (`-pw<password>`) and metadata headers (`-ph+` default ON when `-pw` is set, `-ph-` to disable).
   - **Path Storage & Security**: Supports `-p-` (none), `-pr` (relative), and `-pf` (full) path storage on compress, paired with strict zip-slip traversal protection on extract.
@@ -133,7 +133,7 @@ Usage: uharc <command> [-<switch>...] <archive>[.uha] [files...]
 
 | Switch | Description | Default |
 | :--- | :--- | :---: |
-| `-m<0,1,2,3,x,z>` | Compression mode: `0`=Store, `1`=ALZ Fast, `2`=ALZ Normal, `3`=ALZ Best, `x`=PPM-II, `z`=LZP | `-m2` |
+| `-m<0,1,2,3,x,z,r,w>` | Compression mode: `0`=Store, `1`=ALZ Fast, `2`=ALZ Normal, `3`=ALZ Best, `x`=PPM-II, `z`=LZP, `r`=RLE, `w`=LZ78 | `-m2` |
 | `-md<size>` | Maximum dictionary size in KB (power of 2: `1 .. 32768`, `-md-` to disable) | `-md4096` |
 | `-mm[-,+]` | Disable/enable built-in multimedia detection/compression | `-mm+` (Enabled) |
 | `-o[-,+,p]` | Overwrite mode (`-` never, `+` always, `p` prompt) | `-op` |
@@ -177,6 +177,10 @@ Usage: uharc <command> [-<switch>...] <archive>[.uha] [files...]
 
 # Fast archiving with Prediction by Partial Matching (PPM-II, -mx)
 ./uharc a -mx book.uha text.txt
+
+# Fast archiving with Run-Length Encoding (-mr) or LZ78 (-mw)
+./uharc a -mr quick.uha raw_stream.bin
+./uharc a -mw -md32 lz78.uha source_files/
 
 # Password-protected encrypted archive with encrypted headers
 ./uharc a -pwSecretKey42 -ph+ secure.uha secret_records.bin

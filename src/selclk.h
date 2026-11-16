@@ -9,7 +9,10 @@
  * delta(random,0)=0. tables lues of l'image via selclk_data.h (constante d'image, no corpus).
  * no effect out gate (appelee only under UHA_FRONTIER for to compute SELCLK). */
 
+#include "encode.h"
+
 uint32_t uha_selclk_delta(const uint8_t *flux, uint32_t len, uint32_t armement);
+uint32_t uha_selclk_delta_members(const uha_member *members, int nfiles, uint32_t len, uint32_t armement);
 
 /* Override gated-ON : there value calculee replaces there reading env UHA_PPM_SELCLK of selclk_shift().
  * default OFF (active=0) => selclk_shift() = behavior herite (env now 0). No input out gate. */

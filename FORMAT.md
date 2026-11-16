@@ -166,6 +166,8 @@ The `family` (`dec[9]`) and `order` (`dec[10]`) bytes together determine the exa
 | Family | Order Range | Mode Name | Description |
 |---|---|---|---|
 | `0` | `0` | **Store (`-m0`)** | Uncompressed solid stream. `psize == usize`. |
+| `0` | `1` | **RLE (`-mr`)** | Run-Length Encoding mode with byte-level runs and repeat escapes. |
+| `3` | `2..7` | **LZ78 (`-mw`)** | LZW/LZ78 sliding dictionary mode ($1\text{ KB}..32\text{ KB}$ dictionary, orders 2..7). |
 | `1` | `0` | **Empty Archive (Historical)** | Historical `UHARC.EXE` representation when `usize == 0` across all modes (`psize = 0`). |
 | `3` | `8..23` | **LZP (`-mz`)** | Lempel-Ziv Predictive. `order` specifies the sliding ring buffer size ($1\text{ KB}..32\text{ MB}$). |
 | `1` | `24..39` | **PPM-II (`-mx`)** | Herklotz hybrid SSE + Fenwick trie. `order` specifies the sliding context window ($1\text{ KB}..32\text{ MB}$). |
