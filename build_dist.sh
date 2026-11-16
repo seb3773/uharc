@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
 VERSION="0.6b"
-DEB_VERSION="0.6.1-1"
+DEB_VERSION="0.6b"
 DIST_DIR="${SCRIPT_DIR}/dist"
 STAGE_DIR="${SCRIPT_DIR}/build/dist_stage"
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_DIR="${SCRIPT_DIR}/build/pkg_root"
-VERSION="0.6.1-1"
+VERSION="0.6b"
 ARCH="amd64"
 DEB_NAME="uharc_${VERSION}_${ARCH}.deb"
 
@@ -41,7 +41,7 @@ fi
 # DEBIAN/control
 cat << 'CTRL_EOF' > "${PKG_DIR}/DEBIAN/control"
 Package: uharc
-Version: 0.6.1-1
+Version: 0.6b
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -53,7 +53,7 @@ Description: Modern freestanding C reimplementation of historical UHARC 0.6b arc
  decompressor into a single binary (uharc), achieving 100% bidirectional
  bit-exact compatibility with the original 32-bit archiver (UHARC.EXE).
  Features:
-  - 6 compression modes: Store (M0), ALZ Fast (M1), ALZ Normal (M2), ALZ Best (M3), PPM-II (Mx), LZP (Mz)
+  - 8 compression modes: Store (-m0), ALZ Fast/Normal/Best (-m1..-m3), PPM-II (-mx), LZP (-mz), RLE (-mr), LZ78 (-mw)
   - Multimedia audio and image delta pre-filters (-mm)
   - High-order Prediction by Partial Matching with update exclusions
   - S-box keystream encryption for header and data payload (-pw, -ph)
