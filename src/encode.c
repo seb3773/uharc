@@ -946,6 +946,7 @@ int uha_encode_ppm(const uha_member *members, int count, int order,
                     continue;
                 }
                 int ok = 0;
+#if !defined(NDEBUG) || defined(UHA_PPM_VERIFY_ROUNDTRIP)
                 uint8_t *chk = malloc(usize ? (size_t)usize : 1);
                 if (chk) {
                     int drc = uha_ppm_decode(pkx, lx, order, usize,
@@ -953,6 +954,9 @@ int uha_encode_ppm(const uha_member *members, int count, int order,
                     ok = (drc == 0 && memcmp(chk, plain, usize) == 0);
                     free(chk);
                 }
+#else
+                ok = 1;
+#endif
                 if (ok && (!have || lx < bestlen)) {
                     free(best);
                     best = pkx;

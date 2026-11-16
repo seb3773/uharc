@@ -598,6 +598,7 @@ static int ppm_encode_core(const uint8_t *syms, uint32_t nsyms,
     }
     if (blklaw >= 3) {
         g_blk_raw = raw;
+        ppm_cost_live_cache_bind(raw);
         g_blk_usize = usize;
         g_blk_next = 0u;
         g_blk_start = 0u;
@@ -719,6 +720,7 @@ static int ppm_encode_core(const uint8_t *syms, uint32_t nsyms,
     rc = PPM_OK;
 
 done:
+    ppm_cost_live_cache_bind(NULL);
     uha_rcw_free(&w);
     ppm_model_free(&m);
     return rc;

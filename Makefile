@@ -45,7 +45,7 @@ $(WIN64_DIR):
 	mkdir -p $(WIN64_DIR)
 
 $(TARGET_LINUX): $(SRC_FILES) $(SRC_HEADERS) | $(LINUX_DIR)
-	$(CC) $(CFLAGS) -o $@ $(SRC_FILES) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(SRC_FILES) $(LDFLAGS)
 	@$(STRIP_LINUX) $@ 2>/dev/null || true
 	@ln -sf linux/uharc $(BUILD_DIR)/uharc
 	@ln -sf build/linux/uharc uharc

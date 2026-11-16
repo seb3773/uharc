@@ -13,7 +13,12 @@ typedef struct {
     uint16_t w_freq[512][256];
     uint16_t w_ctr[512];
     uint16_t w_tot[512];
-    uint32_t out_costs[0x3200];
+    /* One cost per position of the evaluated block. The block length can
+     * reach 0x4AFF (tail case `rest < 0x4B00` in a3_live_block_eval), so the
+     * historical 0x3200 entries overflowed into kbuf/khist and past the end
+     * of the allocation (heap corruption reported by ASan). The values
+     * stored are unchanged; kbuf/khist are fully rebuilt before every use. */
+    uint32_t out_costs[0x4B00];
     uint8_t  kbuf[5][2048];
     uint32_t khist[5][256];
     uint32_t khist_mir[5][256];
@@ -34,17 +39,28 @@ static unsigned live_order_shift(int order)
     return 0u;
 }
 
-static unsigned live_delta_cost(unsigned d)
+static const uint8_t s_live_delta_cost[256] = {
+    0, 1, 2, 3, 4, 5, 5, 6, 6, 6, 7, 7, 7, 7, 7, 8,
+    8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11,
+    11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+    11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+    11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+    11, 11, 11, 11, 11, 11, 11, 11, 10, 10, 10, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 8, 8, 8, 8, 8, 8,
+    8, 8, 7, 7, 7, 7, 7, 6, 6, 6, 5, 5, 4, 3, 2, 1,
+};
+
+static inline unsigned live_delta_cost(unsigned d)
 {
-    static const uint32_t s_dbornes[13] = {0u, 1u, 2u, 3u, 4u, 5u, 7u, 10u, 15u, 23u, 36u, 57u, 91u};
-    unsigned m = (d <= 128u) ? d : (256u - d);
-    unsigned c = 0u;
-    size_t i;
-    for (i = 0u; i < 13u; i++) {
-        if (m >= s_dbornes[i]) c = (unsigned)i;
-        else break;
-    }
-    return c;
+    return s_live_delta_cost[(uint8_t)d];
 }
 
 static a3_live_ws *a3_get_live_ws(void)
@@ -194,6 +210,7 @@ static uint32_t a3_live_eval_cm(a3_live_ws *ws, const alz_dec *d,
     uint32_t sum = 0u;
     uint32_t den = (blen >> order_shift) + 1u;
     uint32_t perpos = budget / den;
+    uint32_t dc94 = p_dc94 ? *p_dc94 : 0u;
 
     for (r = 0u; r < nctx; r++) {
         memcpy(ws->w_freq[r], d->bm_freq[src0 + r], 256u * sizeof(uint16_t));
@@ -220,7 +237,7 @@ static uint32_t a3_live_eval_cm(a3_live_ws *ws, const alz_dec *d,
             uint8_t prev = (uint8_t)((rh >> 8) & 0xffu);
             sym = ch;
             if (!sel10) {
-                *p_dc94 += 12u - live_delta_cost((uint32_t)((last - ch) & 0xffu));
+                dc94 += 12u - s_live_delta_cost[(uint8_t)(last - ch)];
                 row = (uint32_t)last + (((last & 0xc0u) == (prev & 0xc0u)) ? 0x100u : 0u);
                 esc_row = 0x3f9u + ((last & 0xe0u) >> 5);
             } else {
@@ -249,10 +266,14 @@ static uint32_t a3_live_eval_cm(a3_live_ws *ws, const alz_dec *d,
 
         ws->out_costs[i] = bc;
         sum += bc;
-        if (i == 0x22bu && (sum >> 9) > perpos)
+        if (i == 0x22bu && (sum >> 9) > perpos) {
+            if (p_dc94) *p_dc94 = dc94;
             return 0xFFFFFFFFu;
-        if (sum > budget)
+        }
+        if (sum > budget) {
+            if (p_dc94) *p_dc94 = dc94;
             return sum;
+        }
 
         ws->w_freq[row][sym] = (uint16_t)(ws->w_freq[row][sym] + 0x20u);
         ws->w_tot[row] = (uint16_t)(ws->w_tot[row] + 0x20u);
@@ -274,6 +295,7 @@ static uint32_t a3_live_eval_cm(a3_live_ws *ws, const alz_dec *d,
         epos++;
         rh = (rh << 8) | ch;
     }
+    if (p_dc94) *p_dc94 = dc94;
     return sum;
 }
 

@@ -217,6 +217,8 @@ static int bittree_encode_bit(uha_bittree *b, uha_rcw *w, int bit)
     return 0;
 }
 
+/* Reference search that produced lzp_rank_paths.inc (self-check builds only). */
+#ifdef UHA_CHECK_RANK_PATHS
 static int rank_find_path(uint8_t seen, uint8_t state, uint8_t result,
                           uint8_t target, int *bits, int *nbits)
 {
@@ -248,12 +250,56 @@ static int rank_find_path(uint8_t seen, uint8_t state, uint8_t result,
     (*nbits)--;
     return 0;
 }
+#endif /* UHA_CHECK_RANK_PATHS */
+
+/*
+ * Precomputed rank paths.
+ *
+ * rank_find_path() is an exhaustive depth-first search whose outcome only
+ * depends on the target symbol: the start state (6), the start result (0xFF)
+ * and the depth limit are constants, and the `seen` argument does not
+ * influence the search. The encoder used to run that search for every match
+ * candidate length (and again to emit the chosen one), which dominated -mz
+ * time on low-redundancy data. lzp_rank_paths.inc holds, for each target, the
+ * exact bit path found by that very search (generated from it), so results
+ * are identical. Build with -DUHA_CHECK_RANK_PATHS to re-derive the table
+ * from rank_find_path() at start-up and abort on any mismatch.
+ */
+#include "lzp_rank_paths.inc"
+
+#ifdef UHA_CHECK_RANK_PATHS
+#include <stdio.h>
+static void rank_path_table_check(void)
+{
+    static int checked = 0;
+    int t, i;
+
+    if (checked)
+        return;
+    checked = 1;
+    for (t = 0; t < 256; t++) {
+        int bits[40];
+        int nbits = 0;
+        int ok = rank_find_path(0, 6, 0xFF, (uint8_t)t, bits, &nbits);
+        unsigned v = 0;
+        for (i = 0; ok && i < nbits; i++)
+            v |= (unsigned)bits[i] << i;
+        if ((ok ? 1 : 0) != s_rank_path_tab[t].ok
+            || (ok && (nbits != s_rank_path_tab[t].nbits || v != s_rank_path_tab[t].bits))) {
+            fprintf(stderr, "UHA_CHECK_RANK_PATHS: mismatch for target %d\n", t);
+            abort();
+        }
+    }
+}
+#else
+#define rank_path_table_check() ((void)0)
+#endif
 
 static int lzp_encode_rank_symbol(uha_lzp *d, uha_rcw *w, int group,
                                   uint8_t seen, uint8_t target)
 {
-    int bits[40];
-    int nbits = 0;
+    unsigned path;
+    int nbits;
     uint8_t state = 6;
     uint8_t result = 0xFF;
     int i, branch, node;
@@ -262,15 +308,18 @@ static int lzp_encode_rank_symbol(uha_lzp *d, uha_rcw *w, int group,
         group = 0;
     if (group > 9)
         group = 9;
-    if (!rank_find_path(seen, 6, 0xFF, target, bits, &nbits))
+    if (!s_rank_path_tab[target].ok)
         return -1;
+    nbits = s_rank_path_tab[target].nbits;
+    path = s_rank_path_tab[target].bits;
 
     for (i = 0; i < nbits; i++) {
+        const int bit = (int)((path >> i) & 1u);
         branch = (seen <= state) ? 1 : 0;
         node = state + branch * 256;
-        if (bittree_encode_bit(&d->rank_prob[group][node], w, bits[i]) != 0)
+        if (bittree_encode_bit(&d->rank_prob[group][node], w, bit) != 0)
             return -1;
-        if (bits[i] == 0)
+        if (bit == 0)
             result = state;
         state = rank_next_state[state * 2 + (result > state ? 1 : 0)];
     }
@@ -979,18 +1028,28 @@ static int model_encode_from_context(uha_ctxmodel *m, uha_rcw *w, int ctx,
         return uha_rcw_encode(w, low, high, total);
     }
 
+    /*
+     * Cumulative frequency below `sym`, skipping `prev`. Zero frequencies add
+     * nothing, so this is a plain prefix sum (vectorizable) minus the
+     * contribution of `prev` when it lies below `sym`. Same result as the
+     * original symbol-by-symbol walk.
+     */
+    if (sym < 0 || sym >= UHA_BYTE_COUNT || sym == prev)
+        return -1;
+    step = m->freq[ctx][sym];
+    if (step == 0)
+        return -1;
     acc = 0;
-    for (idx = 0; idx < UHA_BYTE_COUNT; idx++) {
-        if (idx == prev)
-            continue;
-        step = m->freq[ctx][idx];
-        if (step == 0)
-            continue;
-        if (idx == sym)
-            return uha_rcw_encode(w, acc, acc + step, total);
-        acc += step;
+    {
+        const uint16_t *f = m->freq[ctx];
+        for (idx = 0; idx < sym; idx++)
+            acc += f[idx];
+        if (prev < sym)
+            acc -= f[prev];
     }
-    return -1;
+    (void)low;
+    (void)high;
+    return uha_rcw_encode(w, acc, acc + step, total);
 }
 
 static int model_encode_excluded_escape(uha_ctxmodel *m, uha_rcw *w,
@@ -999,23 +1058,37 @@ static int model_encode_excluded_escape(uha_ctxmodel *m, uha_rcw *w,
     int s;
     uint32_t total, acc, step;
 
-    total = 0;
-    for (s = 0; s < UHA_BYTE_COUNT; s++)
-        if (s != prev && m->freq[ctx][s] == 0)
-            total += m->freq[UHA_ESCAPE_CTX][s];
-    if (total == 0)
-        return -1;
+    /*
+     * Branch-free (vectorizable) form of the original walks: `total` sums the
+     * escape weights of every symbol unseen in `ctx` except `prev`; `acc`
+     * sums those strictly above `sym` (the original walk goes from 255 down).
+     */
+    {
+        const uint16_t *f = m->freq[ctx];
+        const uint16_t *e = m->freq[UHA_ESCAPE_CTX];
+        uint32_t above = 0;
+        int prev_unseen = (prev >= 0 && prev < UHA_BYTE_COUNT && f[prev] == 0);
 
-    acc = 0;
-    for (s = UHA_BYTE_COUNT - 1; s >= 0; s--) {
-        if (s == prev || m->freq[ctx][s] != 0)
-            continue;
-        step = m->freq[UHA_ESCAPE_CTX][s];
-        if (s == sym)
-            return uha_rcw_encode(w, acc, acc + step, total);
-        acc += step;
+        if (sym < 0 || sym >= UHA_BYTE_COUNT)
+            return -1;
+        total = 0;
+        for (s = 0; s < UHA_BYTE_COUNT; s++)
+            total += (f[s] == 0) ? (uint32_t)e[s] : 0u;
+        for (s = sym + 1; s < UHA_BYTE_COUNT; s++)
+            above += (f[s] == 0) ? (uint32_t)e[s] : 0u;
+        if (prev_unseen) {
+            total -= e[prev];
+            if (prev > sym)
+                above -= e[prev];
+        }
+        if (total == 0)
+            return -1;
+        if (sym == prev || f[sym] != 0)
+            return -1;
+        step = e[sym];
+        acc = above;
+        return uha_rcw_encode(w, acc, acc + step, total);
     }
-    return -1;
 }
 
 static int model_encode_symbol(uha_ctxmodel *m, uha_rcw *w, int ctx,
@@ -1042,16 +1115,16 @@ static int model_encode_symbol(uha_ctxmodel *m, uha_rcw *w, int ctx,
     if (direct_total != 0) {
         combined = direct_total + m->escape_weight[ctx];
         if (can_direct) {
+            /* Sum of the frequencies above `sym` (walk order is 255 down),
+             * skipping `prev`: vectorizable suffix sum, identical result. */
+            const uint16_t *f = m->freq[ctx];
             low = 0;
-            for (s = UHA_BYTE_COUNT - 1; s >= 0; s--) {
-                if (s == prev)
-                    continue;
-                high = low + m->freq[ctx][s];
-                if (s == sym)
-                    return uha_rcw_encode(w, low, high, combined);
-                low = high;
-            }
-            return -1;
+            for (s = sym + 1; s < UHA_BYTE_COUNT; s++)
+                low += f[s];
+            if (prev > sym && prev < UHA_BYTE_COUNT)
+                low -= f[prev];
+            high = low + f[sym];
+            return uha_rcw_encode(w, low, high, combined);
         }
         if (uha_rcw_encode(w, direct_total, combined, combined) != 0)
             return -1;
@@ -1243,18 +1316,18 @@ static int lzp_try_encode_match(uha_lzp *d, uha_rcw *w, const uint8_t *plain,
         seen_for_rank = d->pair_seen[pair];
         /* 0xFF = jeton of run full (255). The run final partial remainder encode
          * en length explicite (path emprunte by UHARC). */
+        (void)seen_for_rank;
+        (void)probe_bits;
+        (void)probe_n;
         if (match_len >= 255) {
-            probe_n = 0;
-            if (rank_find_path(seen_for_rank, 6, 0xFF, 0xFF, probe_bits, &probe_n)) {
+            if (s_rank_path_tab[0xFF].ok) {
                 length_symbol = 0xFF;
                 take = 1;
             }
         }
         if (!take) {
             for (cand = (int)match_len; cand >= 1; cand--) {
-                probe_n = 0;
-                if (rank_find_path(seen_for_rank, 6, 0xFF, (uint8_t)cand,
-                                   probe_bits, &probe_n)) {
+                if (s_rank_path_tab[(uint8_t)cand].ok) {
                     length_symbol = (uint8_t)cand;
                     take = 1;
                     break;
@@ -1364,6 +1437,7 @@ int uha_lzp_encode(const uint8_t *plain, uint32_t usize,
 
     *out = NULL;
     *outlen = 0;
+    rank_path_table_check();
 
     d = calloc(1, sizeof(*d));
     if (!d)

@@ -1231,7 +1231,11 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
          * le scan se fait en `p` (= pos+1 du courant), conformement au setup
          * 0x4136a0 qui pose [0x45cb78] = (pos_abs+1)&mask. Deux SOURCES de
          * candidat, puis arbitrage, jamais une seule. */
-        uint32_t s_len[256];                     /* miroir 0x4490b0 : longueur -> distance */
+        uint32_t *const s_len = d->a3v_slen;     /* mirror of 0x4490b0: length -> distance.
+                                                  * Persistent table, all-zero on entry; only
+                                                  * entries [0, b8] can be written, so only that
+                                                  * prefix is cleared on exit (see s_hw). */
+        uint32_t s_hw = 6u;                      /* highest index possibly non-zero */
         uint32_t K = (p < usize) ? ((usize - p > 255u) ? 255u : (usize - p)) : 0u;
         {
             static int s_k255 = -1;
@@ -1287,9 +1291,9 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
             if (d && d->bst_head && d->bst_tree && (!s_trig_env || !*s_trig_env) && (!s_dist_env || !*s_dist_env)) {
                 if (p == d->bst_last_p) {
                     b8 = d->bst_last_b8;
-                    memcpy(s_len, d->bst_last_slen, sizeof(s_len));
+                    memcpy(s_len, d->bst_last_slen, ((size_t)b8 + 1u) * sizeof(*s_len));
                 } else {
-                    memset(s_len, 0, sizeof(s_len));
+                    /* s_len is already all-zero (persistent table invariant) */
                     for (; d->bst_fed < p; d->bst_fed++) {
                         if (!d->in_chain || d->mode.method_class >= ALZ_BEST || d->in_chain[d->bst_fed])
                             alz_bst_insert_only(d, plain, usize, d->bst_fed);
@@ -1298,7 +1302,7 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
                     d->bst_fed = p + 1u;
                     d->bst_last_p = p;
                     d->bst_last_b8 = b8;
-                    memcpy(d->bst_last_slen, s_len, sizeof(s_len));
+                    memcpy(d->bst_last_slen, s_len, ((size_t)b8 + 1u) * sizeof(*s_len));
                 }
             } else {
                 const char *trig_env = s_trig_env;
@@ -1310,7 +1314,7 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
                 uint32_t lo;
                 int nodes = 0;
                 int s_trign = (d && d->trign > 0) ? d->trign : 99;
-                memset(s_len, 0, sizeof(s_len));
+                /* s_len is already all-zero (persistent table invariant) */
                 if (dist_env && *dist_env) {
                     long v = atol(dist_env);
                     s_td_max = (v > 0) ? (uint32_t) v : 130817u;
@@ -1347,7 +1351,7 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
                 }
             }
         } else {
-        memset(s_len, 0, sizeof(s_len));
+        /* s_len is already all-zero (persistent table invariant) */
         hh = ((((uint32_t)plain[p] << 16)
                | ((uint32_t)(p + 1u < usize ? plain[p + 1u] : 0u) << 8)
                | (uint32_t)(p + 2u < usize ? plain[p + 2u] : 0u))
@@ -1375,6 +1379,8 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
             q = chain[q & cmask];
         }
         }
+        if (b8 > s_hw)
+            s_hw = b8;                           /* refiner below never raises b8 */
         /* (3) RAFFINEUR 0x4137a0, appele ssi b8 > 2 (test 0x413774 AVANT la
         * descente). Plafonds de longueur courte 0x4137b2..0x413807, puis
         * descente de longueurs 0x41381d..0x41384f, puis test d'adoption. */
@@ -1419,6 +1425,8 @@ static void a3v_scan(alz_dec *d, const uint8_t *plain, uint32_t usize, uint32_t 
                 cur = (b8 < 256u) ? s_len[b8] : 0u;   /* pend <- dist[b8] 0x4138f2 */
             }
         }
+        /* Restore the all-zero invariant of the persistent table. */
+        memset(s_len, 0, ((size_t)(s_hw < 255u ? s_hw : 255u) + 1u) * sizeof(*s_len));
         d->window[p & mask] = sv_w;
         d->st.window_pos = sv_wp;
         *cls_out = sel; *slot_out = ord; *dist_out = cur; *cnt_out = (int) dh;

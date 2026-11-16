@@ -118,6 +118,7 @@ void     ppm_cost_set_prectx(uint32_t v);
  *   initctx  = [0x4803c4] - CTXBASE[cand] = ctx RELATIF of the node 0, applies au single
  *              candidate equal at the class current (otherwise 0x42230e `xor ebp,ebp`). */
 void     ppm_cost_set_window(uint32_t bandbase, uint32_t initctx);
+void     ppm_cost_live_cache_bind(const uint8_t *raw); /* bind/unbind the input of a PPM encode pass (LIVE c08 prefix cache) */
 /* [M266] band of context `[esp+0x3c]` (= `[0x4803c0]`) : this n'is NOT `pos` ; the legacy engine
  * l'uses for the ctx of cand 2/3/4 (`&1`, `%3`, `&3`). Alimentee by `m->out_count`. */
 void     ppm_cost_set_ctxband(uint32_t v);

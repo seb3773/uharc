@@ -130,6 +130,7 @@ typedef struct {
     uint32_t  bst_last_p;
     uint32_t  bst_last_b8;
     uint32_t  bst_last_slen[256];
+    uint32_t  a3v_slen[256];       /* a3v_scan length->distance table, kept all-zero between calls */
 } alz_dec;
 
 void alz_state_reset(alz_state *s);

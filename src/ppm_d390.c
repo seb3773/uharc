@@ -1,4 +1,5 @@
 #include "ppm_priv.h"
+#include <string.h>
 
 static uint32_t f154w(const ppm_model *m, uint32_t key)
 {
@@ -64,24 +65,27 @@ static uint32_t present_contribution(const ppm_model *m, int ctx_id, int sym,
     return f154i2(m, (freq << 14) / total);
 }
 
-static int ineligible(const ppm_model *m, int ctx, const uint8_t *excl, int n, int bb)
-{
-    return (m->freq[ctx][bb] != 0) || in_excl_l(excl, n, (uint8_t)bb);
-}
-
 static uint32_t novel_workctx_contribution(const ppm_model *m, int ctx, int work_ctx,
                                            int sym, const uint8_t *excl, int n)
 {
     int b;
     uint32_t rem, total, freq;
+    uint8_t excl_map[256];
+    memset(excl_map, 0, sizeof(excl_map));
+    for (b = 0; b < n; b++)
+        excl_map[excl[b]] = 1;
+
+    const uint16_t *f_ctx = m->freq[ctx];
+    const uint16_t *f_work = m->freq[work_ctx];
     rem = m->cum[work_ctx][0];
-    for (b = 0; b <= 255; b++)
-        if (ineligible(m, ctx, excl, n, b))
-            rem = (rem - m->freq[work_ctx][b]) & 0xFFFF;
+    for (b = 0; b <= 255; b++) {
+        if (f_ctx[b] != 0 || excl_map[b])
+            rem = (rem - f_work[b]) & 0xFFFFu;
+    }
     total = total_from_rem(m, work_ctx, rem);
     if (total == 0)
         return 0;
-    freq = m->freq[work_ctx][sym];
+    freq = f_work[sym];
     return f154i2(m, (freq << 14) / total);
 }
 

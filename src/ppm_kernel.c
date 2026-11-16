@@ -247,15 +247,28 @@ static uint32_t fenwick_prefix(const uint16_t *row, int sym)
     return sum;
 }
 
+/*
+ * Sum (mod 2^16) of freq_row[s] for s < sym, s not in the exclusion list.
+ * Computed as the full prefix sum (vectorizable, wraps mod 2^16 like the
+ * original) minus the frequencies of the distinct excluded symbols below
+ * `sym`; modular subtraction makes this identical to the per-symbol walk.
+ */
 static uint32_t mix_prefix(const uint16_t *freq_row, int sym,
                            const uint8_t *excl, int nexcl)
 {
-    uint32_t sum = 0;
-    int s;
+    uint16_t sum = 0;
+    int s, i, j;
 
-    for (s = 0; s < sym; s++) {
-        if (!ppm_in_excl(excl, nexcl, (uint8_t)s))
-            sum = (sum + freq_row[s]) & 0xFFFFu;
+    for (s = 0; s < sym; s++)
+        sum = (uint16_t)(sum + freq_row[s]);
+    for (i = 0; i < nexcl; i++) {
+        if ((int)excl[i] >= sym)
+            continue;
+        for (j = 0; j < i; j++)
+            if (excl[j] == excl[i])
+                break;
+        if (j == i)
+            sum = (uint16_t)(sum - freq_row[excl[i]]);
     }
     return sum;
 }

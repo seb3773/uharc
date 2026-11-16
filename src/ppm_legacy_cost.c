@@ -744,6 +744,74 @@ static void c08_phase(const uint8_t *d, size_t n, size_t i0, size_t i1,
                 (unsigned)s->c08);
 }
 
+/*
+ * Incremental cache for the LIVE phase of the c08 machine.
+ *
+ * The LIVE phase replays the MRU machine over the whole prefix [0, st) of the
+ * stream before every class-0 cost evaluation. Done naively this is O(st) per
+ * block, i.e. quadratic in the stream length (it dominated -mx on large or
+ * solid inputs). The LIVE law only reads bytes strictly below `st` (q < i < st,
+ * payload/avail limits are never reached there), so its state at `st` is a
+ * pure function of base[0 .. st). We therefore keep the state reached at the
+ * last `st` and only replay [cached_st, st) when blocks move forward.
+ *
+ * The cache is only active while a PPM encode pass has bound its input buffer
+ * (ppm_cost_live_cache_bind); any other base pointer, or a backwards move,
+ * falls back to the original full replay. Define UHA_CHECK_C08_CACHE to
+ * cross-check every cached state against a full replay.
+ */
+static struct {
+    const uint8_t *bound;   /* input buffer of the current encode pass, or NULL */
+    const uint8_t *base;    /* base pointer the cached state belongs to */
+    size_t pos;             /* cached state == LIVE machine after [0, pos) */
+    int valid;
+    c08_state s;
+} s_c08_live;
+
+void ppm_cost_live_cache_bind(const uint8_t *raw)
+{
+    s_c08_live.bound = raw;
+    s_c08_live.base = NULL;
+    s_c08_live.pos = 0;
+    s_c08_live.valid = 0;
+}
+
+static void c08_live_prefix(const uint8_t *base, size_t st, size_t len, c08_state *s)
+{
+    if (st == 0u) {
+        c08_seed(s);
+        return;
+    }
+    if (s_c08_live.bound != NULL && base == s_c08_live.bound) {
+        if (s_c08_live.valid && s_c08_live.base == base && s_c08_live.pos <= st) {
+            *s = s_c08_live.s;
+            if (s_c08_live.pos < st)
+                c08_phase(base, st + len, s_c08_live.pos, st, NULL, 0, st, NB_LAW_LIVE, s);
+        } else {
+            c08_seed(s);
+            c08_phase(base, st + len, 0, st, NULL, 0, st, NB_LAW_LIVE, s);
+        }
+#ifdef UHA_CHECK_C08_CACHE
+        {
+            c08_state ref;
+            c08_seed(&ref);
+            c08_phase(base, st + len, 0, st, NULL, 0, st, NB_LAW_LIVE, &ref);
+            if (memcmp(&ref, s, sizeof ref) != 0) {
+                fprintf(stderr, "UHA_CHECK_C08_CACHE: mismatch at st=%zu\n", st);
+                abort();
+            }
+        }
+#endif
+        s_c08_live.s = *s;
+        s_c08_live.base = base;
+        s_c08_live.pos = st;
+        s_c08_live.valid = 1;
+        return;
+    }
+    c08_seed(s);
+    c08_phase(base, st + len, 0, st, NULL, 0, st, NB_LAW_LIVE, s);
+}
+
 /* machine MRU recence -> table c08[i] (validated 100 % vs m45_ctr_eng) */
 static void c08_machine(const uint8_t *d, size_t n, uint32_t *c08_out,
                         uint32_t pos0, size_t off, int flow)
@@ -1140,8 +1208,7 @@ static uint64_t ppm_cost_gen_a(ppm_cost_arena *ap, const uint8_t *win, size_t le
              *      => there sequence `c08[]` of the block. */
             size_t st = (size_t)g_bandbase;
             c08_state s;
-            c08_seed(&s);
-            if (st) c08_phase(win - st, st + len, 0, st, NULL, 0, st, NB_LAW_LIVE, &s);
+            c08_live_prefix(win - st, st, len, &s);
             c08_phase(win - st, st + len, st, st + len, c08, st, st, NB_LAW_EST, &s);
         } else if (c08flow()) {
             /* [M170o] STREAM : rejeu deterministe sure `d[0 .. start+len)` (positions absolues),
