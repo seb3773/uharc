@@ -39,6 +39,39 @@ Because UHARC 0.6b was distributed exclusively as closed-source 32-bit x86 Windo
   - Audio and image delta-filter phase transformations.
 - **Pure Standard C99 Reconstruction**: Translating all recovered algorithms and state machines into portable standard C99 with zero third-party dependencies (standard C library + `-lm`), continuously verified by automated bit-for-bit regression tests against historical `UHARC.EXE` 0.6b archives.
 
+### Why is the historical dictionary limit set at 32 MB?
+
+The era-specific constraint (2005) was memory consumption in -m3 (ALZ Best): the ALZ Best model allocates a binary search tree (BST), hash tables, and node arenas proportional to the window. For a 32 MB dictionary, the encoder consumes roughly 247 MB of RAM (an expansion factor of about 7.7×).
+
+DOS / 32-bit DPMI (XMS) environment: back then, under DOS/4GW or CWSDPMI, the contiguous virtual address space available to DPMI applications rarely exceeded 256 MB to 512 MB. Attempting to allocate a 192 MB dictionary would have required more than 1.5 GB of contiguous RAM, which was impossible under DOS and would have saturated most Windows XP machines of 2005. However, this was not merely an artificial command-line cap. The 32 MB limit is baked deep into the mathematics of the UHARC format, due to the format's architectural locks: if anyone tries to patch the executable to force a larger dictionary, here are the three insurmountable structural barriers they would encounter:
+
+**The ALZ distance table is mathematically capped at 32 MB**  
+In the ALZ codec (alz_tables.c and alz_const.inc), repeat distances are encoded via an arithmetic coding tree (AlzFullDistanceNext) tied to two static 44-element tables:  
+AlzDistanceBase[44] and AlzDistanceSpan[44]  
+For the 44th and final slot:  
+Base[43] = 25165824 (24 MB)  
+Span[43] = 8388608 (8 MB)  
+Base + Span = 33554432 bytes = 32 MB  
+Consequence: ALZ's Range Coder has no symbol, no slot, and no tree path to encode or decode a distance greater than 33,554,432 bytes. Any match beyond 32 MB returns −1 in dist_to_bucket() (alz_match.c). To exceed 32 MB in ALZ, one would have to invent new slots (45, 46…), design a new Huffman/Range Coding tree, and recompute the probabilities, which would break the grammar of the bitstream.
+
+**The other problem: the container's order byte and the destructive modulo 16**  
+In the archive header (FORMAT.md), the order byte (offset 0x0A) encodes both the method class and the dictionary size:  
+For ALZ: order = 40 + 16 × class + k, where k ∈ [0..15] represents the power of 2: 2^(k+10) = 1 KB .. 32 MB.  
+Now, in the official UHARC.EXE decoder, the window size formula is hard-wired as follows:  
+dict_size = 1 << (((order - 40) % 16) + 10);  
+If one used a k >= 16 (for example k=16 → 64 MB, k=17 → 128 MB), there would be order collisions with the following classes (ALZ orders occupy 40..87).  
+The legacy decoder's modulo 16 would wrap around: an order requesting 64 MB (k=16) would be interpreted by the legacy code as 16 (mod 16) = 0 → 1 KB! The legacy decoder would allocate 1 KB and instantly crash (buffer overflow or corruption).
+
+For PPM-II (-mx) and LZP (-mz): same thing; the sliding buffer is computed as 1 << (((order - 24) % 16) + 10). PPM orders occupy 24..39 (exactly 16 values), so going beyond 39 would collide with ALZ (which starts at 40).  
+LZP (-mz): LZP does not encode explicit distances (it is a ring buffer with context prediction). It is the only algorithm whose bitstream could support a wider window (2^(order+2)) without mathematical modification, but its orders range from 8..23; order 24 is already reserved for PPM-II...
+
+In the end, thinking about the "feasibility" of implementing a "large dictionary" extension:  
+The UHARC container has an unallocated order range from 88 to 255 (the official modes stop at 87).  
+We could define extended orders (for example order = 88..100 for LZP extended to 64 MB, 128 MB, 256 MB, 512 MB); our encoder and our decoder would know perfectly well how to write and read them back.  
+What is very complex, however: we would have to create brand-new distance slots in AlzDistanceBase / AlzDistanceSpan from scratch and extend the AlzFullDistanceNext state tree. That would amount to inventing a new, undocumented sub-codec. Moreover, there would inevitably be a compatibility problem with legacy UHARC.EXE: any archive produced with a dictionary > 32 MB would be 100% incompatible with the historical UHARC.EXE (which would display either "unknown compression method" or a fatal error)...
+
+In conclusion, I will not attempt to implement support for larger dictionaries: the purpose of this reimplementation is to be a drop-in replacement, 100% faithful and compliant with Uwe Herklotz's original specifications, for digital preservation. At the time of writing (2026), if anyone needs 128 MB, 256 MB, or 1 GB dictionaries to maximize compression, it makes far more sense to turn naturally to LZMA2 (7-Zip) or FreeArc-c, which compress much faster and with far better ratios than the 32-bit UHARC algorithms of 2005.
+
 ---
 
 ## Highlights
