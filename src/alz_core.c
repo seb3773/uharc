@@ -276,13 +276,8 @@ void alz_apply_escape(alz_dec *d, int selector)
         for (i = 0; i < 16; i++) {
             d->st.slot_dir[i] = 0;
             d->st.slot_hash[i] = (i <= 3) ? 0xFFFFFFFFu : 0;
-            if (i <= 2) {
-                d->st.slot_hash74[i] = 0xFFFFFFFFu;
-                d->st.slot_hash78[i] = 0xFFFFFFFFu;
-            } else {
-                d->st.slot_hash74[i] = 0;
-                d->st.slot_hash78[i] = 0;
-            }
+            d->st.slot_hash74[i] = (i <= 3) ? 0xFFFFFFFFu : 0;
+            d->st.slot_hash78[i] = (i <= 3) ? 0xFFFFFFFFu : 0;
         }
     }
     d->st.escape_model_flag = (selector == 5 || selector == 6) ? 1 : 0;

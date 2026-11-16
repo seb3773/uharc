@@ -472,11 +472,18 @@ void alz_side_post_update(alz_dec *d, uint8_t output_byte)
     new_edi = st->side_primary ? (int)(st->output_pos % st->side_primary) : 0;
     st->side_mod_count = (uint32_t)new_edi;
     mm_score(d, new_edi);
-    if (st->slot_hash[new_edi & 0xF] != 0)
-        st->side_secondary = AlzSelectorSecondaryBase[st->escape_selector]
-                           + (uint32_t)new_edi;
-    else
-        st->side_secondary = AlzSelectorSecondaryBase[st->escape_selector] + 4;
+    if (st->escape_selector == 8) {
+        if (st->slot_hash[new_edi & 0xF] != 0)
+            st->side_secondary = AlzSelectorSecondaryBase[8] + (uint32_t)new_edi;
+        else
+            st->side_secondary = AlzSelectorSecondaryBase[8] + 2;
+    } else {
+        if (st->slot_hash[new_edi & 0xF] != 0)
+            st->side_secondary = AlzSelectorSecondaryBase[st->escape_selector]
+                               + (uint32_t)new_edi;
+        else
+            st->side_secondary = AlzSelectorSecondaryBase[st->escape_selector] + 4;
+    }
     st->side_dir = st->slot_dir[new_edi & 0xF];
 }
 
@@ -520,10 +527,17 @@ void alz_side_mm_step_sim(alz_dec *d, uint8_t output_byte, uint8_t delta_byte)
         new_edi = st->side_primary ? (int)(st->output_pos % st->side_primary) : 0;
         st->side_mod_count = (uint32_t)new_edi;
         mm_score(d, new_edi);
-        if (st->slot_hash[new_edi & 0xF] != 0)
-            st->side_secondary = AlzSelectorSecondaryBase[sel] + (uint32_t)new_edi;
-        else
-            st->side_secondary = AlzSelectorSecondaryBase[sel] + 4;
+        if (sel == 8) {
+            if (st->slot_hash[new_edi & 0xF] != 0)
+                st->side_secondary = AlzSelectorSecondaryBase[8] + (uint32_t)new_edi;
+            else
+                st->side_secondary = AlzSelectorSecondaryBase[8] + 2;
+        } else {
+            if (st->slot_hash[new_edi & 0xF] != 0)
+                st->side_secondary = AlzSelectorSecondaryBase[9] + (uint32_t)new_edi;
+            else
+                st->side_secondary = AlzSelectorSecondaryBase[9] + 4;
+        }
         st->side_dir = st->slot_dir[new_edi & 0xF];
     }
 }
