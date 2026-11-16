@@ -88,7 +88,6 @@ static uint32_t a3_live_k_changepoint(a3_live_ws *ws, const uint8_t *plain,
                                       a3_live_k_state *ks)
 {
     uint32_t c, i, pos_in;
-    uint8_t saved_prev_b = ks->prev_b;
     uint32_t base;
 
     if (blen <= 0x800u)
@@ -170,7 +169,6 @@ static uint32_t a3_live_k_changepoint(a3_live_ws *ws, const uint8_t *plain,
         ks->prev_b = b1;
     }
 
-    ks->prev_b = saved_prev_b;
     return blen;
 }
 
