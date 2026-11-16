@@ -1567,7 +1567,7 @@ uint32_t ppm_bc_law(const uint8_t *d, uint32_t usize)
         return 1u;
     for (i = 0; i < 256u; i++)
         h[i] = 0;
-    scan = (n > 0x10000u) ? 0x10000u : n;          /* 0x40478f : scan bounded has 64 Kio */
+    scan = n;                                      /* scan entire buffer (legacy reads 64KB chunks until n) */
     for (i = 0; i < scan; i++) {
         uint32_t c = d[i];
         h[c]++;

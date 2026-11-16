@@ -659,7 +659,8 @@ Whenever a non-escape symbol is coded, `token_class_update()` adds $+88$ to subs
 
 - **128 KB Block Rebuilds (`alz_next_boundary` / `alz_rebuild_block_model_core`)**: Aligned to every `0x20000` bytes respecting `member_ends` in solid streams ([`src/alz.c`](src/alz.c), [`src/alz_core.c`](src/alz_core.c)). A rebuild zeroes contexts `0..0x300`, halves `token_class[0..65]`, rescales `0x301..0x3F8` (`alz_bm_rescale_entry`) and `0x3F9..0x40B` (`alz_bm_rescale_ctx2`), resets `bm_table[0..255] = 0x9240` (`bm_acc80 = 0x91ADC0`), and codes an escape `selector = uha_rc_uniform(..., 11)`. Selector `10` rescales `0x200..0x2FF` then resets `escape_selector = 0`; selectors `5..9` engage adaptive multimedia linear/delta predictors in [`src/alz_side.c`](src/alz_side.c).
 - **Literal Byte Model (`ALZ_BM_NCTX = 0x420`, 1,056 Fenwick Contexts)**: Implemented in [`src/alz_bm.c`](src/alz_bm.c). Supports single-byte exclusion (`bm_flag` / `bm_predb`, predicting the byte immediately following the prior match when `count != 255`), SSE bit-cost tracking via `AlzSseMap[0..16384]`, and dynamic routing (`bm_acc80`, `bm_acc8c`, `bm_acc90`) between primary `(ctx, ctx2)` Fenwick contexts, multimedia side-channel contexts `0x300`/`0x402`, and an 8-bit uniform bypass.
-- **Encoder Planning Pipeline**: Pairs pre-selection [`a3_sel_derive()`](src/alz.c), warm-arena literal/match cost evaluation (`alz_arena2d` + `alz_lm_decide` in [`src/alz_lm.c`](src/alz_lm.c)), hash-chain & binary-search-tree matchfinders ([`src/alz.c`](src/alz.c)), and scoring via `alz_score_cum[]` ([`src/alz_score.c`](src/alz_score.c)).
+- **Encoder Planning Pipeline**: Pairs pre-selection [`a3_sel_derive()`](src/alz.c), warm-arena literal/match cost evaluation (`alz_arena2d` + `alz_lm_decide` in [`src/alz_lm.c`](src/alz_lm.c)), hash-chain & binary-search-tree matchfinders with cache prefetching hints ([`src/alz.c`](src/alz.c)), and scoring via `alz_score_cum[]` ([`src/alz_score.c`](src/alz_score.c)).
+- **Default Dictionary Scaling & Large Match Table**: By default (without explicit `-md`), ALZ caps dictionary size at **4,096 KiB** ($k=12$, order $40 + 16 \cdot \text{method\_class} + k = 52$ for `-m1`). For distance ranges exceeding 512 KiB ($S8c \ge \text{0x80000}$), bit lengths index the legacy 64-entry table `lm_t9910[64]` (`0x439910`, indexed by $S8c \gg 19$ up to 32 MiB) in [`src/alz_lm.c`](src/alz_lm.c).
 
 ---
 
@@ -673,8 +674,14 @@ UHARC's PPM engine is **Uwe Herklotz's proprietary hybrid architecture**, distin
    The encoder selects the smallest `order` in $24..39$ (`0x18..0x27`) whose circular history window strictly exceeds `usize` ([`uha_encode_ppm`](src/encode.c)):
    $$\text{window\_size} = 2^{(((\text{order} - 24) \bmod 16) + 10)} = 1\text{ KiB} \dots 32\text{ MiB} \quad (64\text{ KiB at order } 30)$$
    [`ppm_model_alloc()`](src/ppm_model.c) allocates **17,199,680 bytes (~16.4 MiB)** of fixed context/hash/record tables (`rec1s` 8 MiB, `rec2s` 2.5 MiB, `ht1/ht2` hash tables 4 MiB, `cum`+`freq` 1 MiB, `len_tab`+`link_tab` 512 KiB, `ring_buf` 256 KiB, auxiliary tables ~157 KiB) plus `m->window` (`window_size + 256` B), plus an optional **`0x400000` (4 MiB)** multi-level cache (`ppm_bc1_st.lvl` in [`src/ppm_bc1.c`](src/ppm_bc1.c)) allocated on demand whenever `byte_class == 1` activates (~20.5 MiB total at `order = 30` with `bc = 1`).
-4. **Transforms (`byte_class`), 5-Stage Cascade & Multi-File Scheduling**:
-   - **`byte_class == 0` vs `1`**: `byte_class = 0` applies a deterministic word/newline/capitalization forward transform (`ppm_detr_forward()` in [`src/ppm_detr_fwd.c`](src/ppm_detr_fwd.c), inverted on decode via `DetrStrData[]`) up to `e0_blk_len`, switching cleanly to bit-inverted bytes `~b` and optional mid-stream promotion (`ppm_promote_to_bc1()`). `byte_class = 1` codes `~b` paired with the 8-level `ppm_bc1` ring predictor.
+4. **Transforms (`byte_class`), DETR Word Preprocessor & 5-Stage Cascade**:
+   - **`byte_class == 0` vs `1` & Heuristic Selection**:
+     [`ppm_bc_law()`](src/ppm_legacy_cost.c) evaluates byte frequencies across the full input data (using 64 KiB I/O chunks) to classify data as text or binary. When text characteristics dominate, `byte_class = 0` (text mode) activates and the initial model class is locked to 0. Otherwise, `byte_class = 1` activates, pairing bit-inverted bytes `~b` with the 8-level `ppm_bc1` ring predictor.
+   - **DETR Deterministic Word Transform (`ppm_detr_forward()`)**:
+     In text mode (`byte_class = 0`), [`ppm_detr_forward()`](src/ppm_detr_fwd.c) applies Herklotz's deterministic word, space, and capitalization preprocessor up to `e0_blk_len` (inverted on decode via `DetrStrData[]`):
+     - **Space runs**: Runs of 2 to 16 consecutive spaces emit class code `cls = 17 - nsp` ($1..15$). A single run of 32 or more spaces emits class code `0`. For intermediate runs of 17 to 31 spaces, legacy UHARC (`0x420F3B`) clamps `nsp` to 16, emitting class code 1 (16 spaces) and consuming 16 bytes, deferring the remaining spaces to the next cycle.
+     - **Word dictionaries & prefixes**: Matches common lowercase dictionary words (`g_detr_cand` / `DetrStrData[]`), with deterministic prefix codes for initial capital letters and punctuation boundaries.
+     - **Stream transitions**: At `e0_blk_len`, the stream switches cleanly to bit-inverted bytes `~b` with optional mid-stream promotion ([`ppm_promote_to_bc1()`](src/ppm_bc1.c)).
    - **Block Resets & Cascade**: Periodic resets (`0x40000 >> (byte_class * 2)` capped by `e0_blk_len`/`detr_thr1` and aligned to `member_ends`) emit a 10-way LZP class (`0..9`, selected on encode by [`ppm_legacy_cost()`](src/ppm_legacy_cost.c)). Each item tries `ppm_matchfinder_decode()` followed by a 5-stage literal cascade (`CR_ORDER1_HIT`, `CR_PREDICTED_HIT`, `CR_REC2_HIT`, `CR_ENTRY_HIT`, `CR_C550`) in [`src/ppm_cascade.c`](src/ppm_cascade.c). Multi-file classification/frontier decisions are mirrored in [`src/frontier.c`](src/frontier.c) and [`src/selclk.c`](src/selclk.c).
 
 ---
@@ -906,8 +913,11 @@ For engineers and researchers comparing `UHARC.EXE` 0.6b disassembly against thi
 | `0x43F154` | Cumulative probability-to-cost lookup table | [`alz_score_cum[]`](src/alz_score.c) / `alz_score_cost()` | [`src/alz_score.c`](src/alz_score.c) |
 | `0x419E20` | In-band multimedia autodetection & delta restore | [`uha_restore_multimedia()`](src/filter.c) | [`src/filter.c`](src/filter.c) |
 | `0x41A380` | x86 BCJ jump/call displacement restore filter | [`apply_exe_filter()`](src/filter.c) | [`src/filter.c`](src/filter.c) |
+| `0x40478F` | PPM full-scan character distribution & mode classifier | [`ppm_bc_law()`](src/ppm_legacy_cost.c) | [`src/ppm_legacy_cost.c`](src/ppm_legacy_cost.c) |
 | `0x420C20` | PPM `detr` deterministic forward transform | [`ppm_detr_forward()`](src/ppm_detr_fwd.c) | [`src/ppm_detr_fwd.c`](src/ppm_detr_fwd.c) |
+| `0x420F3B` | PPM DETR space-run clamp to 16 | [`ppm_detr_forward()`](src/ppm_detr_fwd.c) | [`src/ppm_detr_fwd.c`](src/ppm_detr_fwd.c) |
 | `0x4221C0` | PPM LZP class selection cost evaluator | [`ppm_legacy_cost()`](src/ppm_legacy_cost.c) | [`src/ppm_legacy_cost.c`](src/ppm_legacy_cost.c) |
+| `0x439910` | ALZ large-distance bit length table (64 entries) | `lm_t9910[]` | [`src/alz_lm_tables.inc`](src/alz_lm_tables.inc) |
 | `0x43E130` | PPM secondary escape weight table | `PPMS_43E130[]` | [`src/ppm_tables.c`](src/ppm_tables.c) |
 | `0x43E170` | PPM secondary probability scaling table | `PPMS_43E170[]` | [`src/ppm_tables.c`](src/ppm_tables.c) |
 | `0x43E1F4` | PPM SSE2 probability estimation table | `PPMS_43E1F4[]` | [`src/ppm_tables.c`](src/ppm_tables.c) |

@@ -60,12 +60,15 @@ int ppm_detr_forward(const uint8_t *in, uint32_t len, uint32_t thr2,
             uint32_t nsp = 1;
             while (nsp < 32 && pos + nsp < len && in[pos + nsp] == 0x20)
                 nsp++;
-            if (nsp == 1)
-                cls = -1;               /* has single espace : literal */
-            else if (nsp >= 32)
-                cls = 0;                /* class 32 espaces */
-            else
+            if (nsp == 1) {
+                cls = -1;               /* single space : literal */
+            } else if (nsp >= 32) {
+                cls = 0;                /* class 32 spaces */
+            } else {
+                if (nsp > 16)
+                    nsp = 16;           /* clamp to 16 (legacy 0x420f3f: mov byte [esp+0x10], 0x10) */
                 cls = (int)(17 - nsp);
+            }
         } else if (g_detr_nb[b] != 0 && thr2 - count >= 4) {
             uint32_t off = reuse ? pos : pos + 1;
             const uint8_t *cands = g_detr_cand + (uint32_t)(b - 97) * 16;

@@ -1058,9 +1058,37 @@ static inline uint32_t alz_bst_hash(const uint8_t *plain, uint32_t usize,
     return ((b1 << 5) ^ b0 ^ (b2 << 10)) & 0x3ffffu;
 }
 
+/* Cache hints only: do not change the tree, traversal, or parser decisions.
+ * Disable with -DUHA_BST_PREFETCH=0 for paired baseline measurements. */
+#ifndef UHA_BST_PREFETCH
+#define UHA_BST_PREFETCH 1
+#endif
+static inline void alz_bst_prefetch(const alz_dec *d, const uint8_t *plain,
+                                   uint32_t usize, uint32_t p)
+{
+#if UHA_BST_PREFETCH && (defined(__GNUC__) || defined(__clang__))
+    if (usize >= 13u && p <= usize - 13u) {
+        uint32_t h = alz_bst_hash(plain, usize, d->mode.dict_size, p + 10u);
+        __builtin_prefetch(&d->bst_head[h], 0, 3);
+    }
+    if (usize >= 6u && p <= usize - 6u) {
+        uint32_t h = alz_bst_hash(plain, usize, d->mode.dict_size, p + 3u);
+        uint32_t q = d->bst_head[h];
+        if (q != 0xFFFFFFFFu) {
+            __builtin_prefetch(&d->bst_tree[(size_t)(q & d->mode.dict_mask) * 2u], 1, 3);
+            if (q < usize)
+                __builtin_prefetch(plain + q, 0, 3);
+        }
+    }
+#else
+    (void)d; (void)plain; (void)usize; (void)p;
+#endif
+}
+
 static void alz_bst_insert_only(alz_dec *d, const uint8_t *plain,
                                 uint32_t usize, uint32_t p)
 {
+    alz_bst_prefetch(d, plain, usize, p);
     uint32_t dict_size = d->mode.dict_size;
     uint32_t mask = d->mode.dict_mask;
     uint32_t h = alz_bst_hash(plain, usize, dict_size, p);
@@ -1131,6 +1159,7 @@ static void alz_bst_search_insert(alz_dec *d, const uint8_t *plain,
                                   uint32_t usize, uint32_t p, uint32_t K,
                                   uint32_t s_len[256], uint32_t *b8_out)
 {
+    alz_bst_prefetch(d, plain, usize, p);
     uint32_t dict_size = d->mode.dict_size;
     uint32_t mask = d->mode.dict_mask;
     uint32_t h = alz_bst_hash(plain, usize, dict_size, p);

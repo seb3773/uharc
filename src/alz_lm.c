@@ -50,8 +50,10 @@ void alz_lm_decide(const lm_in *in, lm_out *o)
         ecx = (ecx + in->bc) & M32;
         if (in->S8c >= 0x100) {
             ecx = (ecx + 1) & M32;
-            if (in->S8c >= 0x10000)
-                ecx = (ecx + lm_t9910[in->S8c >> 19] + 1) & M32;
+            if (in->S8c >= 0x10000) {
+                uint32_t idx = in->S8c >> 19;
+                ecx = (ecx + lm_t9910[idx < 64u ? idx : 63u] + 1) & M32;
+            }
         }
     } else if (in->bb != 0) {
         if (in->DL < 4) {

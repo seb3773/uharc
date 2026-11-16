@@ -769,12 +769,7 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
      * same that the -m1 validated ; there Wine-gate the confirme for m2/m3. */
     {
         int base = 40 + 16 * method_class;
-        int k = 0;
-        uint32_t d = 1024;
-        while (d <= usize && k < 15) {
-            k++;
-            d = 1u << (k + 10);
-        }
+        int max_k = 12; /* Default maximum dictionary size is 4096 KB (k=12) */
         if (g_dict_kb > 0) {
             int req_kb = g_dict_kb;
             int req_k = 0;
@@ -783,8 +778,13 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
                 req_k++;
                 rd <<= 1;
             }
-            if (req_k <= k)
-                k = req_k;
+            max_k = req_k;
+        }
+        int k = 0;
+        uint32_t d = 1024;
+        while (d <= usize && k < max_k) {
+            k++;
+            d = 1u << (k + 10);
         }
         order = base + k;
     }
@@ -906,16 +906,6 @@ int uha_encode_ppm(const uha_member *members, int count, int order,
                 }
             }
         }
-        if ((size_t)first_sz >= FEN) {
-            uint64_t sel_cost = 0;
-            uint32_t sel_cls = ppm_legacy_cost_select_class(
-                    plain, (size_t)usize < FEN ? (size_t)usize : FEN, 0,
-                    ppm_legacy_cost, &sel_cost);
-            cls_lo = cls_hi = (int)sel_cls;
-        } else {
-            cls_lo = cls_hi = 0;
-        }
-
         uint32_t e0 = 0u;
         int i, hdr_bc = -1;
         for (i = 0; i < count; i++) {
@@ -934,6 +924,18 @@ int uha_encode_ppm(const uha_member *members, int count, int order,
         if (e0 == 0u && hdr_bc == 0) e0 = usize;
         bc_lo = bc_hi = hdr_bc;
         uha_ppm_set_e0law(1, e0);
+
+        if (hdr_bc == 0) {
+            cls_lo = cls_hi = 0;
+        } else if ((size_t)first_sz >= FEN) {
+            uint64_t sel_cost = 0;
+            uint32_t sel_cls = ppm_legacy_cost_select_class(
+                    plain, (size_t)usize < FEN ? (size_t)usize : FEN, 0,
+                    ppm_legacy_cost, &sel_cost);
+            cls_lo = cls_hi = (int)sel_cls;
+        } else {
+            cls_lo = cls_hi = 0;
+        }
 
         for (int bc = bc_lo; bc <= bc_hi; bc++) {
             for (int cls = cls_lo; cls <= cls_hi; cls++) {

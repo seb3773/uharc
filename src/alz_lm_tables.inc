@@ -35,6 +35,11 @@ static const uint32_t lm_t9714[64] = {
 16,64,1024,8192,64,256,8192,4294967295
 };
 
-static const uint32_t lm_t9910[8] = {
-0,1,2,2,3,3,3,3
+/* Bit length table (legacy at 0x439910, 64 entries in UHARC.EXE offset 0x37910).
+ * Indexed with S8c >> 19 for distances up to 32 MB (64 entries). */
+static const uint32_t lm_t9910[64] = {
+    0,1,2,2,3,3,3,3, 4,4,4,4,4,4,4,4,
+    5,5,5,5,5,5,5,5, 5,5,5,5,5,5,5,5,
+    6,6,6,6,6,6,6,6, 6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6, 6,6,6,6,6,6,6,6
 };
