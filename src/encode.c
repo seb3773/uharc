@@ -299,6 +299,28 @@ static void attrs_dos_stamp(uint32_t mtime, uint16_t *out_time, uint16_t *out_da
     *out_time = 0x0C76;   /* 01:35:44 */
 }
 
+static void apply_filters_forward(uint8_t *plain, const uha_member *members, int count,
+                                  uint8_t family, int ppm_swap)
+{
+    uint64_t ofs = 0;
+    int f;
+
+    if (!plain || count <= 0 || family == 0)
+        return;
+
+    for (f = 0; f < count; f++) {
+        uint32_t sz = members[f].size;
+        if (sz >= 1024) {
+            int exe_matched = 0;
+            if (family & 0x01u)
+                exe_matched = uha_apply_forward_filter(plain + ofs, sz, ppm_swap);
+            if ((family & 0x02u) && !exe_matched)
+                uha_apply_forward_multimedia(plain + ofs, sz);
+        }
+        ofs += sz;
+    }
+}
+
 static int build_attrs(const uha_member *members, int count,
                        uint8_t **out, uint32_t *outlen)
 {
@@ -680,12 +702,14 @@ int uha_encode_lzp(const uha_member *members, int count, int order,
         ofs += members[f].size;
         ends[f] = ofs;
     }
+    uint8_t family = uha_get_nomm() ? 1 : 3;
+    apply_filters_forward(plain, members, count, family, 0);
     rc = uha_lzp_encode(plain, usize, order, ends, count, &pk, &pklen);
     free(plain);
     free(ends);
     if (rc != 0)
         return rc;
-    rc = encode_archive(members, count, 3, (uint8_t)order, pk, (uint32_t)pklen,
+    rc = encode_archive(members, count, family, (uint8_t)order, pk, (uint32_t)pklen,
                         out, outlen);
     free(pk);
     return rc;
@@ -719,16 +743,36 @@ int uha_encode_lz78(const uha_member *members, int count,
             memcpy(plain + ofs, members[f].data, members[f].size);
         ofs += members[f].size;
     }
+    uint8_t family = uha_get_nomm() ? 1 : 3;
+    apply_filters_forward(plain, members, count, family, 0);
     /* -md absent / -md4096 : cap 32 KiB. -md<pow2> : ce plafond. */
     kb = uha_get_dict_kb();
     cap = (kb > 0) ? (uint32_t)kb : 32u;
     order = uha_lz78_select_order(cap, usize);
+    int roundtrip_ok = 0;
     rc = uha_lz78_encode(plain, usize, order, NULL, 0, &pk, &pklen);
+    if (rc == 0 && pk && pklen < usize) {
+        uint8_t *chk = (uint8_t *)malloc(usize ? (size_t)usize : 1);
+        if (chk) {
+            int drc = uha_lz78_decode(pk, pklen, order, usize, NULL, count, chk, usize);
+            if (drc == 0 && memcmp(chk, plain, usize) == 0)
+                roundtrip_ok = 1;
+            free(chk);
+        }
+    }
+    if (!roundtrip_ok) {
+        free(pk);
+        pk = (uint8_t *)malloc(usize ? (size_t)usize : 1);
+        if (!pk) {
+            free(plain);
+            return -4;
+        }
+        if (usize > 0)
+            memcpy(pk, plain, usize);
+        pklen = usize;
+    }
     free(plain);
-    if (rc != 0)
-        return rc;
-    /* family 3 : masque EXE+MM, comme les GT -mw (hello, code.c, …). */
-    rc = encode_archive(members, count, 3, order, pk, (uint32_t)pklen, out, outlen);
+    rc = encode_archive(members, count, family, order, pk, (uint32_t)pklen, out, outlen);
     free(pk);
     return rc;
 }
@@ -806,6 +850,7 @@ int uha_encode_alz(const uha_member *members, int count, int method_class,
         ofs += members[f].size;
         ends[f] = ofs;
     }
+    apply_filters_forward(plain, members, count, 1, 0);
     pk = NULL;
     pklen = 0;
     rc = uha_alz_encode(plain, usize, order, ends, count,
@@ -871,6 +916,7 @@ int uha_encode_ppm(const uha_member *members, int count, int order,
         ofs += members[f].size;
         ends[f] = ofs;
     }
+    apply_filters_forward(plain, members, count, 1, 1);
     /* t12g/t14d - politique of selection PPM.
      * bc1 (ring binary some l'en-tete) is tente en more of bc0 (path sure),
      * but N'is retenu that if it pass has auto-verification roundtrip bit-has-bit

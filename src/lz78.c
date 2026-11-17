@@ -5,6 +5,7 @@
 
 #include "lz78.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #if LZ78_CODE_FC0_USE_REPLAY || defined(UHA_FC0_GEN_TOOL)
@@ -1900,10 +1901,9 @@ int uha_lz78_decode(const uint8_t *in, size_t in_len, uint8_t order,
     if (!in || !out)
         return -2;
     /*
-     * Ne pas confondre store (``order`` 0) et LZ78 mw : Wine peut avoir
-     * ``psize == usize`` (ex. ``runs.bin`` 8→8) avec payload bitstream.
+     * Mode store de repli ou payload non compressé (psize == usize).
      */
-    if (order < UHA_ORDER_LZ78_MIN && in_len == (size_t)usize) {
+    if (in_len == (size_t)usize) {
         if (usize > 0)
             memcpy(out, in, usize);
         return 0;
