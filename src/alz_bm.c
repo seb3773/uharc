@@ -3,6 +3,107 @@
 #include <stdlib.h>
 #include "alz_priv.h"
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
+/*
+ * 256-symbol kernels used by the literal model (SSE2 on x86-64, which is
+ * part of the base ISA, portable C elsewhere; same integer results).
+ */
+
+/* Sum of w[s] over the symbols s with m[s] != 0 (exact, 32-bit). */
+static uint32_t bm_sum_where_nonzero(const uint16_t *m, const uint16_t *w)
+{
+#if defined(__SSE2__)
+    const __m128i zero = _mm_setzero_si128();
+    __m128i acc = zero;
+    int i;
+
+    for (i = 0; i < 256; i += 8) {
+        __m128i mv = _mm_loadu_si128((const __m128i *)(m + i));
+        __m128i wv = _mm_loadu_si128((const __m128i *)(w + i));
+        __m128i v = _mm_andnot_si128(_mm_cmpeq_epi16(mv, zero), wv);
+        acc = _mm_add_epi32(acc, _mm_add_epi32(_mm_unpacklo_epi16(v, zero),
+                                               _mm_unpackhi_epi16(v, zero)));
+    }
+    acc = _mm_add_epi32(acc, _mm_shuffle_epi32(acc, 0x4E));
+    acc = _mm_add_epi32(acc, _mm_shuffle_epi32(acc, 0xB1));
+    return (uint32_t)_mm_cvtsi128_si32(acc);
+#else
+    uint32_t t = 0;
+    int i;
+
+    for (i = 0; i < 256; i++)
+        t += m[i] != 0 ? w[i] : 0u;
+    return t;
+#endif
+}
+
+/*
+ * Split w[] by the "known" mask m[s] != 0: g[s] = w[s] for unknown symbols
+ * (0 otherwise), bsum[b] = sum of g over block b (16 symbols), *gsum the
+ * total of g. Returns the sum of w over the known symbols.
+ */
+static uint32_t bm_split_unknown(const uint16_t *m, const uint16_t *w, uint16_t *g,
+                                 uint32_t *bsum, uint32_t *gsum)
+{
+    uint32_t known = 0, unk = 0;
+    int b;
+#if defined(__SSE2__)
+    const __m128i zero = _mm_setzero_si128();
+    __m128i kacc = zero;
+
+    for (b = 0; b < 16; b++) {
+        __m128i m0 = _mm_loadu_si128((const __m128i *)(m + b * 16));
+        __m128i m1 = _mm_loadu_si128((const __m128i *)(m + b * 16 + 8));
+        __m128i w0 = _mm_loadu_si128((const __m128i *)(w + b * 16));
+        __m128i w1 = _mm_loadu_si128((const __m128i *)(w + b * 16 + 8));
+        __m128i z0 = _mm_cmpeq_epi16(m0, zero);
+        __m128i z1 = _mm_cmpeq_epi16(m1, zero);
+        __m128i u0 = _mm_and_si128(z0, w0), u1 = _mm_and_si128(z1, w1);
+        __m128i k0 = _mm_andnot_si128(z0, w0), k1 = _mm_andnot_si128(z1, w1);
+        __m128i s;
+
+        _mm_storeu_si128((__m128i *)(g + b * 16), u0);
+        _mm_storeu_si128((__m128i *)(g + b * 16 + 8), u1);
+        s = _mm_add_epi32(_mm_add_epi32(_mm_unpacklo_epi16(u0, zero),
+                                        _mm_unpackhi_epi16(u0, zero)),
+                          _mm_add_epi32(_mm_unpacklo_epi16(u1, zero),
+                                        _mm_unpackhi_epi16(u1, zero)));
+        s = _mm_add_epi32(s, _mm_shuffle_epi32(s, 0x4E));
+        s = _mm_add_epi32(s, _mm_shuffle_epi32(s, 0xB1));
+        bsum[b] = (uint32_t)_mm_cvtsi128_si32(s);
+        unk += bsum[b];
+        kacc = _mm_add_epi32(kacc, _mm_add_epi32(
+            _mm_add_epi32(_mm_unpacklo_epi16(k0, zero), _mm_unpackhi_epi16(k0, zero)),
+            _mm_add_epi32(_mm_unpacklo_epi16(k1, zero), _mm_unpackhi_epi16(k1, zero))));
+    }
+    kacc = _mm_add_epi32(kacc, _mm_shuffle_epi32(kacc, 0x4E));
+    kacc = _mm_add_epi32(kacc, _mm_shuffle_epi32(kacc, 0xB1));
+    known = (uint32_t)_mm_cvtsi128_si32(kacc);
+#else
+    for (b = 0; b < 16; b++) {
+        uint32_t t = 0;
+        int j;
+        for (j = 0; j < 16; j++) {
+            int s = b * 16 + j;
+            if (m[s] != 0) {
+                known += w[s];
+                g[s] = 0;
+            } else {
+                g[s] = w[s];
+                t += w[s];
+            }
+        }
+        bsum[b] = t;
+        unk += t;
+    }
+#endif
+    *gsum = unk;
+    return known;
+}
+
 static uint32_t bm_get_threshold(alz_dec *d, uint32_t total)
 {
     d->rc.range /= total;
@@ -32,14 +133,26 @@ static void bm_fenwick_add(alz_dec *d, int ctx, int sym, uint16_t step)
     d->bm_tree[ctx][0] = (uint16_t)(d->bm_tree[ctx][0] + step);
 }
 
+/*
+ * Rebuild the Fenwick tree of a context from its frequencies. Node i
+ * (1..255) holds the sum of freq[i - lowbit(i) .. i - 1] and node 0 the grand
+ * total, all modulo 2^16 as with repeated bm_fenwick_add() calls; computing
+ * them as differences of running prefix sums gives the same 16-bit values in
+ * O(256) instead of O(256 log 256).
+ */
 static void bm_rebuild_fenwick(alz_dec *d, int ctx)
 {
-    int s, i;
+    const uint16_t *f = d->bm_freq[ctx];
+    uint16_t *t = d->bm_tree[ctx];
+    uint32_t pre[257];
+    int i;
+
+    pre[0] = 0;
     for (i = 0; i < 256; i++)
-        d->bm_tree[ctx][i] = 0;
-    for (s = 0; s < 256; s++)
-        if (d->bm_freq[ctx][s] != 0)
-            bm_fenwick_add(d, ctx, s, d->bm_freq[ctx][s]);
+        pre[i + 1] = pre[i] + f[i];
+    t[0] = (uint16_t)pre[256];
+    for (i = 1; i < 256; i++)
+        t[i] = (uint16_t)(pre[i] - pre[i - (i & -i)]);
 }
 
 static uint16_t bm_ctx_total(alz_dec *d, int c)
@@ -96,7 +209,7 @@ static int bm_in_context(alz_dec *d, int c, uint32_t bx, uint32_t threshold,
 static int bm_decode_from_contexts(alz_dec *d, int ctx, int ctx2)
 {
     uint32_t bx, combined, threshold, esc_total, th2, acc, stp, bx2, excl_sum;
-    int s, known[256];
+    int s;
 
     bx = bm_ctx_total(d, ctx);
     if (bx != 0) {
@@ -106,30 +219,64 @@ static int bm_decode_from_contexts(alz_dec *d, int ctx, int ctx2)
             return bm_in_context(d, ctx, bx, threshold, combined);
         bm_sse(d, (combined - bx) & 0xFFFFFFFFu, combined);
         bm_remove(d, bx, (combined - bx) & 0xFFFFFFFFu);
-        excl_sum = 0;
-        for (s = 0; s < 256; s++) {
-            known[s] = (d->bm_freq[ctx][s] != 0)
-                    || ((d->bm_flag != 0) && (s == d->bm_predb));
-            if (known[s])
-                excl_sum += d->bm_freq[ctx2][s];
-        }
-        esc_total = (d->bm_tree[ctx2][0] - excl_sum) & 0xFFFF;
-        if (esc_total == 0) {
-            d->rc.corrupt = 1;
-            return 0;
-        }
-        th2 = bm_get_threshold(d, esc_total);
-        acc = 0;
-        for (s = 255; s >= 0; s--) {
-            if (known[s])
-                continue;
-            stp = d->bm_freq[ctx2][s];
-            if (th2 < acc + stp) {
-                bm_sse(d, stp, esc_total);
-                bm_remove(d, acc, stp);
-                return s;
+        {
+            /*
+             * Escape to ctx2, excluding every symbol known in ctx (and the
+             * predicted byte when bm_flag is set). g[] holds the ctx2 weight
+             * of each eligible symbol (0 for excluded ones, which the legacy
+             * top-down walk skips; a zero weight cannot be selected either),
+             * bsum[] the 16-symbol block sums, so the walk can skip whole
+             * blocks. Partial sums are exact while the eligible total fits in
+             * 16 bits (always the case for valid models, totals are rescaled
+             * at 0x4000); otherwise the legacy masked walk is used.
+             */
+            uint16_t g[256];
+            uint32_t bsum[16], gsum;
+            int b;
+
+            excl_sum = bm_split_unknown(d->bm_freq[ctx], d->bm_freq[ctx2], g, bsum, &gsum);
+            if (d->bm_flag != 0 && d->bm_freq[ctx][d->bm_predb] == 0) {
+                stp = g[d->bm_predb];
+                excl_sum += stp;
+                bsum[d->bm_predb >> 4] -= stp;
+                gsum -= stp;
+                g[d->bm_predb] = 0;
             }
-            acc = (acc + stp) & 0xFFFF;
+            esc_total = (d->bm_tree[ctx2][0] - excl_sum) & 0xFFFF;
+            if (esc_total == 0) {
+                d->rc.corrupt = 1;
+                return 0;
+            }
+            th2 = bm_get_threshold(d, esc_total);
+            acc = 0;
+            if (gsum <= 0xFFFFu) {
+                for (b = 15; b >= 0; b--) {
+                    if (th2 >= acc + bsum[b]) {
+                        acc += bsum[b];
+                        continue;
+                    }
+                    for (s = b * 16 + 15; s >= b * 16; s--) {
+                        stp = g[s];
+                        if (th2 < acc + stp) {
+                            bm_sse(d, stp, esc_total);
+                            bm_remove(d, acc, stp);
+                            return s;
+                        }
+                        acc += stp;
+                    }
+                    break;
+                }
+            } else {
+                for (s = 255; s >= 0; s--) {
+                    stp = g[s];
+                    if (th2 < acc + stp) {
+                        bm_sse(d, stp, esc_total);
+                        bm_remove(d, acc, stp);
+                        return s;
+                    }
+                    acc = (acc + stp) & 0xFFFF;
+                }
+            }
         }
         d->rc.corrupt = 1;
         return 0;
@@ -212,15 +359,12 @@ static void bm_update(alz_dec *d, int ctx, int sym)
 static uint32_t bm_known_map(alz_dec *d, int c, int sym, int exclude_ctx)
 {
     uint32_t t;
-    int s;
 
     t = d->bm_tree[c][0];
     if (c < 0x3F9)
         t = (t + d->bm_ew[c]) & 0xFFFF;
     if (exclude_ctx >= 0)
-        for (s = 0; s < 256; s++)
-            if (d->bm_freq[exclude_ctx][s] != 0)
-                t = (t - d->bm_freq[c][s]) & 0xFFFF;
+        t = (t - bm_sum_where_nonzero(d->bm_freq[exclude_ctx], d->bm_freq[c])) & 0xFFFF;
     if ((d->bm_flag != 0)
         && (exclude_ctx < 0 || d->bm_freq[exclude_ctx][d->bm_predb] == 0))
         t = (t - d->bm_freq[c][d->bm_predb]) & 0xFFFF;

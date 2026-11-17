@@ -28,11 +28,80 @@ uint8_t alz_prev_byte(alz_dec *d, uint32_t distance)
     return d->window[p];
 }
 
+/*
+ * Match copy without the multimedia side model (escape_selector == 0): the
+ * legacy per-byte loop only moves bytes and updates the byte history, so the
+ * bytes are copied in a tight loop (memcpy when source and destination do not
+ * wrap and do not overlap) and the history fields are then set from the last
+ * bytes copied. Final state and output are identical to calling
+ * alz_put_byte() for every byte.
+ */
+static void alz_copy_match_plain(alz_dec *d, uint32_t distance, uint32_t count)
+{
+    const uint32_t mask = d->mode.dict_mask;
+    const uint32_t size = mask + 1u;
+    uint8_t *w = d->window;
+    uint32_t wp = d->st.window_pos;
+    uint32_t src, i, op;
+    uint8_t last, prev;
+
+    if (distance == 0)
+        distance = 1;
+    src = (wp - distance) & mask;
+    if (wp + count <= size && src + count <= size) {
+        if (distance >= count && ((src + count <= wp) || (wp + count <= src))) {
+            memcpy(w + wp, w + src, count);
+        } else {
+            uint8_t *dp = w + wp;
+            const uint8_t *sp = w + src;
+            for (i = 0; i < count; i++)
+                dp[i] = sp[i];
+        }
+    } else {
+        for (i = 0; i < count; i++)
+            w[(wp + i) & mask] = w[(src + i) & mask];
+    }
+
+    op = d->st.output_pos;
+    if (d->out && op < d->outlen) {
+        size_t n = count;
+        if (n > d->outlen - op)
+            n = d->outlen - op;
+        if (wp + n <= size) {
+            memcpy(d->out + op, w + wp, n);
+        } else {
+            size_t first = size - wp;
+            memcpy(d->out + op, w + wp, first);
+            memcpy(d->out + op + first, w, n - first);
+        }
+    }
+
+    last = w[(wp + count - 1u) & mask];
+    prev = (count >= 2) ? w[(wp + count - 2u) & mask] : d->st.last_byte;
+    if (count >= 4) {
+        d->st.rolling_history = ((uint32_t)w[(wp + count - 4u) & mask] << 24)
+                              | ((uint32_t)w[(wp + count - 3u) & mask] << 16)
+                              | ((uint32_t)prev << 8) | last;
+    } else {
+        for (i = 0; i < count; i++)
+            d->st.rolling_history = (d->st.rolling_history << 8) | w[(wp + i) & mask];
+    }
+    d->st.output_pos = op + count;
+    d->st.window_pos = (wp + count) & mask;
+    d->st.prev_delta = (uint8_t)(last - prev);
+    d->st.prev_byte = prev;
+    d->st.last_byte = last;
+}
+
 void alz_copy_match(alz_dec *d, uint32_t distance, uint32_t count)
 {
     uint32_t i;
     uint8_t b;
 
+    if (d->st.escape_selector == 0 && count != 0 && count <= d->mode.dict_mask + 1u) {
+        alz_copy_match_plain(d, distance, count);
+        return;
+    }
     for (i = 0; i < count; i++) {
         b = alz_prev_byte(d, distance);
         alz_put_byte(d, b);

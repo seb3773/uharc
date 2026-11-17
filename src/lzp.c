@@ -4,6 +4,10 @@
 #include "lzp.h"
 #include "rangecoder.h"
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
 #define UHA_SYMBOL_COUNT  319
 #define UHA_BYTE_COUNT    256
 #define UHA_ESCAPE_CTX    318
@@ -160,17 +164,10 @@ static void binprob_update_synthetic_one(uha_binprob *p)
 
 static int binprob_decode_bit(uha_binprob *p, uha_rc *rc)
 {
-    uint32_t t = uha_rc_threshold(rc, p->total);
-    int bit;
+    int bit = uha_rc_decode_binary(rc, p->split, p->total);
 
-    if (t < p->split) {
-        uha_rc_remove(rc, 0, p->split);
-        bit = 0;
+    if (bit == 0)
         p->split = (uint16_t)(p->split + 64);
-    } else {
-        uha_rc_remove(rc, p->split, p->total);
-        bit = 1;
-    }
 
     p->total = (uint16_t)(p->total + 64);
     if (p->total >= UHA_MODEL_LIMIT) {
@@ -191,14 +188,10 @@ static void bittree_init(uha_bittree *b, uint16_t v)
 
 static int bittree_decode_bit(uha_bittree *b, uha_rc *rc)
 {
-    uint32_t t = uha_rc_fixed12(rc);
-
-    if (t < b->value) {
-        uha_rc_remove(rc, 0, b->value);
+    if (uha_rc_decode_bit12(rc, b->value) == 0) {
         b->value = (uint16_t)(b->value + ((4096 - b->value) >> 6));
         return 0;
     }
-    uha_rc_remove(rc, b->value, 4096);
     b->value = (uint16_t)(b->value - (b->value >> 6));
     return 1;
 }
@@ -465,15 +458,67 @@ static int model_decode_from_context(uha_ctxmodel *m, uha_rc *rc, int ctx,
     return 0;
 }
 
+/*
+ * Escape decode: the symbol is coded with the escape-context weights of every
+ * symbol unseen in `ctx` (f[s] == 0), `prev` excluded, walking from 255 down.
+ * The eligible weights are gathered once into g[] together with 16-symbol
+ * block sums (branch-free, vectorizable); the top-down walk then skips whole
+ * blocks and only scans the block that contains the threshold. Symbols with
+ * a zero weight can never be selected by the legacy walk, so skipping them
+ * gives the same symbol and the same low/high bounds.
+ */
 static int model_decode_excluded_escape(uha_ctxmodel *m, uha_rc *rc, int ctx, int prev)
 {
-    int s, symbol;
-    uint32_t total, low, high, threshold, acc, step;
+    const uint16_t *f = m->freq[ctx];
+    const uint16_t *e = m->freq[UHA_ESCAPE_CTX];
+    uint16_t g[UHA_BYTE_COUNT];
+    uint32_t bsum[UHA_BYTE_COUNT / 16];
+    uint32_t total, threshold, acc;
+    int s, b, j;
 
     total = 0;
-    for (s = 0; s < UHA_BYTE_COUNT; s++)
-        if (s != prev && m->freq[ctx][s] == 0)
-            total += m->freq[UHA_ESCAPE_CTX][s];
+#if defined(__SSE2__)
+    {
+        const __m128i zero = _mm_setzero_si128();
+        (void)j;
+        for (b = 0; b < UHA_BYTE_COUNT / 16; b++) {
+            __m128i f0 = _mm_loadu_si128((const __m128i *)(f + b * 16));
+            __m128i f1 = _mm_loadu_si128((const __m128i *)(f + b * 16 + 8));
+            __m128i e0 = _mm_loadu_si128((const __m128i *)(e + b * 16));
+            __m128i e1 = _mm_loadu_si128((const __m128i *)(e + b * 16 + 8));
+            __m128i v0 = _mm_and_si128(_mm_cmpeq_epi16(f0, zero), e0);
+            __m128i v1 = _mm_and_si128(_mm_cmpeq_epi16(f1, zero), e1);
+            __m128i w;
+            _mm_storeu_si128((__m128i *)(g + b * 16), v0);
+            _mm_storeu_si128((__m128i *)(g + b * 16 + 8), v1);
+            /* Unsigned widening sum of the 16 weights of the block. */
+            w = _mm_add_epi32(_mm_add_epi32(_mm_unpacklo_epi16(v0, zero),
+                                            _mm_unpackhi_epi16(v0, zero)),
+                              _mm_add_epi32(_mm_unpacklo_epi16(v1, zero),
+                                            _mm_unpackhi_epi16(v1, zero)));
+            w = _mm_add_epi32(w, _mm_shuffle_epi32(w, 0x4E));
+            w = _mm_add_epi32(w, _mm_shuffle_epi32(w, 0xB1));
+            bsum[b] = (uint32_t)_mm_cvtsi128_si32(w);
+            total += bsum[b];
+        }
+    }
+#else
+    for (b = 0; b < UHA_BYTE_COUNT / 16; b++) {
+        uint32_t t = 0;
+        for (j = 0; j < 16; j++) {
+            uint16_t v = (f[b * 16 + j] == 0) ? e[b * 16 + j] : 0;
+            g[b * 16 + j] = v;
+            t += v;
+        }
+        bsum[b] = t;
+        total += t;
+    }
+#endif
+    if (prev >= 0 && prev < UHA_BYTE_COUNT && g[prev] != 0) {
+        total -= g[prev];
+        bsum[prev >> 4] -= g[prev];
+        g[prev] = 0;
+    }
 
     if (total == 0) {
         rc->corrupt = 1;
@@ -482,26 +527,108 @@ static int model_decode_excluded_escape(uha_ctxmodel *m, uha_rc *rc, int ctx, in
 
     threshold = uha_rc_threshold(rc, total);
     acc = 0;
-    for (s = UHA_BYTE_COUNT - 1; s >= 0; s--) {
-        if (s == prev || m->freq[ctx][s] != 0) continue;
-        step = m->freq[UHA_ESCAPE_CTX][s];
-        if (threshold < acc + step) {
-            symbol = s;
-            low = acc;
-            high = acc + step;
-            uha_rc_remove(rc, low, high);
-            return symbol;
+    for (b = UHA_BYTE_COUNT / 16 - 1; b >= 0; b--) {
+        if (threshold >= acc + bsum[b]) {
+            acc += bsum[b];
+            continue;
         }
-        acc += step;
+        for (s = b * 16 + 15; s >= b * 16; s--) {
+            uint32_t step = g[s];
+            if (threshold < acc + step) {
+                uha_rc_remove(rc, acc, acc + step);
+                return s;
+            }
+            acc += step;
+        }
+        break;
     }
     rc->corrupt = 1;
     return 0;
 }
 
+/*
+ * Direct-context literal search.
+ *
+ * The legacy walk accumulates frequencies from symbol 255 down to 0
+ * (skipping the excluded symbol `prev`) and returns the first symbol s with
+ *     low(s) = sum_{k > s, k != prev} f[k] <= threshold < low(s) + f[s].
+ * With T = direct_total and P(s) = sum_{k < s, k != prev} f[k], one has
+ * low(s) = T - P(s) - f[s], so the condition is equivalent to
+ *     P(s) <= T - 1 - threshold < P(s) + f[s],
+ * i.e. a plain prefix search, done here in 8 steps on the Fenwick tree that
+ * the model already maintains (tree[i] = sum of f[i - lowbit(i) .. i - 1]).
+ * The exclusion of `prev` is applied on the fly to every candidate prefix.
+ * Totals stay below the 16384 rescale limit, so the 16-bit tree never
+ * saturates and its sums are exact. Returns the symbol (and low/high in the
+ * legacy top-down orientation), or -1 when the search finds no symbol
+ * (corrupt stream, same outcome as the legacy walk).
+ * Build with -DUHA_CHECK_LZP_FENWICK to cross-check every decision against
+ * the legacy walk.
+ */
+static int model_select_direct(const uha_ctxmodel *m, int ctx, int prev,
+                               uint32_t total, uint32_t threshold,
+                               uint32_t *low, uint32_t *high)
+{
+    const uint16_t *tree = m->tree[ctx];
+    const uint16_t *freq = m->freq[ctx];
+    uint32_t target = total - 1u - threshold;
+    uint32_t fprev = 0, acc = 0, p, f;
+    unsigned idx = 0, bitmask, next;
+    /* prev < 0 never matches: use an index above every symbol. */
+    unsigned pv = (prev >= 0 && prev < UHA_BYTE_COUNT) ? (unsigned)prev : 0x1000u;
+
+    if (pv < UHA_BYTE_COUNT)
+        fprev = freq[pv];
+    for (bitmask = 128; bitmask != 0; bitmask >>= 1) {
+        uint32_t v, ex;
+        next = idx + bitmask;
+        v = acc + tree[next];
+        ex = (pv < next) ? fprev : 0u;
+        if (v - ex <= target) {
+            idx = next;
+            acc = v;
+        }
+    }
+    p = acc - ((pv < idx) ? fprev : 0u);
+    f = freq[idx];
+    if (idx == pv || f == 0 || p > target || target >= p + f)
+        return -1;
+    *low = total - p - f;
+    *high = total - p;
+    return (int)idx;
+}
+
+#ifdef UHA_CHECK_LZP_FENWICK
+#include <stdio.h>
+static void model_check_direct(const uha_ctxmodel *m, int ctx, int prev,
+                               uint32_t threshold, int sym, uint32_t lo, uint32_t hi)
+{
+    uint32_t low = 0, high;
+    int s;
+
+    for (s = UHA_BYTE_COUNT - 1; s >= 0; s--) {
+        if (s == prev) continue;
+        high = low + m->freq[ctx][s];
+        if (threshold < high) {
+            if (s != sym || low != lo || high != hi) {
+                fprintf(stderr, "UHA_CHECK_LZP_FENWICK: mismatch\n");
+                abort();
+            }
+            return;
+        }
+        low = high;
+    }
+    if (sym != -1) {
+        fprintf(stderr, "UHA_CHECK_LZP_FENWICK: mismatch (corrupt)\n");
+        abort();
+    }
+}
+#endif
+
 static int model_decode_symbol(uha_ctxmodel *m, uha_rc *rc, int ctx, int prev)
 {
     uint32_t direct_total, combined_total, threshold;
-    uint32_t low, high;
+    uint32_t low = 0, high = 0;
     int s;
 
     if (ctx < 0 || ctx >= UHA_SYMBOL_COUNT)
@@ -519,18 +646,16 @@ static int model_decode_symbol(uha_ctxmodel *m, uha_rc *rc, int ctx, int prev)
         combined_total = direct_total + m->escape_weight[ctx];
         threshold = uha_rc_threshold(rc, combined_total);
         if (threshold < direct_total) {
-            low = 0;
-            for (s = UHA_BYTE_COUNT - 1; s >= 0; s--) {
-                if (s == prev) continue;
-                high = low + m->freq[ctx][s];
-                if (threshold < high) {
-                    uha_rc_remove(rc, low, high);
-                    return s;
-                }
-                low = high;
+            s = model_select_direct(m, ctx, prev, direct_total, threshold, &low, &high);
+#ifdef UHA_CHECK_LZP_FENWICK
+            model_check_direct(m, ctx, prev, threshold, s, low, high);
+#endif
+            if (s < 0) {
+                rc->corrupt = 1;
+                return 0;
             }
-            rc->corrupt = 1;
-            return 0;
+            uha_rc_remove(rc, low, high);
+            return s;
         }
         uha_rc_remove(rc, direct_total, combined_total);
     }
@@ -550,11 +675,26 @@ static void model_rebuild_tree(uha_ctxmodel *m, int ctx)
 
     if (ctx < 0 || ctx >= UHA_SYMBOL_COUNT) return;
 
-    memset(m->tree[ctx], 0, sizeof(m->tree[ctx]));
-
     sum = 0;
     for (s = 0; s < UHA_BYTE_COUNT; s++)
         sum += m->freq[ctx][s];
+    if (sum <= 0xFFFF) {
+        /*
+         * No partial sum can saturate: build every node from the running
+         * prefix sums, tree[i] = pre[i] - pre[i - lowbit(i)] (O(256) instead
+         * of O(256 log 256), identical values).
+         */
+        uint32_t pre[UHA_BYTE_COUNT + 1];
+        pre[0] = 0;
+        for (s = 0; s < UHA_BYTE_COUNT; s++)
+            pre[s + 1] = pre[s] + m->freq[ctx][s];
+        m->tree[ctx][0] = (uint16_t)sum;
+        for (i = 1; i < UHA_BYTE_COUNT; i++)
+            m->tree[ctx][i] = (uint16_t)(pre[i] - pre[i - (i & -i)]);
+        return;
+    }
+
+    memset(m->tree[ctx], 0, sizeof(m->tree[ctx]));
     if (sum > 0xFFFF) sum = 0xFFFF;
     m->tree[ctx][0] = (uint16_t)sum;
 

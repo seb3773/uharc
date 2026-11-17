@@ -1,3 +1,4 @@
+#include <string.h>
 #include "ppm_priv.h"
 
 enum { TAB_A = 1, TAB_B = 2, TAB_C = 3, TAB_E = 4 };
@@ -72,8 +73,7 @@ int ppm_rw1_decode(ppm_model *m, uha_rc *r, uint32_t rec1_idx, uint32_t rec2_idx
 
     *sym = -1;
     roll = m->c48;
-    for (i = 0; i <= 0x1F; i++)
-        recb[i] = m->rec1s[rec1_idx][i];
+    memcpy(recb, m->rec1s[rec1_idx], 0x20);
 
     rec2marker = m->rec2s[rec2_idx][0x13];
     pb = m->pred_byte[ctx28];
@@ -124,8 +124,7 @@ int ppm_rw1_decode(ppm_model *m, uha_rc *r, uint32_t rec1_idx, uint32_t rec2_idx
     b38 = ((roll & 0xC0) == 0xC0) ? 0x10 : 0;
 
     m->c3c = c3c;
-    for (i = 0; i <= 0x1F; i++)
-        recw[i] = recb[i];
+    memcpy(recw, recb, 0x20);
     n_adapt = 0;
 
     if (sl < 0xC && flags[sl] != 0) {
@@ -312,8 +311,7 @@ int ppm_rw1_encode(ppm_model *m, uint32_t rec1_idx, uint32_t rec2_idx,
     if (!m->w)
         return 0;
     roll = m->c48;
-    for (i = 0; i <= 0x1F; i++)
-        recb[i] = m->rec1s[rec1_idx][i];
+    memcpy(recb, m->rec1s[rec1_idx], 0x20);
 
     rec2marker = m->rec2s[rec2_idx][0x13];
     pb = m->pred_byte[ctx28];
@@ -364,8 +362,7 @@ int ppm_rw1_encode(ppm_model *m, uint32_t rec1_idx, uint32_t rec2_idx,
     b38 = ((roll & 0xC0) == 0xC0) ? 0x10 : 0;
 
     m->c3c = c3c;
-    for (i = 0; i <= 0x1F; i++)
-        recw[i] = recb[i];
+    memcpy(recw, recb, 0x20);
     n_adapt = 0;
 
     if (sl < 0xC && flags[sl] != 0) {

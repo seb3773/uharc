@@ -167,7 +167,61 @@ typedef struct {
     size_t         out_cap;
     size_t         out_len;
     int            out_sym;
+    /*
+     * Child lookup accelerator (decoder only). The legacy trie search walks
+     * the sibling list of `esi` looking for the child labelled `ebx`; every
+     * (parent, label) pair is unique, so an open-addressing hash table maps
+     * it straight to the child code, and tail[] keeps the last child of each
+     * node (the `link` the walk would have returned when the child is
+     * missing). Both are rebuilt on every dictionary reset. The sibling lists
+     * themselves are still maintained exactly as before.
+     */
+    uint32_t      *hkey;          /* (parent << 8 | label) + 1, 0 = empty */
+    uint16_t      *hval;          /* child code */
+    uint16_t      *tail;          /* last child of each node, or LZ78_ROOT */
+    uint32_t       hmask;
+    int            hshift;
 } lz78_dec;
+
+static void lz78_hash_clear(lz78_dec *d)
+{
+    uint32_t i;
+
+    if (!d->hkey)
+        return;
+    memset(d->hkey, 0, ((size_t)d->hmask + 1u) * sizeof(*d->hkey));
+    for (i = 0; i < 0x102u && i < d->dict_cap; i++)
+        d->tail[i] = (uint16_t)LZ78_ROOT;
+}
+
+static uint32_t lz78_hash_slot(const lz78_dec *d, uint32_t key)
+{
+    return (uint32_t)((key * 2654435761u) >> d->hshift) & d->hmask;
+}
+
+static int lz78_hash_find(const lz78_dec *d, uint32_t key)
+{
+    uint32_t i = lz78_hash_slot(d, key);
+
+    for (;;) {
+        uint32_t k = d->hkey[i];
+        if (k == key + 1u)
+            return (int)d->hval[i];
+        if (k == 0)
+            return -1;
+        i = (i + 1u) & d->hmask;
+    }
+}
+
+static void lz78_hash_insert(lz78_dec *d, uint32_t key, uint32_t code)
+{
+    uint32_t i = lz78_hash_slot(d, key);
+
+    while (d->hkey[i] != 0)
+        i = (i + 1u) & d->hmask;
+    d->hkey[i] = key + 1u;
+    d->hval[i] = (uint16_t)code;
+}
 
 static void lz78_emit(lz78_dec *d, uint8_t b)
 {
@@ -289,6 +343,7 @@ static void lz78_fn_427fc0(lz78_dec *d, int symbol)
         d->next_code = 0x102u;
         d->width = 9;
         d->mask = 0xffu;
+        lz78_hash_clear(d);
         return;
     }
     if (symbol == (int)(LZ78_ROOT + 1u)) {
@@ -328,7 +383,35 @@ static int lz78_peekb(const lz78_dec *d)
     return (int)(d->payload[d->pi] & 0xffu);
 }
 
-/* ``428229`` : ``*link`` = ``[esp+4]`` (``ROOT`` → ``w0`` du nœud, sinon frère). */
+#ifdef UHA_CHECK_LZ78_TRIE
+#include <stdio.h>
+/* Reference sibling-list walk, used to cross-check the hash lookup. */
+static void lz78_trie_check(const lz78_dec *d, int esi, int ebx, int child)
+{
+    uint32_t eax = d->dict[esi].w0, link = LZ78_ROOT;
+
+    for (;;) {
+        if (eax == LZ78_ROOT || eax >= d->next_code)
+            break;
+        if (d->dict[eax].ch == (uint8_t)ebx) {
+            if (child != (int)eax)
+                goto bad;
+            return;
+        }
+        link = eax;
+        eax = d->dict[eax].parent;
+    }
+    if (eax != LZ78_ROOT || child != -1 || d->tail[esi] != link)
+        goto bad;
+    return;
+bad:
+    fprintf(stderr, "UHA_CHECK_LZ78_TRIE: mismatch\n");
+    abort();
+}
+#endif
+
+/* Trie search: returns 1 and the child of `esi` labelled `ebx` in *nesi, or 2
+ * with *link = last child of `esi` (LZ78_ROOT when it has none). */
 static int lz78_trie(lz78_dec *d, int esi, int ebx, int *nesi, int *link)
 {
     uint32_t eax;
@@ -338,6 +421,18 @@ static int lz78_trie(lz78_dec *d, int esi, int ebx, int *nesi, int *link)
     *link = (int)LZ78_ROOT;
     if ((uint32_t)esi >= d->next_code)
         return 2;
+    if (d->hkey) {
+        int child = lz78_hash_find(d, ((uint32_t)esi << 8) | (uint8_t)ebx);
+#ifdef UHA_CHECK_LZ78_TRIE
+        lz78_trie_check(d, esi, ebx, child);
+#endif
+        if (child >= 0) {
+            *nesi = child;
+            return 1;
+        }
+        *link = (int)d->tail[esi];
+        return 2;
+    }
     eax = d->dict[esi].w0;
     for (;;) {
         if (eax == LZ78_ROOT)
@@ -372,6 +467,11 @@ static void lz78_add_entry(lz78_dec *d, int prev, int suffix, int link)
         d->dict[prev].w0 = (uint16_t)nc;
     else if ((uint32_t)link < d->next_code)
         d->dict[link].parent = (uint16_t)nc;
+    if (d->hkey) {
+        lz78_hash_insert(d, ((uint32_t)prev << 8) | (uint8_t)suffix, nc);
+        d->tail[prev] = (uint16_t)nc;
+        d->tail[nc] = (uint16_t)LZ78_ROOT;
+    }
     if (nc == (uint32_t)(1 << d->width) && d->width < 16) {
         d->width++;
         d->mask = (1u << d->width) - 1u;
@@ -1824,8 +1924,27 @@ int uha_lz78_decode(const uint8_t *in, size_t in_len, uint8_t order,
     d.dict = (lz78_ent *)calloc(d.dict_cap, sizeof(lz78_ent));
     if (!d.dict)
         return -2;
+    {
+        /* Hash capacity: power of two >= 2 * dictionary size (load <= 1/2). */
+        int bits = 10;
+        while ((1u << bits) < 2u * d.dict_cap)
+            bits++;
+        d.hmask = (1u << bits) - 1u;
+        d.hshift = 32 - bits;
+        d.hkey = (uint32_t *)malloc(((size_t)d.hmask + 1u) * sizeof(uint32_t));
+        d.hval = (uint16_t *)malloc(((size_t)d.hmask + 1u) * sizeof(uint16_t));
+        d.tail = (uint16_t *)malloc((size_t)d.dict_cap * sizeof(uint16_t));
+        if (!d.hkey || !d.hval || !d.tail) {
+            /* Fall back to the sibling-list walk. */
+            free(d.hkey); free(d.hval); free(d.tail);
+            d.hkey = NULL; d.hval = NULL; d.tail = NULL;
+        }
+    }
 
     rc = lz78_decode_payload(&d);
+    free(d.hkey);
+    free(d.hval);
+    free(d.tail);
     free(d.dict);
     return rc;
 }

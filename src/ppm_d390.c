@@ -1,5 +1,6 @@
 #include "ppm_priv.h"
 #include <string.h>
+#include "simd_kernels.h"
 
 static uint32_t f154w(const ppm_model *m, uint32_t key)
 {
@@ -65,23 +66,32 @@ static uint32_t present_contribution(const ppm_model *m, int ctx_id, int sym,
     return f154i2(m, (freq << 14) / total);
 }
 
+/*
+ * Legacy form: rem = cum - sum of f_work[b] over the symbols b that are
+ * present in ctx (f_ctx[b] != 0) or excluded, each symbol counted once,
+ * all modulo 2^16. Computed as one vector pass over the present symbols
+ * plus the distinct excluded symbols that are absent from ctx.
+ */
 static uint32_t novel_workctx_contribution(const ppm_model *m, int ctx, int work_ctx,
                                            int sym, const uint8_t *excl, int n)
 {
     int b;
-    uint32_t rem, total, freq;
-    uint8_t excl_map[256];
-    memset(excl_map, 0, sizeof(excl_map));
-    for (b = 0; b < n; b++)
-        excl_map[excl[b]] = 1;
-
+    uint32_t rem, total, freq, s;
+    uint64_t seen[4] = { 0, 0, 0, 0 };
     const uint16_t *f_ctx = m->freq[ctx];
     const uint16_t *f_work = m->freq[work_ctx];
-    rem = m->cum[work_ctx][0];
-    for (b = 0; b <= 255; b++) {
-        if (f_ctx[b] != 0 || excl_map[b])
-            rem = (rem - f_work[b]) & 0xFFFFu;
+
+    s = uha_sum16_where_nonzero(f_ctx, f_work);
+    for (b = 0; b < n; b++) {
+        unsigned e = excl[b];
+        uint64_t bit = (uint64_t)1 << (e & 63);
+        if (seen[e >> 6] & bit)
+            continue;
+        seen[e >> 6] |= bit;
+        if (f_ctx[e] == 0)
+            s += f_work[e];
     }
+    rem = (m->cum[work_ctx][0] - s) & 0xFFFFu;
     total = total_from_rem(m, work_ctx, rem);
     if (total == 0)
         return 0;

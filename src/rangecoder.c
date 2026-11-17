@@ -3,26 +3,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-unsigned long uha_rc_dec_count(void) { return 0; }
 void uha_cost_reset(void) {}
 uint64_t uha_cost_get(void) { return 0; }
 void uha_cost_setcap(uint64_t n) { (void)n; }
-
-void uha_reader_init(uha_reader *r, const uint8_t *data, size_t size)
-{
-    r->data = data;
-    r->size = size;
-    r->pos = 0;
-    r->exhausted = 0;
-}
-
-uint8_t uha_reader_byte(uha_reader *r)
-{
-    if (r->pos < r->size)
-        return r->data[r->pos++];
-    r->exhausted = 1;
-    return 0;
-}
 
 void uha_rc_init(uha_rc *rc, const uint8_t *data, size_t size)
 {
@@ -38,114 +21,7 @@ void uha_rc_init(uha_rc *rc, const uint8_t *data, size_t size)
         rc->corrupt = 1;
 }
 
-void uha_rc_normalize(uha_rc *rc)
-{
-    while (rc->range < UHA_RC_TOP) {
-        rc->code = (rc->code << 8) | uha_reader_byte(&rc->rd);
-        rc->range <<= 8;
-    }
-}
-
-uint32_t uha_rc_threshold(uha_rc *rc, uint32_t total)
-{
-    uint32_t r;
-
-    if (total == 0) {
-        rc->corrupt = 1;
-        return 0;
-    }
-    rc->range /= total;
-    if (rc->range == 0) {
-        rc->corrupt = 1;
-        return 0;
-    }
-    r = rc->code / rc->range;
-    if (r >= total) {
-        rc->corrupt = 1;
-        r = total - 1;
-    }
-    return r;
-}
-
-uint32_t uha_rc_fixed12(uha_rc *rc)
-{
-    uint32_t r;
-
-    rc->range >>= 12;
-    if (rc->range == 0) {
-        rc->corrupt = 1;
-        return 0;
-    }
-    r = rc->code / rc->range;
-    if (r >= 4096) {
-        rc->corrupt = 1;
-        r = 4095;
-    }
-    return r;
-}
-
-void uha_rc_remove(uha_rc *rc, uint32_t low, uint32_t high)
-{
-    if (high <= low) {
-        rc->corrupt = 1;
-        return;
-    }
-    rc->code -= rc->range * low;
-    rc->range *= (high - low);
-    uha_rc_normalize(rc);
-}
-
-uint32_t uha_rc_uniform(uha_rc *rc, uint32_t total)
-{
-    uint32_t t;
-
-    if (total == 0) {
-        rc->corrupt = 1;
-        return 0;
-    }
-    t = uha_rc_threshold(rc, total);
-    uha_rc_remove(rc, t, t + 1);
-    return t;
-}
-
-int uha_rc_bit12_shift(uha_rc *rc, uint16_t *prob, int shift)
-{
-    uint32_t t;
-
-    if (rc->corrupt)
-        return 0;
-    if (shift < 1)
-        shift = 1;
-    else if (shift > 12)
-        shift = 12;
-
-    rc->range >>= 12;
-    if (rc->range == 0) {
-        rc->corrupt = 1;
-        return 0;
-    }
-    t = rc->code / rc->range;
-    if (t >= 4096) {
-        rc->corrupt = 1;
-        t = 4095;
-    }
-    if (t < *prob) {
-        rc->range *= *prob;
-        *prob = (uint16_t)(*prob + ((4096u - *prob) >> shift));
-        uha_rc_normalize(rc);
-        return 0;
-    }
-    rc->code -= rc->range * *prob;
-    rc->range *= (4096u - *prob);
-    *prob = (uint16_t)(*prob - (*prob >> shift));
-    uha_rc_normalize(rc);
-    return 1;
-}
-
-int uha_rc_bit12(uha_rc *rc, uint16_t *prob)
-{
-    return uha_rc_bit12_shift(rc, prob, 6);
-}
+/* The other range decoder primitives are inline in rangecoder.h. */
 
 #if defined(__GNUC__) || defined(__clang__)
 #define UHA_LIKELY(x)   __builtin_expect(!!(x), 1)

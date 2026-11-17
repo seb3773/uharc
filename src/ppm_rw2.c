@@ -1,3 +1,4 @@
+#include <string.h>
 #include "ppm_priv.h"
 
 enum { TAB_A = 1, TAB_B = 2, TAB_E = 3, TAB_ESC = 4 };
@@ -14,8 +15,8 @@ void ppm_rec2_total_flags(ppm_model *m, uint32_t rec2_idx, uint8_t *rec,
     int slot, i;
     uint8_t xs;
 
-    for (i = 0; i <= 0x13; i++)
-        rec[i] = m->rec2s[rec2_idx][i];
+    /* memcpy: a byte-pointer loop forces a reload of m->rec2s per byte. */
+    memcpy(rec, m->rec2s[rec2_idx], 0x14);
     *total = rec[0x12];
     *active_count = 0;
     for (slot = 0; slot <= 7; slot++) {
@@ -97,8 +98,7 @@ int ppm_rw2_decode(ppm_model *m, uha_rc *r, uint32_t rec2_idx, int sel_hint, int
         return 0;
 
     a0 = (m->a8g >= m->dcg) ? 8 : (rec[0x13] & 0x0F);
-    for (i = 0; i <= 0x13; i++)
-        recw[i] = rec[i];
+    memcpy(recw, rec, 0x14);
     total = base_total;
     n_adapt = 0;
 
@@ -286,8 +286,7 @@ int ppm_rw2_encode(ppm_model *m, uint32_t rec2_idx, int sel_hint, int target, in
         return 0;
 
     a0 = (m->a8g >= m->dcg) ? 8 : (rec[0x13] & 0x0F);
-    for (i = 0; i <= 0x13; i++)
-        recw[i] = rec[i];
+    memcpy(recw, rec, 0x14);
     total = base_total;
     n_adapt = 0;
 

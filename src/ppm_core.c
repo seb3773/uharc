@@ -101,30 +101,43 @@ int ppm_fenwick_bsearch(const uint16_t *row, uint32_t total, uint32_t freq, uint
     return base;
 }
 
+/*
+ * Fenwick descent with on-the-fly exclusion of the symbols in excl[].
+ *
+ * Legacy form: alive[i] starts at 1 and is cleared when a step is taken past
+ * excl[i]; at each step s = sum of freq[excl[i]] over the alive entries with
+ * excl[i] < node. Since base_node only grows and a taken step clears exactly
+ * the entries below the new base, "alive" is equivalent to
+ * excl[i] >= base_node, so s is the (16-bit) sum over
+ * base_node <= excl[i] < node: computed here branch-free from the cached
+ * weights, with identical results (duplicates in excl[] count twice, as
+ * before; the sum is taken modulo 2^16 like the legacy running mask).
+ */
 int ppm_fenwick_mixsearch(const uint16_t *row, const uint16_t *freq_row,
                           uint32_t total, uint32_t freq,
                           const uint8_t *excl, int nexcl, uint32_t *rem)
 {
     int base_node, step, esi_node, i;
     uint32_t budget, s, cumat;
-    int alive[32];
+    uint32_t w[256];
 
+    if (nexcl > 256)
+        nexcl = 256;
     budget = (total - freq) & 0xFFFFu;
     base_node = 0;
     step = 0x80;
     for (i = 0; i < nexcl; i++)
-        alive[i] = 1;
+        w[i] = freq_row[excl[i]];
     while (step != 0) {
         esi_node = base_node + step;
         s = 0;
-        for (i = 0; i < nexcl; i++)
-            if (alive[i] && esi_node > excl[i])
-                s = (s + freq_row[excl[i]]) & 0xFFFFu;
+        for (i = 0; i < nexcl; i++) {
+            int e = excl[i];
+            s += (e >= base_node && e < esi_node) ? w[i] : 0u;
+        }
+        s &= 0xFFFFu;
         cumat = row[esi_node];
         if (cumat < ((s + budget) & PPM_M32)) {
-            for (i = 0; i < nexcl; i++)
-                if (alive[i] && esi_node > excl[i])
-                    alive[i] = 0;
             budget = (budget - ((cumat - s) & PPM_M32)) & 0xFFFFu;
             base_node = esi_node;
         }

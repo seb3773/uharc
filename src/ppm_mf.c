@@ -5,6 +5,41 @@
 #include "ppm_priv.h"
 #include "encode.h"
 
+/*
+ * Number of equal bytes walking backwards from window[a] and window[b]
+ * (inclusive), capped at 64: same result as the legacy byte loop
+ *     n = 0; while (n < 0x40 && w[a] == w[b]) { n++; a--; b--; }
+ * computed 8 bytes at a time. Callers guarantee a, b >= 0x3F, so every byte
+ * read (down to a - 63, b - 63) is one the legacy loop could read as well.
+ */
+static inline uint32_t ppm_back_match64(const uint8_t *w, uint32_t a, uint32_t b)
+{
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__BYTE_ORDER__) \
+    && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    uint32_t n = 0;
+
+    while (n < 0x40) {
+        uint64_t x, y, z;
+        memcpy(&x, w + a - n - 7, 8);
+        memcpy(&y, w + b - n - 7, 8);
+        z = x ^ y;
+        if (z != 0)
+            return n + ((uint32_t)__builtin_clzll(z) >> 3);
+        n += 8;
+    }
+    return 0x40;
+#else
+    uint32_t n = 0;
+
+    while (n < 0x40 && w[a] == w[b]) {
+        n++;
+        a--;
+        b--;
+    }
+    return n;
+#endif
+}
+
 static uint32_t hash1(uint32_t ctx0)
 {
     return ((ctx0 >> 0xD) ^ ctx0) & 0x3FFFF;
@@ -146,7 +181,7 @@ void ppm_matchfinder_decode(ppm_model *m, uha_rc *r, uint8_t *raw_syms, ppm_matc
     uint32_t ctx0, ctx1, ctx2, mask, wrap, winpos;
     uint32_t h1, h2, saved18, type1c, flag30, depth;
     uint32_t bestlen, matchlen, edi, cand, dist, cur, cur14, ebx;
-    uint32_t a, b, n, inprog, ddc, d4a8, v, pidx, length_, eedi, ov_base;
+    uint32_t inprog, ddc, d4a8, v, pidx, length_, eedi, ov_base;
     int cls, bank, node, declen, bit, nxt, i, maxlen;
     uint32_t runit, freq, prob;
 
@@ -185,15 +220,7 @@ void ppm_matchfinder_decode(ppm_model *m, uha_rc *r, uint8_t *raw_syms, ppm_matc
                 if (ebx < 0x40)
                     ebx += wrap;
                 if (m->window[cur - 0xC] == m->window[ebx - 0xC]) {
-                    n = 0;
-                    a = cur14;
-                    b = ebx - 1;
-                    while (n < 0x40 && m->window[a] == m->window[b]) {
-                        n++;
-                        a--;
-                        b--;
-                    }
-                    matchlen = n;
+                    matchlen = ppm_back_match64(m->window, cur14, ebx - 1);
                     if (matchlen >= bestlen) {
                         bestlen = matchlen;
                         edi = cand;
@@ -334,7 +361,7 @@ int ppm_matchfinder_encode(ppm_model *m, ppm_match *mr,
     uint32_t ctx0, ctx1, ctx2, mask, wrap, winpos;
     uint32_t h1, h2, saved18, type1c, flag30, depth;
     uint32_t bestlen, matchlen, edi, cand, dist, cur, cur14, ebx;
-    uint32_t a, b, n, inprog, v;
+    uint32_t inprog, v;
     uint32_t ddc, d4a8, maxlen, bank, mlen, want, ov_base, eedi, idx, d, i2;
     int cls;
 
@@ -373,15 +400,7 @@ int ppm_matchfinder_encode(ppm_model *m, ppm_match *mr,
                 if (ebx < 0x40)
                     ebx += wrap;
                 if (m->window[cur - 0xC] == m->window[ebx - 0xC]) {
-                    n = 0;
-                    a = cur14;
-                    b = ebx - 1;
-                    while (n < 0x40 && m->window[a] == m->window[b]) {
-                        n++;
-                        a--;
-                        b--;
-                    }
-                    matchlen = n;
+                    matchlen = ppm_back_match64(m->window, cur14, ebx - 1);
                     if (matchlen >= bestlen) {
                         bestlen = matchlen;
                         edi = cand;
