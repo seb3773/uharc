@@ -3,15 +3,37 @@
 
 /*
  * Slicing-by-16 CRC-32 tables using standard reflected IEEE 802.3 polynomial (0xEDB88320u).
- * 16 tables of 256 uint32_t (16 KB in .rodata). Processes 16 bytes per iteration,
- * yielding 4-6x speedup over standard single-byte table lookup across all platforms.
+ * 16 tables of 256 uint32_t (16 KB in .bss, generated once on first use instead of .rodata).
+ * Processes 16 bytes per iteration, yielding 4-6x speedup over single-byte lookup.
  */
-#include "crc32_tables.inc"
+static uint32_t s_crc32_tables[16][256];
+static int s_crc32_ready = 0;
+
+static void crc32_init_tables(void)
+{
+    uint32_t i, t;
+    for (i = 0; i < 256u; i++) {
+        uint32_t c = i;
+        int b;
+        for (b = 0; b < 8; b++)
+            c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        s_crc32_tables[0][i] = c;
+    }
+    for (t = 1; t < 16u; t++) {
+        for (i = 0; i < 256u; i++) {
+            uint32_t prev = s_crc32_tables[t - 1][i];
+            s_crc32_tables[t][i] = (prev >> 8) ^ s_crc32_tables[0][prev & 0xFFu];
+        }
+    }
+    s_crc32_ready = 1;
+}
 
 static inline uint32_t crc32_core_init(uint32_t c, const uint8_t *buf, size_t len)
 {
     if (!buf || len == 0)
         return c;
+    if (!s_crc32_ready)
+        crc32_init_tables();
 
     while (len >= 16) {
         uint32_t w0, w1, w2, w3;

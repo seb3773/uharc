@@ -24,10 +24,11 @@
 #include <string.h>
 
 #include "alz_arena_c4.h"
+#include "alz_tables.h"
 
-/* LUT de coût capturée au runtime @0x43f154 (§13.133/134). alz_score_cum[16385],
- * liaison interne (statique) — aucune collision avec alz_score.c qui l'inclut aussi. */
-#include "alz_score_table.inc"
+/* Reuse AlzSseMap[16385] generated at runtime by uha_alz_gen_tables()
+ * (bit-exact with the legacy @0x43f154 table). */
+#define alz_score_cum AlzSseMap
 
 #define M16(v) ((uint16_t)((v) & 0xFFFFu))
 #define M32(v) ((uint32_t)((v) & 0xFFFFFFFFu))
@@ -109,6 +110,8 @@ static void c4_row_commit(alz_arena_c4_row *R)
 void alz_arena_c4_init(alz_arena_c4_t *a)
 {
     uint32_t r, i;
+    if (!AlzSseMap[1])
+        uha_alz_gen_tables();
     memset(a, 0, sizeof(*a));
     for (r = 0; r < ALZ_ARENA_C4_ROWMAX; r++) {
         a->rows[r].d4 = 1u;        /* C1 : fixpoint du PRIME commit */

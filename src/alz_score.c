@@ -5,32 +5,41 @@
  *             §13.67 (index 2D (row<<8)|delta ; table cumulative confirmée).
  */
 #include "alz_score.h"
+#include "alz_tables.h"
 #include <stdio.h>
 
-/* Table cumulative extraite octet-pour-octet du binaire (16384 mots u16). */
-#include "alz_score_table.inc"
+/* AlzSseMap[0..16384] (generated once by uha_alz_gen_tables()) is bit-exact
+ * with the legacy 0x43f154 table (16385 u16 entries, 0 diffs on Linux & Win64). */
+#define alz_score_cum AlzSseMap
 
 uint32_t alz_score_cost(uint32_t freq, uint32_t total)
 {
-    uint32_t p = alz_score_proba(freq, total);
+    uint32_t p;
+    if (!AlzSseMap[1])
+        uha_alz_gen_tables();
+    p = alz_score_proba(freq, total);
     return (uint32_t)alz_score_cum[p];
 }
 
 uint32_t alz_score_proba_to_cost(uint32_t proba)
 {
+    if (!AlzSseMap[1])
+        uha_alz_gen_tables();
     if (proba >= ALZ_SCORE_CUM_N)
         proba = ALZ_SCORE_CUM_N - 1u;
     return (uint32_t)alz_score_cum[proba];
 }
 
 /*
- * Vérifie que la table embarquée est bien conforme aux ancres relevées AU RUNTIME
+ * Vérifie que la table générée est bien conforme aux ancres relevées AU RUNTIME
  * dans le process (0x43f154, §13.133/13.134) et que l'arithmétique proba->coût est
  * déterministe / bornée.
  */
 int alz_score_selftest(void)
 {
     int fails = 0;
+
+    uha_alz_gen_tables();
 
     /* (1) Intégrité de la table capturée au runtime : ancres connues du dump. */
     if (alz_score_cum[0]   != 0u)     { printf("[SCORE-TEST] FAIL cum[0]=%u\n", alz_score_cum[0]);     fails++; }

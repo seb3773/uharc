@@ -20,6 +20,27 @@ DESTDIR ?=
 SRC_FILES = $(wildcard src/*.c src/uha04/*.c)
 SRC_HEADERS = $(wildcard src/*.h src/*.inc src/uha04/*.h)
 
+# Cold CLI/container/helper translation units compiled with -Os (codecs stay at -O3)
+COLD_SRCS = src/uharc.c src/container.c src/wildcard.c src/crypto.c \
+            src/filter.c src/rle.c src/selclk.c src/frontier.c
+HOT_SRCS  = $(filter-out $(COLD_SRCS),$(SRC_FILES))
+
+COLD_CFLAGS       = $(subst -O3,-Os,$(CFLAGS))
+WIN64_COLD_CFLAGS = $(subst -O3,-Os,$(WIN64_CFLAGS))
+
+LINUX_OBJ_DIR = $(LINUX_DIR)/obj
+WIN64_OBJ_DIR = $(WIN64_DIR)/obj
+
+LINUX_HOT_OBJS  = $(patsubst %.c,$(LINUX_OBJ_DIR)/%.o,$(HOT_SRCS))
+LINUX_COLD_OBJS = $(patsubst %.c,$(LINUX_OBJ_DIR)/%.o,$(COLD_SRCS))
+LINUX_OBJS      = $(LINUX_HOT_OBJS) $(LINUX_COLD_OBJS)
+
+WIN64_HOT_OBJS  = $(patsubst %.c,$(WIN64_OBJ_DIR)/%.o,$(HOT_SRCS))
+WIN64_COLD_OBJS = $(patsubst %.c,$(WIN64_OBJ_DIR)/%.o,$(COLD_SRCS))
+WIN64_OBJS      = $(WIN64_HOT_OBJS) $(WIN64_COLD_OBJS)
+
+HAVE_WIN64 := $(shell command -v $(CROSS_WIN64_CC) 2>/dev/null)
+
 .PHONY: all linux win64 all-platforms clean install uninstall deb dist test asan help debug
 
 all: linux
@@ -44,21 +65,38 @@ $(LINUX_DIR):
 $(WIN64_DIR):
 	mkdir -p $(WIN64_DIR)
 
-$(TARGET_LINUX): $(SRC_FILES) $(SRC_HEADERS) | $(LINUX_DIR)
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(SRC_FILES) $(LDFLAGS)
+$(LINUX_HOT_OBJS): $(LINUX_OBJ_DIR)/%.o: %.c $(SRC_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
+
+$(LINUX_COLD_OBJS): $(LINUX_OBJ_DIR)/%.o: %.c $(SRC_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) $(COLD_CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
+
+$(TARGET_LINUX): $(LINUX_OBJS) | $(LINUX_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(LINUX_OBJS) -o $@ $(LDFLAGS)
 	@$(STRIP_LINUX) $@ 2>/dev/null || true
 	@ln -sf linux/uharc $(BUILD_DIR)/uharc
 	@ln -sf build/linux/uharc uharc
 
-$(TARGET_WIN64): $(SRC_FILES) $(SRC_HEADERS) | $(WIN64_DIR)
-	@if which $(CROSS_WIN64_CC) >/dev/null 2>&1; then \
-		$(CROSS_WIN64_CC) $(WIN64_CFLAGS) -o $@ $(SRC_FILES) $(WIN64_LDFLAGS); \
-		x86_64-w64-mingw32-strip --strip-all $@ 2>/dev/null || true; \
-		echo "Windows 64-bit binary built: $@"; \
-	else \
-		echo "WARNING: $(CROSS_WIN64_CC) not found, skipping win64 target."; \
-		echo "Install with: sudo apt install gcc-mingw-w64-x86-64"; \
-	fi
+ifneq ($(HAVE_WIN64),)
+$(WIN64_HOT_OBJS): $(WIN64_OBJ_DIR)/%.o: %.c $(SRC_HEADERS)
+	@mkdir -p $(dir $@)
+	@$(CROSS_WIN64_CC) $(WIN64_CFLAGS) -c $< -o $@
+
+$(WIN64_COLD_OBJS): $(WIN64_OBJ_DIR)/%.o: %.c $(SRC_HEADERS)
+	@mkdir -p $(dir $@)
+	@$(CROSS_WIN64_CC) $(WIN64_COLD_CFLAGS) -c $< -o $@
+
+$(TARGET_WIN64): $(WIN64_OBJS) | $(WIN64_DIR)
+	@$(CROSS_WIN64_CC) $(WIN64_CFLAGS) $(WIN64_OBJS) -o $@ $(WIN64_LDFLAGS)
+	@x86_64-w64-mingw32-strip --strip-all $@ 2>/dev/null || true
+	@echo "Windows 64-bit binary built: $@"
+else
+$(TARGET_WIN64): | $(WIN64_DIR)
+	@echo "WARNING: $(CROSS_WIN64_CC) not found, skipping win64 target."
+	@echo "Install with: sudo apt install gcc-mingw-w64-x86-64"
+endif
 
 debug: CFLAGS = -std=c99 -Wall -Wextra -g -O0 -Isrc -Isrc/uha04
 debug: LDFLAGS = -lm
