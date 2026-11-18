@@ -50,60 +50,73 @@ int ppm_detr_forward(const uint8_t *in, uint32_t len, uint32_t thr2,
         if (reuse)
             pending = -1;
 
-        if (count >= thr2) {
+        if (count > thr2) {
             out[n++] = (uint8_t)~b;
-            pos += 1;
+            pos += reuse ? 0u : 1u;
             continue;
         }
 
         if (b == 0x20) {
-            uint32_t nsp = 1;
-            while (nsp < 32 && pos + nsp < len && in[pos + nsp] == 0x20)
-                nsp++;
-            if (nsp == 1) {
-                cls = -1;               /* single space : literal */
-            } else if (nsp >= 32) {
-                cls = 0;                /* class 32 spaces */
-            } else {
-                if (nsp > 16)
-                    nsp = 16;           /* clamp to 16 (legacy 0x420f3f: mov byte [esp+0x10], 0x10) */
-                cls = (int)(17 - nsp);
+            if (thr2 - count >= 32) {
+                uint32_t nsp = 1;
+                while (nsp < 32 && pos + nsp < len && in[pos + nsp] == 0x20)
+                    nsp++;
+                if (nsp == 1) {
+                    cls = -1;               /* single space : literal */
+                } else if (nsp >= 32) {
+                    cls = 0;                /* class 32 spaces */
+                } else {
+                    if (nsp > 16)
+                        nsp = 16;           /* clamp to 16 (legacy 0x420f3f: mov byte [esp+0x10], 0x10) */
+                    cls = (int)(17 - nsp);
+                }
             }
-        } else if (g_detr_nb[b] != 0 && thr2 - count >= 4) {
-            uint32_t off = reuse ? pos : pos + 1;
-            const uint8_t *cands = g_detr_cand + (uint32_t)(b - 97) * 16;
-            uint32_t i, nb = g_detr_nb[b];
-            for (i = 0; i < nb; i++) {
-                uint32_t c = cands[i];
-                uint32_t sl = DetrStrLen[c], j, ok = 1;
-                for (j = 1; j < sl; j++) {
-                    uint32_t k = off + (j - 1);
-                    if (k >= len ||
-                        (uint8_t)~DetrStrData[DetrStrOff[c] + j] != in[k]) {
-                        ok = 0;
+        } else if (g_detr_nb[b] != 0) {
+            if (thr2 - count >= 4) {
+                uint32_t off = reuse ? pos : pos + 1;
+                const uint8_t *cands = g_detr_cand + (uint32_t)(b - 97) * 16;
+                uint32_t i, nb = g_detr_nb[b];
+                for (i = 0; i < nb; i++) {
+                    uint32_t c = cands[i];
+                    uint32_t sl = DetrStrLen[c], j, ok = 1;
+                    for (j = 1; j < sl; j++) {
+                        uint32_t k = off + (j - 1);
+                        if (k >= len ||
+                            (uint8_t)~DetrStrData[DetrStrOff[c] + j] != in[k]) {
+                            ok = 0;
+                            break;
+                        }
+                    }
+                    if (ok && sl >= 1) {
+                        cls = (int)c;
                         break;
                     }
                 }
-                if (ok && sl >= 1) {
-                    cls = (int)c;
-                    break;
-                }
             }
-        } else if (b == 0x0A && pos + 1 < len) {
-            if (g_detr_case[in[pos + 1]] == 2)
-                cls = 0x60;
-        } else if (b == 0x0D && pos + 2 < len && in[pos + 1] == 0x0A) {
-            if (g_detr_case[in[pos + 2]] == 2)
-                cls = 0x61;
-            else if (in[pos + 2] == 0x20 && pos + 3 < len && in[pos + 3] != 0x20)
-                cls = 0x62;
-        } else if (g_detr_case[b] == 1 && pos + 1 < len &&
-                   g_detr_case[in[pos + 1]] == 2) {
-            cls = 0x63;
+        } else if (thr2 - count >= 4) {
+            if (b == 0x0A && pos + 1 < len) {
+                if (g_detr_case[in[pos + 1]] == 2)
+                    cls = 0x60;
+            } else if (b == 0x0D && pos + 2 < len && in[pos + 1] == 0x0A) {
+                if (g_detr_case[in[pos + 2]] == 2)
+                    cls = 0x61;
+                else if (in[pos + 2] == 0x20 && pos + 3 < len && in[pos + 3] != 0x20)
+                    cls = 0x62;
+            } else if (g_detr_case[b] == 1 && pos + 1 < len &&
+                       g_detr_case[in[pos + 1]] == 2) {
+                cls = 0x63;
+            }
         }
 
         if (cls < 0) {
-            out[n++] = (uint8_t)~b;
+            if (b >= 0x80 && g_detr_esc2[b - 0x80] != 0) {
+                /* Legacy 0x420eeb..0x420f27: bytes colliding with detr codes
+                 * (DetrClass[b] < 200) are escaped as a two-symbol pair. */
+                out[n++] = (uint8_t)~g_detr_esc1[b - 0x80];
+                out[n++] = (uint8_t)~g_detr_esc2[b - 0x80];
+            } else {
+                out[n++] = (uint8_t)~b;
+            }
             /* En mode `reuse` l'byte has ALREADY ete consumes by the 0x63 : the
              * curseur d'input not moves not, single there output advances d'1. */
             pos += reuse ? 0u : 1u;

@@ -634,7 +634,8 @@ static int ppm_encode_core(const uint8_t *syms, uint32_t nsyms,
             ppm_bc1_reset();
             next_boundary = (uint32_t)out_pos;
         }
-        while ((uint32_t)out_pos >= next_boundary && (uint32_t)in_pos < nsyms) {
+        while ((uint32_t)out_pos >= next_boundary && next_boundary < usize &&
+               (uint32_t)in_pos < nsyms) {
             period = 0x40000u >> (m.byte_class * 2);
             boundary_target = (usize - next_boundary > period)
                 ? next_boundary + period : usize;
