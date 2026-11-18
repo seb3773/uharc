@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_DIR="${SCRIPT_DIR}/build/pkg_root"
-VERSION="0.6b"
+VERSION="0.6b.1"
 ARCH="amd64"
 DEB_NAME="uharc_${VERSION}_${ARCH}.deb"
 
@@ -41,7 +41,7 @@ fi
 # DEBIAN/control
 cat << 'CTRL_EOF' > "${PKG_DIR}/DEBIAN/control"
 Package: uharc
-Version: 0.6b
+Version: 0.6b.1
 Section: utils
 Priority: optional
 Architecture: amd64
