@@ -92,7 +92,10 @@ int uha_decrypt(uint8_t *raw, size_t rawlen, const uha_header *h, const char *pa
         return -5;
 
     crc_len = (size_t)h->file_count * 4;
-    end64 = (uint64_t)h->attrs_ofs + h->attrs_packed;
+    if (h->version == 4)
+        end64 = (uint64_t)h->attrs2_ofs + h->attrs2_packed;
+    else
+        end64 = (uint64_t)h->attrs_ofs + h->attrs_packed;
     if (end64 > rawlen)
         return -2;
 
@@ -104,7 +107,8 @@ int uha_decrypt(uint8_t *raw, size_t rawlen, const uha_header *h, const char *pa
         stream_xor(raw + h->data_ofs, h->psize, user);
     }
 
-    if (h->flags & UHA_FLAG_PW_HDR) {
+    if ((h->flags & UHA_FLAG_PW_HDR) ||
+        (h->version == 4 && (h->flags & UHA_FLAG_PW_DATA))) {
         derive_table(def, UHA_DEFAULT_PASSWORD);
         if (crc_len > 0) {
             stream_xor(raw + h->crc_ofs, crc_len, user);
@@ -117,6 +121,10 @@ int uha_decrypt(uint8_t *raw, size_t rawlen, const uha_header *h, const char *pa
         if (h->attrs_packed > 0) {
             stream_xor(raw + h->attrs_ofs, h->attrs_packed, user);
             stream_xor(raw + h->attrs_ofs, h->attrs_packed, def);
+        }
+        if (h->version == 4 && h->attrs2_packed > 0) {
+            stream_xor(raw + h->attrs2_ofs, h->attrs2_packed, user);
+            stream_xor(raw + h->attrs2_ofs, h->attrs2_packed, def);
         }
     }
     return 0;

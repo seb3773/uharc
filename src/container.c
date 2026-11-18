@@ -6,6 +6,7 @@
 #include "uha.h"
 #include "lzp.h"
 #include "crc32.h"
+#include "uha04/uha04_codec.h"
 
 static const uint8_t uha_init_sbox[256] = {
     0xc3,0xae,0x65,0x6b,0x78,0x47,0xf2,0x91,0xd6,0x50,0xcb,0x65,0x20,0xbd,0x75,0xbf,
@@ -65,12 +66,13 @@ static void descramble(uint8_t *buf, size_t n)
 
 int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
 {
-    uint8_t dec[UHA_HDR_LEN];
+    uint8_t dec[UHA_HDR_LEN_V4];
     uint8_t seed;
     uint16_t check16;
-    uint64_t crc_ofs64, names_ofs64, attrs_ofs64, end64;
+    uint64_t crc_ofs64, names_ofs64, attrs_ofs64, attrs2_ofs64, end64;
     size_t sfx_ofs = 0;
     const uint8_t *hdr = raw;
+    uint8_t ver;
     int i;
 
     if (!raw || !h || rawlen < UHA_HDR_LEN)
@@ -80,18 +82,25 @@ int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
         size_t off;
         int found = 0;
         for (off = 0; off + UHA_HDR_LEN <= rawlen; off++) {
-            if (raw[off] == 'U' && raw[off + 1] == 'H' && raw[off + 2] == 'A' && raw[off + 3] == 6) {
-                uint8_t test_dec[UHA_HDR_LEN];
-                uint8_t test_seed = raw[off + 0x25];
-                uint16_t test_chk = le16(raw + off + 37);
-                int k;
-                for (k = 0; k < 31; k++)
-                    test_dec[4 + k] = (uint8_t)(raw[off + 4 + k] ^ ((test_seed + (uint32_t)k * (uint32_t)k) & 0xFF));
-                if (test_chk == (uint16_t)(uha_crc32(test_dec + 4, 31) & 0xFFFFu)) {
-                    sfx_ofs = off;
-                    hdr = raw + off;
-                    found = 1;
-                    break;
+            if (raw[off] == 'U' && raw[off + 1] == 'H' && raw[off + 2] == 'A' &&
+                (raw[off + 3] == 6 || raw[off + 3] == 4)) {
+                uint8_t cand_ver = raw[off + 3];
+                size_t hlen = (cand_ver == 4) ? UHA_HDR_LEN_V4 : UHA_HDR_LEN;
+                int enc_len = (cand_ver == 4) ? 36 : 31;
+                size_t chk_ofs = (cand_ver == 4) ? 42 : 37;
+                if (off + hlen <= rawlen) {
+                    uint8_t test_dec[UHA_HDR_LEN_V4];
+                    uint8_t test_seed = raw[off + chk_ofs];
+                    uint16_t test_chk = le16(raw + off + chk_ofs);
+                    int k;
+                    for (k = 0; k < enc_len; k++)
+                        test_dec[4 + k] = (uint8_t)(raw[off + 4 + k] ^ ((test_seed + (uint32_t)k * (uint32_t)k) & 0xFF));
+                    if (test_chk == (uint16_t)(uha_crc32(test_dec + 4, (size_t)enc_len) & 0xFFFFu)) {
+                        sfx_ofs = off;
+                        hdr = raw + off;
+                        found = 1;
+                        break;
+                    }
                 }
             }
         }
@@ -100,8 +109,55 @@ int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
     } else {
         if (raw[0] != 'U' || raw[1] != 'H' || raw[2] != 'A')
             return -1;
-        if (raw[3] != 6)
+        if (raw[3] != 6 && raw[3] != 4)
             return -1;
+    }
+
+    ver = hdr[3];
+    if (ver == 4) {
+        if (rawlen - sfx_ofs < UHA_HDR_LEN_V4)
+            return -2;
+        memcpy(dec, hdr, UHA_HDR_LEN_V4);
+        seed = hdr[42];
+        for (i = 0; i < 36; i++)
+            dec[4 + i] = (uint8_t)(hdr[4 + i] ^ ((seed + (uint32_t)i * (uint32_t)i) & 0xFF));
+        check16 = le16(hdr + 42);
+        if (check16 != (uint16_t)(uha_crc32(dec + 4, 36) & 0xFFFFu))
+            return -2;
+
+        memset(h, 0, sizeof(*h));
+        h->version        = 4;
+        h->flags          = dec[8];
+        h->family         = dec[9];
+        h->order          = dec[10];
+        h->ndirs          = le16(dec + 11);
+        h->usize          = le32(dec + 13);
+        h->psize          = le32(dec + 17);
+        h->file_count     = le24(dec + 21);
+        h->names_unpacked = le24(dec + 24);
+        h->names_packed   = le24(dec + 27);
+        h->attrs_packed   = le24(dec + 30);
+        h->attrs2_packed  = le24(dec + 33);
+        h->w33            = le16(dec + 36);
+        h->w35            = le16(dec + 38);
+        h->w40            = le16(dec + 40);
+        h->check16        = check16;
+
+        crc_ofs64    = (uint64_t)sfx_ofs + (uint64_t)UHA_HDR_LEN_V4 + h->psize;
+        names_ofs64  = crc_ofs64 + (uint64_t)h->file_count * 4ULL;
+        attrs_ofs64  = names_ofs64 + h->names_packed;
+        attrs2_ofs64 = attrs_ofs64 + h->attrs_packed;
+        end64        = attrs2_ofs64 + h->attrs2_packed;
+        if (end64 > (uint64_t)SIZE_MAX)
+            return -2;
+
+        h->header_ofs = sfx_ofs;
+        h->data_ofs   = sfx_ofs + UHA_HDR_LEN_V4;
+        h->crc_ofs    = (size_t)crc_ofs64;
+        h->names_ofs  = (size_t)names_ofs64;
+        h->attrs_ofs  = (size_t)attrs_ofs64;
+        h->attrs2_ofs = (size_t)attrs2_ofs64;
+        return 0;
     }
 
     memcpy(dec, hdr, UHA_HDR_LEN);
@@ -200,6 +256,33 @@ static int decode_meta_block(const uint8_t *raw, size_t rawlen,
     return 0;
 }
 
+static int decode_meta_block_v4(const uint8_t *raw, size_t rawlen,
+                                size_t ofs, uint32_t pklen, uint8_t method,
+                                uint8_t *plain, uint32_t unpacked)
+{
+    uint8_t *blk;
+    int rc;
+
+    if ((uint64_t)ofs + pklen > rawlen)
+        return -2;
+    if (unpacked == 0)
+        return 0;
+    if (pklen == 0)
+        return -2;
+
+    blk = malloc(pklen);
+    if (!blk)
+        return -4;
+    memcpy(blk, raw + ofs, pklen);
+    descramble(blk, pklen);
+
+    rc = uha04_decode_stream(method, 0, blk, pklen, NULL, 0, plain, unpacked);
+    free(blk);
+    if (rc != 0)
+        return -4;
+    return 0;
+}
+
 void uha_entrylist_free(uha_entrylist *l)
 {
     int i;
@@ -236,38 +319,86 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
     rc = uha_parse_header(raw, rawlen, &h);
     if (rc != 0)
         return rc;
-    if ((uint64_t)h.names_ofs + h.names_packed + h.attrs_packed > rawlen)
-        return -2;
+    if (h.version == 4) {
+        if ((uint64_t)h.attrs2_ofs + h.attrs2_packed > rawlen)
+            return -2;
+    } else {
+        if ((uint64_t)h.names_ofs + h.names_packed + h.attrs_packed > rawlen)
+            return -2;
+    }
     if (h.file_count == 0)
         return 0;
     if (h.names_packed == 0 || h.attrs_packed == 0 || h.names_unpacked == 0)
         return -2;
+    if (h.version == 4 && h.attrs2_packed == 0)
+        return -2;
 
     fc = h.file_count;
     ndirs = h.ndirs;
-    if (ndirs == 0 || (uint64_t)ndirs + fc > h.names_unpacked)
+    if ((h.version != 4 && ndirs == 0) || (uint64_t)ndirs + fc > h.names_unpacked)
         return -2;
     if ((uint64_t)fc * 11ULL > SIZE_MAX)
         return -2;
     if (h.crc_ofs + (uint64_t)fc * 4ULL > rawlen)
         return -2;
 
-    rc = decode_meta_block(raw, rawlen, h.names_ofs, h.names_packed,
-                           h.names_unpacked, &names);
-    if (rc != 0)
-        return rc;
-
     alen = 11u * fc;
-    rc = decode_meta_block(raw, rawlen, h.attrs_ofs, h.attrs_packed, alen, &attrs);
-    if (rc != 0) {
-        free(names);
-        return rc;
-    }
+    if (h.version == 4) {
+        names = malloc(h.names_unpacked);
+        attrs = malloc(alen);
+        if (!names || !attrs) {
+            free(names);
+            free(attrs);
+            return -4;
+        }
+        rc = decode_meta_block_v4(raw, rawlen, h.names_ofs, h.names_packed,
+                                  17, names, h.names_unpacked);
+        if (rc != 0) {
+            free(names);
+            free(attrs);
+            return rc;
+        }
+        rc = decode_meta_block_v4(raw, rawlen, h.attrs_ofs, h.attrs_packed,
+                                  2, attrs, 4u * fc);
+        if (rc != 0) {
+            free(names);
+            free(attrs);
+            return rc;
+        }
+        if ((uint16_t)(uha_crc32(attrs, 4u * fc) & 0xFFFFu) != h.w35) {
+            free(names);
+            free(attrs);
+            return -2;
+        }
+        rc = decode_meta_block_v4(raw, rawlen, h.attrs2_ofs, h.attrs2_packed,
+                                  7, attrs + 4u * fc, 7u * fc);
+        if (rc != 0) {
+            free(names);
+            free(attrs);
+            return rc;
+        }
+        if ((uint16_t)(uha_crc32(attrs + 4u * fc, 7u * fc) & 0xFFFFu) != h.w40) {
+            free(names);
+            free(attrs);
+            return -2;
+        }
+    } else {
+        rc = decode_meta_block(raw, rawlen, h.names_ofs, h.names_packed,
+                               h.names_unpacked, &names);
+        if (rc != 0)
+            return rc;
 
-    if ((uint16_t)(uha_crc32(attrs, alen) & 0xFFFFu) != h.w35) {
-        free(names);
-        free(attrs);
-        return -2;
+        rc = decode_meta_block(raw, rawlen, h.attrs_ofs, h.attrs_packed, alen, &attrs);
+        if (rc != 0) {
+            free(names);
+            return rc;
+        }
+
+        if ((uint16_t)(uha_crc32(attrs, alen) & 0xFFFFu) != h.w35) {
+            free(names);
+            free(attrs);
+            return -2;
+        }
     }
 
     aux = malloc((size_t)fc * 4u);
@@ -288,7 +419,7 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
         return -2;
     }
 
-    dirs = malloc((size_t)ndirs * sizeof(char *));
+    dirs = malloc((size_t)(ndirs ? ndirs : 1u) * sizeof(char *));
     dir_pool = malloc((size_t)h.names_unpacked + ndirs + 1u);
     out->items = calloc(fc, sizeof(uha_entry));
     if (!dirs || !dir_pool || !out->items) {
@@ -362,35 +493,44 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
             return -2;
         }
         d = (uint32_t)attrs[4u * fc + f] | ((uint32_t)attrs[5u * fc + f] << 8);
-        if (d >= ndirs) {
-            free(dirs);
-            free(dir_pool);
-            free(aux);
-            free(names);
-            free(attrs);
-            uha_entrylist_free(out);
-            return -2;
+        if (ndirs > 0) {
+            if (d >= ndirs) {
+                free(dirs);
+                free(dir_pool);
+                free(aux);
+                free(names);
+                free(attrs);
+                uha_entrylist_free(out);
+                return -2;
+            }
+            dlen = strlen(dirs[d]);
+        } else {
+            dlen = 0;
         }
-        dlen = strlen(dirs[d]);
-        full = malloc(dlen + ln + 1u);
-        if (!full) {
-            free(dirs);
-            free(dir_pool);
-            free(aux);
-            free(names);
-            free(attrs);
-            uha_entrylist_free(out);
-            return -4;
+        {
+            size_t need_sep = (dlen > 0 && dirs[d][dlen - 1] != '/') ? 1u : 0u;
+            full = malloc(dlen + need_sep + ln + 1u);
+            if (!full) {
+                free(dirs);
+                free(dir_pool);
+                free(aux);
+                free(names);
+                free(attrs);
+                uha_entrylist_free(out);
+                return -4;
+            }
+            if (dlen > 0)
+                memcpy(full, dirs[d], dlen);
+            if (need_sep)
+                full[dlen] = '/';
+            for (j = 0; j < ln; j++) {
+                char c = (char)names[p++];
+                if (c == '\\')
+                    c = '/';
+                full[dlen + need_sep + j] = c;
+            }
+            full[dlen + need_sep + ln] = '\0';
         }
-        if (dlen > 0)
-            memcpy(full, dirs[d], dlen);
-        for (j = 0; j < ln; j++) {
-            char c = (char)names[p++];
-            if (c == '\\')
-                c = '/';
-            full[dlen + j] = c;
-        }
-        full[dlen + ln] = '\0';
         out->items[f].name = full;
     }
 

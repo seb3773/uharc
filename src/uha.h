@@ -17,6 +17,7 @@
 
 #define UHA_SIG_LEN      3
 #define UHA_HDR_LEN      39
+#define UHA_HDR_LEN_V4   44
 #define UHA_ORDER_STORE  0
 #define UHA_ORDER_RLE    1
 #define UHA_ORDER_LZ78_MIN 2
@@ -34,20 +35,23 @@ typedef struct {
     uint8_t  order;           /* selects the codec */
     uint8_t  flags;           /* dec[8]: 0x02 payload pw, 0x04 header pw */
     uint16_t ndirs;           /* dec[11..12]: unique directory count */
-    uint16_t w33;             /* dec[33..34]: low16(CRC32(aux_plain || names_plain)) */
-    uint16_t w35;             /* dec[35..36]: low16(CRC32(attrs_plain[0..11*fc])) */
-    uint16_t check16;         /* raw[37..38]: low16(CRC32(dec[4..34])) */
+    uint16_t w33;             /* dec[33..34]: low16(CRC32(aux_plain || names_plain)) (v4: crc1) */
+    uint16_t w35;             /* dec[35..36]: low16(CRC32(attrs_plain[0..11*fc]))    (v4: crc2) */
+    uint16_t w40;             /* v4 only: dec[40..41] low16(CRC32(tab3)) */
+    uint16_t check16;         /* raw[37..38] (v4: raw[42..43]): header CRC16 */
     uint32_t usize;           /* total unpacked size of all members */
     uint32_t psize;           /* packed size of the data stream */
     uint32_t file_count;      /* number of members */
     uint32_t names_unpacked;
     uint32_t names_packed;
     uint32_t attrs_packed;
+    uint32_t attrs2_packed;   /* v4 only: tab3 compressed size */
     size_t   header_ofs;      /* 0 for .uha, or offset of UHA header in SFX .exe */
-    size_t   data_ofs;        /* header_ofs + 39 */
+    size_t   data_ofs;        /* header_ofs + header_len (39 or 44) */
     size_t   crc_ofs;         /* data_ofs + psize */
     size_t   names_ofs;       /* crc_ofs + file_count * 4 */
     size_t   attrs_ofs;       /* names_ofs + names_packed */
+    size_t   attrs2_ofs;      /* v4 only: attrs_ofs + attrs_packed */
 } uha_header;
 
 typedef struct {

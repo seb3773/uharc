@@ -49,7 +49,8 @@ static void apply_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit,
 
     if (size <= 15)
         return;
-    memset(tbl, 0, sizeof(tbl));
+    for (k = 0; k < 128; k++)
+        tbl[k] = (uint16_t)k;
     n = (int64_t)size - 15;
     i = (int64_t)start;
     while (i < n) {
@@ -158,7 +159,8 @@ static void apply_forward_exe_filter(uint8_t *buf, uint32_t size, uint32_t limit
 
     if (size <= 15)
         return;
-    memset(tbl, 0, sizeof(tbl));
+    for (k = 0; k < 128; k++)
+        tbl[k] = (uint16_t)k;
     n = (int64_t)size - 15;
     i = (int64_t)start;
     while (i < n) {
@@ -462,4 +464,31 @@ void uha_restore_multimedia(uint8_t *buf, uint32_t usize)
         buf[i] = (uint8_t)(delta + ((history >> shift) & 0xFF));
         history = (history << 8) | buf[i];
     }
+}
+
+void uha_restore_fax(uint8_t *buf, uint32_t usize)
+{
+    uint32_t r, base, o, x, i;
+    uint8_t *tmp;
+
+    if (!buf || usize != 513216u)
+        return;
+    tmp = (uint8_t *)malloc(513216u);
+    if (!tmp)
+        return;
+    o = 0;
+    for (r = 0; r < 2376u; r++) {
+        uint8_t mask = (uint8_t)(1u << (7u - (r & 7u)));
+        base = (r >> 3) * 1728u;
+        for (x = 0; x < 1728u; x += 8u) {
+            uint8_t b = 0;
+            for (i = 0; i < 8u; i++) {
+                if (buf[base + x + i] & mask)
+                    b |= (uint8_t)(0x80u >> i);
+            }
+            tmp[o++] = b;
+        }
+    }
+    memcpy(buf, tmp, 513216u);
+    free(tmp);
 }

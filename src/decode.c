@@ -8,6 +8,7 @@
 #include "filter.h"
 #include "rle.h"
 #include "lz78.h"
+#include "uha04/uha04_codec.h"
 
 int uha_decode_payload(const uint8_t *raw, size_t rawlen,
                        const uha_header *h,
@@ -54,7 +55,11 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
     }
 
     rc = -3;
-    if (h->order == UHA_ORDER_RLE)
+    if (h->version == 4) {
+        rc = uha04_decode_stream(h->order, h->family,
+                                 raw + h->data_ofs, h->psize,
+                                 ends, n, out, h->usize);
+    } else if (h->order == UHA_ORDER_RLE)
         rc = uha_rle_decode(raw + h->data_ofs, h->psize, out, h->usize);
     else if (h->order >= UHA_ORDER_LZ78_MIN && h->order <= UHA_ORDER_LZ78_MAX)
         rc = uha_lz78_decode(raw + h->data_ofs, h->psize, h->order, h->usize,
@@ -71,26 +76,33 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
 
     if (rc == 0 && h->family != 0) {
         uint64_t ofs = 0;
-        int ppm_swap = (h->order >= UHA_ORDER_PPM_MIN
+        int ppm_swap = (h->version != 4
+                        && h->order >= UHA_ORDER_PPM_MIN
                         && h->order <= UHA_ORDER_PPM_MAX);
         if (n > 0) {
             for (i = 0; i < n; i++) {
                 uint32_t sz = entries->items[i].size;
-                if (sz >= 1024) {
+                if ((h->family & 0x80u) && sz == 513216u) {
+                    uha_restore_fax(out + ofs, sz);
+                } else if (sz >= 1024) {
                     int exe_matched = 0;
                     if (h->family & 0x01u)
                         exe_matched = uha_restore_filter(out + ofs, sz, ppm_swap);
-                    if ((h->family & 0x02u) && !exe_matched)
+                    if ((h->family & 0x02u) && (h->version == 4 || !exe_matched))
                         uha_restore_multimedia(out + ofs, sz);
                 }
                 ofs += sz;
             }
-        } else if (h->usize >= 1024) {
-            int exe_matched = 0;
-            if (h->family & 0x01u)
-                exe_matched = uha_restore_filter(out, h->usize, ppm_swap);
-            if ((h->family & 0x02u) && !exe_matched)
-                uha_restore_multimedia(out, h->usize);
+        } else {
+            if ((h->family & 0x80u) && h->usize == 513216u) {
+                uha_restore_fax(out, h->usize);
+            } else if (h->usize >= 1024) {
+                int exe_matched = 0;
+                if (h->family & 0x01u)
+                    exe_matched = uha_restore_filter(out, h->usize, ppm_swap);
+                if ((h->family & 0x02u) && (h->version == 4 || !exe_matched))
+                    uha_restore_multimedia(out, h->usize);
+            }
         }
     }
 

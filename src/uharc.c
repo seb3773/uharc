@@ -777,7 +777,28 @@ static int run_selftest(void)
             fprintf(stderr, "FAIL: uha_parse_header accepted bad version\n");
             return 1;
         }
-        printf("  [OK] Header parser & checksum self-test passed\n");
+        {
+            uint8_t dummy4[UHA_HDR_LEN_V4];
+            uint16_t chk4;
+            memset(dummy4, 0, sizeof(dummy4));
+            memcpy(dummy4, "UHA", 3);
+            dummy4[3] = 0x04;
+            chk4 = (uint16_t)(uha_crc32(dummy4 + 4, 36) & 0xFFFFu);
+            for (k = 0; k < 36; k++)
+                dummy4[4 + k] ^= (uint8_t)(((chk4 & 0xFFu) + (uint32_t)k * (uint32_t)k) & 0xFFu);
+            dummy4[42] = (uint8_t)(chk4 & 0xFFu);
+            dummy4[43] = (uint8_t)(chk4 >> 8);
+            if (uha_parse_header(dummy4, sizeof(dummy4), &h) != 0 || h.version != 4) {
+                fprintf(stderr, "FAIL: uha_parse_header v0.4 test failed\n");
+                return 1;
+            }
+            dummy4[42] ^= 1;
+            if (uha_parse_header(dummy4, sizeof(dummy4), &h) == 0) {
+                fprintf(stderr, "FAIL: uha_parse_header accepted corrupted v0.4 check16\n");
+                return 1;
+            }
+        }
+        printf("  [OK] Header parser & checksum self-test passed (v0.6 & v0.4)\n");
     }
 
     /* EXE & Multimedia pre-filter roundtrip check */

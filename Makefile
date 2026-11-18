@@ -1,6 +1,6 @@
 CC ?= gcc
-CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fno-semantic-interposition -fmerge-all-constants -fvisibility=hidden -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections -fno-strict-aliasing -DNDEBUG -Isrc
-WIN64_CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fmerge-all-constants -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fno-strict-aliasing -DNDEBUG -Isrc
+CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fno-semantic-interposition -fmerge-all-constants -fvisibility=hidden -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections -fno-strict-aliasing -DNDEBUG -Isrc -Isrc/uha04
+WIN64_CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fmerge-all-constants -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fno-strict-aliasing -DNDEBUG -Isrc -Isrc/uha04
 LDFLAGS ?= -flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -Wl,--as-needed -Wl,--exclude-libs,ALL -s -lm
 WIN64_LDFLAGS ?= -static -flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -Wl,--exclude-all-symbols -s -lm
 STRIP_LINUX ?= strip --strip-all
@@ -17,8 +17,8 @@ CROSS_WIN64_CC ?= x86_64-w64-mingw32-gcc
 PREFIX ?= /usr/local
 DESTDIR ?=
 
-SRC_FILES = $(wildcard src/*.c)
-SRC_HEADERS = $(wildcard src/*.h src/*.inc)
+SRC_FILES = $(wildcard src/*.c src/uha04/*.c)
+SRC_HEADERS = $(wildcard src/*.h src/*.inc src/uha04/*.h)
 
 .PHONY: all linux win64 all-platforms clean install uninstall deb dist test asan help debug
 
@@ -27,7 +27,7 @@ all: linux
 linux: $(TARGET_LINUX)
 	@ln -sf build/linux/uharc uharc
 
-asan: CFLAGS = -std=c99 -Wall -Wextra -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-strict-aliasing -Isrc
+asan: CFLAGS = -std=c99 -Wall -Wextra -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-strict-aliasing -Isrc -Isrc/uha04
 asan: LDFLAGS = -fsanitize=address,undefined -lm
 asan: STRIP_LINUX = true
 asan: clean $(TARGET_LINUX)
@@ -60,7 +60,7 @@ $(TARGET_WIN64): $(SRC_FILES) $(SRC_HEADERS) | $(WIN64_DIR)
 		echo "Install with: sudo apt install gcc-mingw-w64-x86-64"; \
 	fi
 
-debug: CFLAGS = -std=c99 -Wall -Wextra -g -O0 -Isrc
+debug: CFLAGS = -std=c99 -Wall -Wextra -g -O0 -Isrc -Isrc/uha04
 debug: LDFLAGS = -lm
 debug: STRIP_LINUX = true
 debug: clean $(TARGET_LINUX)
