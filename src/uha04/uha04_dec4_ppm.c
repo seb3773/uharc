@@ -1,3 +1,4 @@
+#include "simd_kernels.h"
 #include "uha04_dec4_int.h"
 
 int d4vc_ppm(dec4v_ctx *c)
@@ -1762,10 +1763,8 @@ unsigned int d4vc_ppm_prob_decode(dec4v_ctx *c, unsigned int eax_in)
     unsigned int c4[256];
     unsigned short cw[257];
 
-    for (i = 0; i < 256U; i++)
-        c4[i] = 0U;
-    for (i = 0; i < 257U; i++)
-        cw[i] = 0U;
+    /* c4[0..count) and cw[1..count] are written before they are read:
+     * no initialisation needed. */
     b14 = c->blk14;
     b14b = c->blk14_base;
     b15 = c->blk15;
@@ -1817,7 +1816,6 @@ unsigned int d4vc_ppm_prob_decode(dec4v_ctx *c, unsigned int eax_in)
         D4V_RC_RANGE_32(&c->st, 0) = sym;
         v2c = D4V_RC_CODE_32(&c->st, 0) / sym;
         if ((v2c & 0xFFFFU) >= (v28 & 0xFFFFU)) {
-            unsigned int idx;
             unsigned int plane15;
             unsigned int acc;
             D4V_RSLOT_MID_32(&c->st, 0) = v28 & 0xFFFFU;
@@ -1827,60 +1825,63 @@ unsigned int d4vc_ppm_prob_decode(dec4v_ctx *c, unsigned int eax_in)
             total = d4v_blk_u16(b14, b14b,
                 (uint32_t)(D4V_BLK_PTR_14_32(&c->st, 0)
                     + (D4V_TBL_45AFA4_32(&c->st, 0) << 9))) & 0xFFFFU;
-            D4V_RSLOT_LO_32(&c->st, 0) = total;
             scaled = D4V_TBL_45AFA4_32(&c->st, 0) << 8;
-            t1 = count;
-            for (idx = 0; idx < 256U; idx++) {
-                int take;
-                D4V_CTX_B_45C68A_8(&c->st, 0) = (unsigned char)count;
-                take = d4v_blk_u16(b15, b15b, (uint32_t)(plane15 + idx * 2U)) != 0U;
-                if (!take) {
-                    take = 0;
-                    for (i = 0; i < count; i++) {
-                        if (idx == (unsigned int)D4V_CTX_B_45C65E_8(&c->st, i)) {
-                            take = 1;
-                            break;
+            {
+                /*
+                 * Reference: a symbol is "taken" when its plane15 word is
+                 * non-zero or it is in the exclusion list; the total is
+                 * total - sum of P[s] over the taken symbols (32-bit), and
+                 * the symbol is found by a descending walk 255, 254, ...
+                 * (wrapping) over the symbols that are not taken,
+                 * acc = (acc + P[s]) & 0xFFFF, until acc > point.
+                 * g[] holds P[s] for the symbols that are not taken (0
+                 * otherwise), so taken = sum(P) - sum(g).
+                 */
+                uint16_t pl[256], pw[256], g[256];
+                uint32_t gsum, wsum, point, acc32;
+                int s;
+                memcpy(pl, b15 + ((uint32_t)plane15 - b15b), sizeof(pl));
+                memcpy(pw, b15 + ((uint32_t)(D4V_BLK_PTR_15_32(&c->st, 0) + scaled * 2U) - b15b),
+                    sizeof(pw));
+                uha_mask_where_zero(pl, pw, g, &gsum, &wsum);
+                for (i = 0; i < count; i++) {
+                    unsigned int e = (unsigned int)D4V_CTX_B_45C65E_8(&c->st, i);
+                    gsum -= g[e];
+                    g[e] = 0;
+                }
+                total = (total - (wsum - gsum)) & U32MASK;
+                D4V_RSLOT_LO_32(&c->st, 0) = total;
+                if (total == 0U || gsum == 0U) {
+                    c->err = 4;
+                    return 0U;
+                }
+                word = D4V_RC_RANGE_32(&c->st, 0) / total;
+                D4V_RC_RANGE_32(&c->st, 0) = word;
+                if (word == 0U) {
+                    c->err = 4;
+                    return 0U;
+                }
+                v2c = D4V_RC_CODE_32(&c->st, 0) / word;
+                point = v2c & 0xFFFFU;
+                if (point == 0xFFFFU) {
+                    c->err = 4;
+                    return 0U;
+                }
+                acc32 = 0;
+                /* a pass that does not stop wraps around (as the legacy
+                 * byte counter does); bound passes so corrupt inputs cannot hang */
+                {
+                    unsigned int passes = 0U;
+                    while ((s = uha_desc_search_g(g, point, &acc32)) < 0) {
+                        if (++passes > 65536U) {
+                            c->err = 4;
+                            return 0U;
                         }
                     }
                 }
-                if (take) {
-                    word = d4v_blk_u16(b15, b15b,
-                        (uint32_t)(D4V_BLK_PTR_15_32(&c->st, 0) + (idx + scaled) * 2U))
-                        & 0xFFFFU;
-                    D4V_RSLOT_LO_32(&c->st, 0) -= word;
-                }
+                v1C = (unsigned char)s;
+                acc = acc32;
             }
-            total = D4V_RSLOT_LO_32(&c->st, 0);
-            word = D4V_RC_RANGE_32(&c->st, 0) / total;
-            D4V_RC_RANGE_32(&c->st, 0) = word;
-            v2c = D4V_RC_CODE_32(&c->st, 0) / word;
-            acc = 0;
-            v1C = 0;
-            do {
-                int empty;
-                int add;
-                v1C = (unsigned char)(v1C - 1U);
-                count = D4V_CTX_B_45C68A_8(&c->st, 0);
-                empty = d4v_blk_u16(b15, b15b,
-                    (uint32_t)(plane15 + (unsigned int)v1C * 2U)) == 0U;
-                add = 0;
-                if (empty) {
-                    add = 1;
-                    for (i = 0; i < count; i++) {
-                        if ((unsigned int)D4V_CTX_B_45C65E_8(&c->st, i) == (unsigned int)v1C) {
-                            add = 0;
-                            break;
-                        }
-                    }
-                }
-                if (add) {
-                    word = d4v_blk_u16(b15, b15b,
-                        (uint32_t)(D4V_BLK_PTR_15_32(&c->st, 0)
-                            + ((unsigned int)v1C + scaled) * 2U));
-                    acc = ((acc & 0xFFFFU) + word) & 0xFFFFU;
-                }
-                D4V_CTX_B_45C68A_8(&c->st, 0) = (unsigned char)count;
-            } while ((acc & 0xFFFFU) <= (v2c & 0xFFFFU));
             word = d4v_blk_u16(b15, b15b,
                 (uint32_t)(D4V_BLK_PTR_15_32(&c->st, 0)
                     + ((D4V_TBL_45AFA4_32(&c->st, 0) << 8) + (unsigned int)v1C) * 2U));

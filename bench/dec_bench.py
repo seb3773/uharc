@@ -9,7 +9,11 @@ or the median of those decodes is one sample. A and B processes are
 interleaved in ABBA order on CPU-pinned lanes so that machine drift affects
 both builds equally, and the whole schedule is repeated ROUNDS times.
 
-Per group (codec/mode), the speedup is  sum(median A) / sum(median B)  over
+Groups are derived from the archive headers (format version + codec, e.g.
+v6:ppm, v6:alz3, v4:lzp; see bench/dec_common.py), and cover the decoder
+corpus, the legacy reference archives and the native UHARC 0.4 corpus.
+
+Per group, the speedup is  sum(median A) / sum(median B)  over
 all archives of the group, with a 95% bootstrap confidence interval obtained
 by resampling the samples of each archive. Verdicts:
     GAIN   CI lower bound > 1 + --min-gain   (real improvement)
@@ -20,7 +24,8 @@ Only GAIN results (and no LOSS anywhere) qualify a change for retention.
 This harness does not check output equality: always run bench/dec_verify.py.
 
 Usage:
-    bench/dec_bench.py A_HARNESS B_HARNESS [--groups m1,mx,...] [--set quick|all]
+    bench/dec_bench.py A_HARNESS B_HARNESS [--groups v6:ppm,v4:alz2,...] [--set quick|all]
+        [--sets dec,ext,legacy]
         [--rounds 5] [--inner 3] [--lanes 6] [--cpu-stride 1] [--stat min|median]
         [--match REGEX] [--min-gain 0.01] [--json out.json]
 
@@ -39,33 +44,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-GROUPS = ["m0", "mr", "mw", "mz", "mx", "m1", "m2", "m3"]
-# Representative subset: text, xml, executable, database, image, audio,
-# binary records, large (window wrap) and the solid archive.
-QUICK = ["dickens.1m", "xml.1m", "mozilla.1m", "ooffice.1m", "osdb.1m", "sao.1m",
-         "x-ray.1m", "audio16.wav", "image24.bmp", "records.bin", "code.c",
-         "mozilla.6m", "SOLID_all"]
-PASSWORD = "secret42"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dec_common import archives, group_sort_key, groups_of, is_quick, password  # noqa: E402
 
 
-def group_of(name):
-    m = re.match(r"^(.*)__(m[0-9a-z])(?:_(.+))?\.uha$", name)
-    if not m:
-        return None, None, None
-    return m.group(1), m.group(2), m.group(3)
-
-
-def collect(corpus, groups, subset):
-    out = []
-    for p in sorted(Path(corpus).glob("*.uha")):
-        base, g, var = group_of(p.name)
-        if g not in groups:
-            continue
-        if subset == "quick" and (base not in QUICK or var is not None):
-            continue
-        out.append((g, p))
-    return out
+def collect(harness, sets, groups, subset):
+    arcs = archives(sets)
+    if subset == "quick":
+        arcs = [a for a in arcs if is_quick(a)]
+    gm = groups_of(harness, arcs)
+    return [(gm[a], a) for a in arcs if groups is None or gm[a] in groups]
 
 
 STAT_COL = 7   # harness column: 6 = min, 7 = median of the inner repeats
@@ -73,8 +61,8 @@ STAT_COL = 7   # harness column: 6 = min, 7 = median of the inner repeats
 
 def run(harness, cpu, archive, inner):
     cmd = ["taskset", "-c", str(cpu), str(harness), "-q", "-w", "1", "-n", str(inner)]
-    if "_pw" in archive.name:
-        cmd += ["-p", PASSWORD]
+    if password(archive):
+        cmd += ["-p", password(archive)]
     cmd.append(str(archive))
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
@@ -113,9 +101,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("a")
     ap.add_argument("b")
-    ap.add_argument("--corpus", default=str(ROOT / "bench" / "dec_corpus"))
-    ap.add_argument("--groups", default=",".join(GROUPS))
-    ap.add_argument("--set", default="quick")
+    ap.add_argument("--sets", default="dec,ext",
+                    help="archive sets: dec (C encoder), ext (native 0.4/0.6), legacy")
+    ap.add_argument("--groups", default=None, help="comma list, e.g. v6:ppm,v4:lzp")
+    ap.add_argument("--set", default="quick", help="quick or all")
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--inner", type=int, default=3)
     ap.add_argument("--lanes", type=int, default=6)
@@ -133,12 +122,13 @@ def main():
 
     global STAT_COL
     STAT_COL = 6 if args.stat == "min" else 7
-    groups = args.groups.split(",")
-    items = collect(args.corpus, groups, args.set)
+    items = collect(args.a, args.sets.split(","),
+                    args.groups.split(",") if args.groups else None, args.set)
     if args.match:
         items = [it for it in items if re.search(args.match, it[1].name)]
     if not items:
-        sys.exit("no archives selected (run bench/make_dec_corpus.sh)")
+        sys.exit("no archives selected (run bench/make_dec_corpus.sh / fetch_ext_corpus.sh)")
+    groups = sorted({g for g, _ in items}, key=group_sort_key)
     # Longest jobs first for better lane packing (archive size as a proxy).
     items.sort(key=lambda x: -x[1].stat().st_size)
     gmap = {p: g for g, p in items}
@@ -161,7 +151,7 @@ def main():
                 results[archive] = (ta, tb)
 
     report = {}
-    print(f"{'group':6s} {'n':>3s} {'A (s)':>9s} {'B (s)':>9s} {'speedup':>8s}  {'95% CI':17s} verdict")
+    print(f"{'group':9s} {'n':>3s} {'A (s)':>9s} {'B (s)':>9s} {'speedup':>8s}  {'95% CI':17s} verdict")
     tot_a = tot_b = 0.0
     all_per = []
     for g in groups:
@@ -178,18 +168,18 @@ def main():
             v = "LOSS"
         else:
             v = "noise"
-        print(f"{g:6s} {len(per):3d} {sa:9.4f} {sb:9.4f} {sp:8.3f}x [{lo:6.3f}, {hi:6.3f}] {v}")
+        print(f"{g:9s} {len(per):3d} {sa:9.4f} {sb:9.4f} {sp:8.3f}x [{lo:6.3f}, {hi:6.3f}] {v}")
         report[g] = {"n": len(per), "a": sa, "b": sb, "speedup": sp, "ci": [lo, hi], "verdict": v}
         tot_a += sa
         tot_b += sb
         all_per += per
     lo, hi = bootstrap(all_per, iters=1000)
-    print(f"{'TOTAL':6s} {len(all_per):3d} {tot_a:9.4f} {tot_b:9.4f} {tot_a / tot_b:8.3f}x [{lo:6.3f}, {hi:6.3f}]")
+    print(f"{'TOTAL':9s} {len(all_per):3d} {tot_a:9.4f} {tot_b:9.4f} {tot_a / tot_b:8.3f}x [{lo:6.3f}, {hi:6.3f}]")
     if args.per_file:
         for p in sorted(results, key=lambda p: (gmap[p], p.name)):
             ta, tb = results[p]
             ma, mb = statistics.median(ta), statistics.median(tb)
-            print(f"  {gmap[p]:4s} {p.name:34s} {ma * 1e3:9.2f} ms {mb * 1e3:9.2f} ms {ma / mb:7.3f}x")
+            print(f"  {gmap[p]:9s} {p.name:34s} {ma * 1e3:9.2f} ms {mb * 1e3:9.2f} ms {ma / mb:7.3f}x")
     if args.json:
         Path(args.json).write_text(json.dumps({"groups": report, "files": {
             p.name: {"a": results[p][0], "b": results[p][1]} for p in results}}, indent=1))

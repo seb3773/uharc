@@ -157,6 +157,7 @@
  *                                    previous byte
  * ------------------------------------------------------------------------ */
 
+#include "simd_kernels.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -2201,10 +2202,9 @@ static unsigned d5v_sym(d5v *d, unsigned ctx)
         unsigned esc = (unsigned)d->escctx;
         unsigned short *efen = d->fen + (size_t)esc * 256u;
         unsigned short *ecnt = d->cnt + (size_t)esc * 256u;
-        unsigned sum = 0, t, i;
+        unsigned sum, t;
 
-        for (i = 0; i < 256u; i++)
-            if (cnt[i]) sum = (sum + (unsigned)ecnt[i]) & 0xFFFFu;
+        sum = uha_sum16_where_nonzero(cnt, ecnt);
         if (d->s913 && cnt[d->s914] == 0)
             sum = (sum + (unsigned)ecnt[d->s914]) & 0xFFFFu;
         t = (unsigned)((efen[0] - sum) & 0xFFFFu);
@@ -2217,28 +2217,14 @@ static unsigned d5v_sym(d5v *d, unsigned ctx)
         d->range /= t;
         if (d->range == 0) { d->err = 7; return 0; }
         point = (unsigned)((d->code / d->range) & 0xFFFFu);
-        sum = 0;
-        sym = 256u;
-        if (d->s913) {
-            if (d->s914 != 255u) {
-                for (;;) {
-                    sym--;
-                    if (cnt[sym] == 0) {
-                        sum = (sum + (unsigned)ecnt[sym]) & 0xFFFFu;
-                        if (sum > point) break;
-                    }
-                    if (sym == (unsigned)d->s914 + 1u) break;
-                }
-            }
-            if (sum <= point) sym--;
-        }
-        for (;;) {
-            if (sum > point) break;
-            do {
-                if (sym == 0u) { d->err = 7; return 0; }
-                sym--;
-            } while (cnt[sym] != 0);
-            sum = (sum + (unsigned)ecnt[sym]) & 0xFFFFu;
+        {
+            /* Descending walk over the symbols absent from ctx, s914
+             * excluded when s913 is set (see uha_desc_search_zero). */
+            uint32_t acc;
+            int s = uha_desc_search_zero(cnt, ecnt, d->s913 ? (int)d->s914 : -1, point, &acc);
+            if (s < 0) { d->err = 7; return 0; }
+            sym = (unsigned)s;
+            sum = acc;
         }
         d->chi = sum;
         d->clo = (unsigned)((sum - (unsigned)ecnt[sym]) & 0xFFFFu);
@@ -2327,9 +2313,7 @@ static void d5v_cost(d5v *d, unsigned ctx, unsigned sym)
     } else if (!ovl) {
         if (d->s913) total = (unsigned)((total - cnt[d->s914]) & 0xFFFFu);
     } else {
-        unsigned i;
-        for (i = 0; i < 256u; i++)
-            if (ovl[i]) total = (unsigned)((total - cnt[i]) & 0xFFFFu);
+        total = (unsigned)((total - uha_sum16_where_nonzero(ovl, cnt)) & 0xFFFFu);
         if (d->s913 && ovl[d->s914] == 0)
             total = (unsigned)((total - cnt[d->s914]) & 0xFFFFu);
     }

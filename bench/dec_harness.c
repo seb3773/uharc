@@ -11,6 +11,7 @@
  *
  * Usage:
  *   dec_harness [-n REPS] [-w WARMUP] [-p PASSWORD] [-o DUMP_DIR] [-q] ARCHIVE...
+ *   dec_harness -I ARCHIVE...     (header info only: name version order family usize)
  *
  * Output: one line per archive, tab separated:
  *   name  rc  usize  members  crc_ok  fnv64  min_ns  median_ns  crc32  all_ns(comma list)
@@ -87,7 +88,7 @@ static const char *base_name(const char *p)
 
 int main(int argc, char **argv)
 {
-    int reps = 1, warm = 0, quiet = 0, ai;
+    int reps = 1, warm = 0, quiet = 0, info = 0, ai;
     const char *pw = NULL, *dump = NULL;
 
     for (ai = 1; ai < argc && argv[ai][0] == '-'; ai++) {
@@ -101,6 +102,8 @@ int main(int argc, char **argv)
             dump = argv[++ai];
         else if (!strcmp(argv[ai], "-q"))
             quiet = 1;
+        else if (!strcmp(argv[ai], "-I"))
+            info = 1;
         else {
             fprintf(stderr, "unknown option %s\n", argv[ai]);
             return 2;
@@ -120,6 +123,12 @@ int main(int argc, char **argv)
 
         if (!raw || uha_parse_header(raw, rawlen, &h) != 0) {
             printf("%s\tERR_HEADER\n", base_name(path));
+            free(raw);
+            continue;
+        }
+        if (info) {
+            printf("%s\t%u\t%u\t%u\t%u\n", base_name(path), (unsigned)h.version,
+                   (unsigned)h.order, (unsigned)h.family, (unsigned)h.usize);
             free(raw);
             continue;
         }

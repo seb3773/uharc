@@ -17,12 +17,12 @@ CFLAGS="-std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-p
 LDFLAGS="-flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -lm"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
-SRCS=$(ls "$SRC"/src/*.c)
-LIBSRCS=$(ls "$SRC"/src/*.c | grep -v '/uharc\.c$')
+SRCS=$(ls "$SRC"/src/*.c "$SRC"/src/uha04/*.c 2>/dev/null)
+LIBSRCS=$(echo "$SRCS" | tr ' ' '\n' | grep -v '/uharc\.c$')
 
 build() {   # build EXTRA_FLAGS...  (both binaries, in parallel)
-    $CC $CFLAGS "$@" -I"$SRC/src" -o "$OUT/uharc" $SRCS $LDFLAGS &
-    $CC $CFLAGS "$@" -I"$SRC/src" -o "$OUT/dec_harness" "$ROOT/bench/dec_harness.c" $LIBSRCS $LDFLAGS &
+    $CC $CFLAGS "$@" -I"$SRC/src" -I"$SRC/src/uha04" -o "$OUT/uharc" $SRCS $LDFLAGS &
+    $CC $CFLAGS "$@" -I"$SRC/src" -I"$SRC/src/uha04" -o "$OUT/dec_harness" "$ROOT/bench/dec_harness.c" $LIBSRCS $LDFLAGS &
     wait
 }
 

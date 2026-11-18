@@ -1,3 +1,4 @@
+#include "simd_kernels.h"
 #include "ppm_priv.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,21 +110,26 @@ static int novel(ppm_model *m, uha_rc *r, ppm_kstate *ks,
                  int ctx, uint32_t rem, uint32_t total,
                  const uint8_t *excl, int nexcl)
 {
-    int bitmap[256];
+    uint16_t g[256];
     int wc, b, i;
-    uint32_t si, novel_total, freq2, dx, high, fb, low;
+    uint32_t si, novel_total, freq2, dx, high, fb, low, gsum, wsum;
 
     if (((total - rem) & PPM_M32) != 0)
         uha_rc_remove(r, rem, total);
-    for (i = 0; i < 256; i++)
-        bitmap[i] = 0;
-    for (i = 0; i < nexcl; i++)
-        bitmap[excl[i]] = 1;
+    /*
+     * Reference: a symbol b is eligible when freq[ctx][b] == 0 and b is not
+     * excluded; si = sum of freq[wc][b] over the other symbols (mod 2^16);
+     * then a descending walk b = 255..0 accumulates freq[wc][b] of the
+     * eligible symbols (mod 2^16) and stops at the first b where the sum
+     * exceeds freq2, or at b == 0. g[] holds the eligible weights.
+     */
     wc = m->work_ctx;
-    si = 0;
-    for (b = 0; b < 256; b++)
-        if (m->freq[ctx][b] != 0 || bitmap[b])
-            si = (si + m->freq[wc][b]) & 0xFFFFu;
+    uha_mask_where_zero(m->freq[ctx], m->freq[wc], g, &gsum, &wsum);
+    for (i = 0; i < nexcl; i++) {
+        gsum -= g[excl[i]];
+        g[excl[i]] = 0;
+    }
+    si = (wsum - gsum) & 0xFFFFu;
     novel_total = (m->cum[wc][0] - si) & 0xFFFFu;
     if (novel_total == 0) {
         ks->supported = 0;
@@ -133,14 +139,9 @@ static int novel(ppm_model *m, uha_rc *r, ppm_kstate *ks,
     ks->last_total = novel_total;
     freq2 = (r->code / r->range) & 0xFFFFu;
     dx = 0;
-    b = 0x100;
-    for (;;) {
-        b--;
-        if (!(m->freq[ctx][b] != 0 || bitmap[b]))
-            dx = (dx + m->freq[wc][b]) & 0xFFFFu;
-        if (dx > freq2 || b == 0)
-            break;
-    }
+    b = uha_desc_search_g(g, freq2, &dx);
+    if (b < 0)
+        b = 0;
     high = dx & 0xFFFFu;
     fb = m->freq[wc][b] & 0xFFFFu;
     low = (high - fb) & PPM_M32;

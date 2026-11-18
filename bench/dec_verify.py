@@ -2,9 +2,11 @@
 """Bit-exactness gate for decoder optimizations.
 
 Decodes every archive of the decoder corpus (bench/dec_corpus, see
-bench/make_dec_corpus.sh) and of the legacy reference corpus
-(corpus/archives, produced by UHARC.EXE 0.6b) with a baseline and a
-candidate build of bench/dec_harness, and requires, for every archive:
+bench/make_dec_corpus.sh), of the legacy reference corpus (corpus/archives,
+produced by UHARC.EXE 0.6b) and of the external native corpus
+(bench/ext_corpus: UHARC 0.4 archives + a native 0.6 archive, see
+bench/fetch_ext_corpus.sh) with a baseline and a candidate build of
+bench/dec_harness, and requires, for every archive:
 
   * identical return code, payload size, member count and member CRC status;
   * identical decoded payload (FNV-1a 64 and CRC-32 of the whole payload).
@@ -38,24 +40,18 @@ import tempfile
 import zlib
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-PASSWORD = "secret42"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dec_common import ROOT, archives, password  # noqa: E402
 
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
 
 
-def archives():
-    out = sorted((ROOT / "bench" / "dec_corpus").glob("*.uha"))
-    out += sorted((ROOT / "corpus" / "archives").glob("*.uha"))
-    return out
-
-
 def run_one(harness, arc):
     cmd = [str(harness), "-q"]
-    if "_pw" in arc.name:
-        cmd += ["-p", PASSWORD]
+    if password(arc):
+        cmd += ["-p", password(arc)]
     cmd.append(str(arc))
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
@@ -75,7 +71,8 @@ def run_all(harness, arcs, jobs):
 
 def original_of(arc):
     m = re.match(r"^(.*)__m[0-9a-z](?:_.+)?\.uha$", arc.name)
-    if not m or arc.name.startswith("SOLID_") or arc.name.startswith("ALL__"):
+    if (not m or arc.name.startswith("SOLID_") or arc.name.startswith("ALL__")
+            or "bench/ext_corpus" in str(arc)):
         return None
     base = m.group(1)
     for d in (ROOT / "bench" / "corpus", ROOT / "bench" / "corpus" / "large", ROOT / "corpus" / "input"):
@@ -88,12 +85,12 @@ def cli_extract_check(cli, arcs, jobs):
     """Extract each mono-file decoder-corpus archive and compare with its original."""
     def one(arc):
         orig = original_of(arc)
-        if orig is None or "corpus/archives" in str(arc):
+        if orig is None or "bench/dec_corpus" not in str(arc):
             return None
         with tempfile.TemporaryDirectory(prefix="uhv_") as td:
             cmd = [str(cli), "e", "-y", "-d0", str(arc), f"-t{td}"]
-            if "_pw" in arc.name:
-                cmd.append(f"-pw{PASSWORD}")
+            if password(arc):
+                cmd.append(f"-pw{password(arc)}")
             subprocess.run(cmd, capture_output=True)
             out = Path(td) / orig.name
             ok = out.is_file() and filecmp.cmp(out, orig, shallow=False)

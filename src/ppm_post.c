@@ -172,6 +172,64 @@ static void cls_phase_update(ppm_model *m)
     }
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+#define PPM_PREFETCH(p) __builtin_prefetch((const void *)(p), 0, 3)
+#define PPM_PREFETCHW(p) __builtin_prefetch((const void *)(p), 1, 3)
+#else
+#define PPM_PREFETCH(p) ((void)0)
+#define PPM_PREFETCHW(p) ((void)0)
+#endif
+
+/*
+ * Performance only (no effect on the decoded data): once the rolling
+ * context of the next symbol is known, start loading the table entries the
+ * next match-finder step and literal cascade will read (hash chains, the
+ * rec1/rec2 records, the 8 bc1 levels, the last-symbol ring), so that their
+ * cache misses overlap with the model updates of the current symbol.
+ */
+static void ppm_prefetch_next(const ppm_model *m)
+{
+    uint32_t c0 = m->roll_ctx0, c1 = m->roll_ctx1, c2 = m->roll_ctx2, c48, h1, h2;
+    uint8_t *lvl = ppm_bc1_st.lvl;
+
+    h1 = ((c0 >> 0xD) ^ c0) & 0x3FFFF;
+    h2 = ((((c0 >> 0xF) ^ c0) << 4) ^ (((c1 >> 0xF) ^ c1) << 6) ^ ((c2 >> 0xF) ^ c2)) & 0x3FFFF;
+    PPM_PREFETCHW(m->ht2_prev + h2);
+    PPM_PREFETCHW(m->ht2_new + h2);
+    PPM_PREFETCHW(m->link_tab + h1);
+    PPM_PREFETCHW(m->len_tab + h1);
+    PPM_PREFETCHW(m->ht1_ctx + h1);
+    PPM_PREFETCHW(m->ht1_pos + h1);
+    if (m->marker_fl == 2)
+        c48 = ((c0 >> 8) & 0xFF) | ((c0 >> 16) & 0xFF00) | ((c1 << 8) & 0xFF0000) | (c1 & 0xFF000000);
+    else
+        c48 = c0;
+    PPM_PREFETCHW(m->rec2s[c48 & 0xFFFF]);
+    PPM_PREFETCHW(m->rec1s[(c48 ^ (c48 >> 0x0D)) & 0x7FFF]);
+    PPM_PREFETCH(m->ring_buf + m->ring_off[0]);
+    PPM_PREFETCH(m->ring_buf + m->ring_off[1]);
+    PPM_PREFETCH(m->ring_buf + m->ring_off[2]);
+    PPM_PREFETCH(m->ring_buf + m->ring_off[3]);
+    if (m->byte_class != 0 && lvl) {
+        uint32_t b0 = c0 & 0xFF, b1 = (c0 >> 8) & 0xFF, b2 = (c0 >> 16) & 0xFF, b3 = c0 >> 24;
+        uint32_t ff = (b0 == 0xFF) ? 0x10000u : 0u, depth;
+        if ((c0 & 0xFFFF0000) == 0xFFFF0000) depth = 0x10000;
+        else if ((c0 & 0xFFFF) == 0xFFFF) depth = 0x20000;
+        else if ((c0 & 0xFF000000) == 0xFF000000) depth = 0x30000;
+        else if ((c0 & 0xFF0000) == 0xFF0000) depth = 0x40000;
+        else if ((c0 & 0xFF00) == 0xFF00) depth = 0x50000;
+        else if ((c0 & 0xFF) == 0xFF) depth = 0x60000;
+        else depth = 0;
+        PPM_PREFETCHW(lvl + BC1_LVLOFF[0] + ((b3 << 8) + (c1 >> 24)) * 4);
+        PPM_PREFETCHW(lvl + BC1_LVLOFF[1] + (((c0 >> 8) & 0xFFFF) + ff) * 4);
+        PPM_PREFETCHW(lvl + BC1_LVLOFF[2] + (((c0 >> 16) & 0xFFFF) + ff) * 4);
+        PPM_PREFETCHW(lvl + BC1_LVLOFF[3] + ((b2 << 8) + b0) * 4);
+        PPM_PREFETCHW(lvl + BC1_LVLOFF[4] + ((b3 << 8) + b1) * 4);
+        PPM_PREFETCHW(lvl + BC1_LVLOFF[5] + ((b3 << 8) + b0) * 4);
+        PPM_PREFETCHW(lvl + BC1_LVLOFF[6] + ((c1 & 0xFFFF) + depth) * 4);
+    }
+}
+
 void ppm_post_symbol_maintenance(ppm_model *m, int sym, int dl)
 {
     ppm_ring_store(m, sym);
@@ -184,6 +242,7 @@ void ppm_post_symbol_maintenance(ppm_model *m, int sym, int dl)
     ppm_update_rolling_ctx(m, sym);
     cls_phase_update(m);
     ppm_ring_recompute(m);
+    ppm_prefetch_next(m);
 }
 
 /* [M170k] Machine of CONTEXT of the scan of cost (legacy `0x423650` + `0x4232a0`) : ONLY

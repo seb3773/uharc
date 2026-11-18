@@ -71,6 +71,7 @@
  * Return codes: 0 ok, 1 bad args, 2 nomem, 3 input short, 4 output short,
  * 7 data error (corrupt stream).
  */
+#include "simd_kernels.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -399,7 +400,7 @@ static unsigned d4_sym(dec3v *d, unsigned ci)
     unsigned short *f0;
     unsigned short *r0;
     unsigned long scaled;
-    unsigned di, esc, total, rem, p, step, q, sym, i;
+    unsigned di, esc, total, rem, p, step, q, sym;
     unsigned eb;
     int have_eb;
     unsigned fb;
@@ -497,10 +498,7 @@ escape:
     r0 = d->raw + fb * 256u;
     /* total0 = order-0 total minus every symbol already in this context */
     {
-        unsigned xsum = 0;
-        for (i = 0; i < 256; i++) {
-            if (r[i] != 0) xsum = (xsum + r0[i]) & D4_M16;
-        }
+        unsigned xsum = uha_sum16_where_nonzero(r, r0);
         if (have_eb && r[eb] == 0) xsum = (xsum + r0[eb]) & D4_M16;
         total = (f0[0] - xsum) & D4_M16;
     }
@@ -515,53 +513,16 @@ escape:
     }
     scaled = d->code / d->range;
     {
+        /* Walk the symbols absent from this context from 255 down, eb
+         * excluded, accumulating r0[] (see uha_desc_search_zero). */
         unsigned scaled16 = (unsigned)(scaled & D4_M16);
-        unsigned acc = 0;
-        unsigned v40 = 256;
-        if (have_eb) {
-            unsigned stop = eb + 1u;
-            while (v40 != stop) {
-                --v40;
-                if (r[v40] == 0) {
-                    acc = (acc + r0[v40]) & D4_M16;
-                    if (acc > scaled16) break;
-                }
-            }
-            if (acc <= scaled16) {
-                if (v40 == 0) {
-                    d->err = 7;
-                    return 0;
-                }
-                --v40;
-            }
-        }
-        if (acc <= scaled16) {
-            for (;;) {
-                if (v40 == 0) {
-                    d->err = 7;
-                    return 0;
-                }
-                --v40;
-                if (r[v40] == 0) break;
-            }
-            for (;;) {
-                acc = (acc + r0[v40]) & D4_M16;
-                if (acc > scaled16) break;
-                for (;;) {
-                    if (v40 == 0) {
-                        d->err = 7;
-                        return 0;
-                    }
-                    --v40;
-                    if (r[v40] == 0) break;
-                }
-            }
-        }
-        if (v40 > 255) {
+        uint32_t acc;
+        int i = uha_desc_search_zero(r, r0, have_eb ? (int)eb : -1, scaled16, &acc);
+        if (i < 0) {
             d->err = 7;
             return 0;
         }
-        sym = v40;
+        sym = (unsigned)i;
         {
             unsigned hi = acc;
             unsigned lo = (acc - r0[sym]) & D4_M16;
