@@ -4,7 +4,7 @@ Pure C99 standalone reimplementation of the legendary **UHARC 0.6b archiver** (1
 
 > **Reverse Engineering & Legal Notice:** This work was conducted strictly for the purposes of software interoperability and digital data preservation (under European Directive 2009/24/EC) to reconstruct the proprietary compression algorithms, container format, and transformations of an obsolete 32-bit DOS/Windows archiver.
 
-This repository provides a complete, self-contained C99 implementation (standard C library + `-lm`, zero external third-party dependencies) combining both **compressor** (`uharc a` / `uharc m`) and **decompressor** (`uharc x` / `uharc e`) into a single unified binary (`uharc`), designed for **bidirectional bit-exact compatibility** with the original historical Windows x86 binary (`UHARC.EXE` 0.6b).
+This repository provides a complete, self-contained C99 implementation (standard C library + `-lm`, zero external third-party dependencies) combining both **compressor** (`uharc a` / `uharc m`) and **decompressor** (`uharc x` / `uharc e`) into a single unified binary (`uharc`), designed for **bidirectional bit-exact compatibility** with the original historical Windows x86 binary (`UHARC.EXE` 0.6b), with **transparent read/list/test/extract support for legacy UHARC 0.4 archives (`UHA\x04`)**.
 
 ---
 
@@ -80,6 +80,9 @@ In conclusion, I will not attempt to implement support for larger dictionaries: 
   - **Decompression**: 100% bit-exact extraction verified across all **89** primary reference archives plus **4** extended solid multi-file archives (`corpus/archives/extra/`).
   - **Mono-File Encoding**: **72 / 72** bit-identical archives (`arc[39..]`, 0 byte diffs) across all 12 reference corpus files and all 6 modes (`-m0`, `-mz`, `-mx`, `-m1`, `-m2`, `-m3`), plus `-md*`, `-mm-`, `-p-`, `-pr`, and `-pw`/`-ph+`.
   - **Multi-File Solid Encoding**: `0` payload byte diffs for Store (`-m0`), LZP (`-mz`), and PPM-II (`-mx`).
+- **Transparent Legacy UHARC 0.4 Decompression (`UHA\x04`)**:
+  - Automatically detects UHARC 0.4 archives (including SFX) during `l`, `v`, `t`, `x`, and `e` operations — no extra flags required.
+  - Supports all 0.4 compression methods (Store, RLE, LZ78, LZP, PPM, ALZ), password-protected archives (`-pw`), and EXE/multimedia/fax post-filters, verified across **103 / 103** UHARC 0.4 test archives (and ASan/UBSan clean).
 - **Complete Feature Set**:
   - **All Compression Modes**: Store (`-m0`), ALZ Fast (`-m1`), ALZ Normal (`-m2`, default), ALZ Best (`-m3`), PPM-II (`-mx`), LZP (`-mz`), RLE (`-mr`), and LZ78 (`-mw`).
   - **Multimedia & Text Modeling**: Built-in ALZ in-stream adaptive side-channel prediction (`-mm+` / `-mm-`), PPM `detr` word transform and multimedia classes, plus x86 BCJ & LZP multimedia preprocessing transforms.
@@ -87,7 +90,7 @@ In conclusion, I will not attempt to implement support for larger dictionaries: 
   - **Path Storage & Security**: Supports `-p-` (none), `-pr` (relative), and `-pf` (full) path storage on compress, paired with strict zip-slip traversal protection on extract.
   - **Configurable Dictionaries**: Scalable power-of-two sliding window dictionaries from `1 KB` up to `32768 KB` (`-md1` .. `-md32768`, default `-md4096`).
 - **Compact & Self-Contained Builds**:
-  - Pure standard C99 (`-lm`), compiling cleanly with zero warnings (`-O3 -flto` + stripped) to ~416 KB on native Linux (`build/linux/uharc`) and ~484 KB statically linked on Windows 64-bit via MinGW-w64 (`build/win64/uharc.exe`).
+  - Pure standard C99 (`-lm`), compiling cleanly with zero warnings (`-O3 -flto` + stripped) to ~756 KB on native Linux (`build/linux/uharc`) and ~832 KB statically linked on Windows 64-bit via MinGW-w64 (`build/win64/uharc.exe`) — including both the full 0.6b compressor/decompressor and the 0.4 legacy decoders.
 - **Extended 4 GB Capacity (Breaking the Historical 2 GB Barrier)**:
   - The historical 2005 `UHARC.EXE` 0.6b binary could not process archives exceeding 2 GB due to 32-bit signed CRT file seeking (`long` in `fseek`/`ftell`), 32-bit address space limits, and a hardcoded scanner check (`ERROR: Archives larger than 2 GB are not supported !`).
   - The underlying UHA 0.6b on-disk container format natively uses 32-bit unsigned integers (`uint32_t`) for both uncompressed (`usize`) and packed (`psize`) stream sizes, supporting containers up to 4 GB (4,294,967,295 bytes).
@@ -103,8 +106,9 @@ The engine is verified continuously via built-in self-tests and Python complianc
 
 | Test Suite | Parameters & Scope | Scope / Count | Verified Result |
 | :--- | :--- | :---: | :--- |
-| **Built-In Self-Tests** | `./uharc --selftest` (CRC-32 vector, header parser, zip-slip check) | **3 / 3** | **PASS** |
+| **Built-In Self-Tests** | `./uharc --selftest` (CRC-32, v0.6 & v0.4 header parser, EXE/MM filter roundtrip, zip-slip check) | **4 / 4** | **PASS** |
 | **Reference Corpus Decompression** | `tests/test_all.py` across `corpus/archives/*.uha` (+ 4 `extra/*.uha`) | **89 / 89** (+4) | **100% MD5 PASS** |
+| **Legacy UHARC 0.4 Decompression** | Transparent `l`/`t`/`x` across all 0.4 codecs (Store, RLE, LZ78, LZP, PPM, ALZ, `-pw`, EXE/MM/FAX) | **103 / 103** | **100% PASS (ASan/UBSan clean)** |
 | **Roundtrip Suite** | `tests/test_roundtrip.py` (4 files $\times$ 6 modes, also ASan/UBSan clean) | **24 / 24** | **100% MD5 PASS** |
 | **Mono-File Standard Parity** | `tests/test_parity.py`: 12 files (`empty.dat`..`zeros.bin`) $\times$ `-m0,-mz,-mx,-m1,-m2,-m3` | **72 / 72** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
 | **Dictionary Scaling** | `records.bin` with `-m3` across `-md16`, `-md256`, `-md1024`, `-md4096` | **4 / 4** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
@@ -282,8 +286,9 @@ uharc/
 |   |-- alz*.c / alz*.h      # ALZ adaptive 2D matrix engine (-m1, -m2, -m3)
 |   |-- ppm*.c / ppm*.h      # PPM-II Prediction by Partial Matching engine (-mx)
 |   |-- lzp.c / lzp.h        # LZP predictive engine (-mz)
-|   |-- filter.c / filter.h  # Executable x86 BCJ & multimedia delta filters
-|   `-- frontier.c / selclk.c # Multi-file frontier analysis and classification models
+|   |-- filter.c / filter.h  # Executable x86 BCJ, multimedia delta & fax filters
+|   |-- frontier.c / selclk.c # Multi-file frontier analysis and classification models
+|   `-- uha04/               # Legacy UHARC 0.4 decoders (LZ78-LSB, LZP, PPM, ALZ) + C99 facade
 |-- corpus/
 |   |-- input/               # 12 original reference input files
 |   `-- archives/            # 89 reference archives (+ 4 solid -mx archives in extra/)
@@ -304,5 +309,6 @@ uharc/
 
 - Original UHARC algorithms and concepts Copyright (c) 1997-2005 by **Uwe Herklotz**.
 - Reverse engineering and modern pure C99 reimplementation by **[seb3773](https://github.com/seb3773)**.
+- Special thanks to **[roytam1](https://github.com/roytam1)** for the excellent reverse-engineering work on **[unuharc_recon](https://github.com/roytam1/unuharc_recon)**, which served as the foundation for integrating legacy UHARC 0.4 archive decompression support.
 - Distributed for educational, interoperability, and digital preservation purposes under the terms of the MIT License.
 
