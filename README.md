@@ -263,6 +263,31 @@ Usage: uharc <command> [-<switch>...] <archive>[.uha] [files...]
 
 ---
 
+## Benchmarks & Performance
+
+The `bench/` directory contains a self-contained benchmarking and bit-exactness verification suite (see [bench/README.md](bench/README.md), [bench/OPTIMIZATIONS.md](bench/OPTIMIZATIONS.md), and [bench/DECODER_OPTIMIZATIONS.md](bench/DECODER_OPTIMIZATIONS.md)):
+
+- **Corpus & harnesses**: `make_corpus.sh`, `make_dec_corpus.sh`, `fetch_ext_corpus.sh` (Silesia 1 MiB slices, media, executables, and 103 native UHARC 0.4 archives), plus an in-process decoder harness (`dec_harness.c`).
+- **Bit-exactness gates**: `verify.py` (encoder) and `dec_verify.py` (decoder across 400+ archives).
+- **A/B timing & instruction counting**: `bench.py`, `dec_bench.py`, `dec_abpair.py` (interleaved paired runs with 95% bootstrap CIs), and `ircount.sh` / `dec_ircount.sh` (deterministic Callgrind instruction counts).
+
+### Encoding Speed vs. Legacy `UHARC.EXE` 0.6b
+
+Measured on 4 × 1 MiB diverse inputs (`dickens.1m`, `mozilla.1m`, `audio16.wav`, `ooffice.1m` — 4 MiB per mode, 20 MiB total, median of 3 runs). Comparing both Windows binaries under the same Wine environment provides an apples-to-apples baseline alongside the native Linux build:
+
+| Mode | Legacy `UHARC.EXE` (Wine) | This build Win64 (Wine) | Win64 vs. Legacy | This build Linux (native) | Linux vs. Legacy |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`-m1`** (ALZ Fast) | 2.83 s | 2.57 s | **1.10x** | 1.99 s | **1.42x** |
+| **`-m2`** (ALZ Normal) | 3.02 s | 2.77 s | **1.09x** | 2.02 s | **1.50x** |
+| **`-m3`** (ALZ Best) | 3.07 s | 2.77 s | **1.11x** | 2.07 s | **1.49x** |
+| **`-mz`** (LZP) | 1.12 s | 1.22 s | 0.92x | 0.66 s | **1.70x** |
+| **`-mx`** (PPM-II) | 4.57 s | 4.24 s | **1.08x** | 3.67 s | **1.24x** |
+| **Total (20 MiB)** | **14.61 s** | **13.57 s** | **1.08x** | **10.40 s** | **1.40x** |
+
+*Note: Subsequent PPM prefetching added in `v0.6b.1` accelerates `-mx` encoding by an additional ~13% (~1.4x vs. legacy on native Linux). In decompression, SSE2 literal/escape models, hashed LZ78 tries, inlined range decoding, and PPM prefetching deliver 1.4x–6x speedups over the baseline C port across all 0.6b and 0.4 codecs (see [bench/DECODER_OPTIMIZATIONS.md](bench/DECODER_OPTIMIZATIONS.md)).*
+
+---
+
 ## Project Structure
 
 ```text
@@ -289,6 +314,10 @@ uharc/
 |   |-- filter.c / filter.h  # Executable x86 BCJ, multimedia delta & fax filters
 |   |-- frontier.c / selclk.c # Multi-file frontier analysis and classification models
 |   `-- uha04/               # Legacy UHARC 0.4 decoders (LZ78-LSB, LZP, PPM, ALZ) + C99 facade
+|-- bench/                   # Benchmarking, Callgrind, and bit-exactness verification tools
+|   |-- bench.py / dec_bench.py / dec_abpair.py  # A/B timing harnesses
+|   |-- verify.py / dec_verify.py                # Bit-exactness verification gates
+|   `-- OPTIMIZATIONS.md / DECODER_OPTIMIZATIONS.md
 |-- corpus/
 |   |-- input/               # 12 original reference input files
 |   `-- archives/            # 89 reference archives (+ 4 solid -mx archives in extra/)
