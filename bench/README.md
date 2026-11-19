@@ -1,6 +1,6 @@
 # Encoder performance bench
 
-Tools used to evaluate encoder optimizations. The golden rule of the project
+Tools used to evaluate encoder performance. The golden rule of the project
 applies to every change: **the encoder output must stay bit-exact** with the
 legacy `UHARC.EXE` 0.6b encoder (and therefore with the last known-good build).
 A speedup is only retained when the timing harness shows a real gain, not noise.
