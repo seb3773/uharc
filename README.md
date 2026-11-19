@@ -268,7 +268,7 @@ Usage: uharc <command> [-<switch>...] <archive>[.uha] [files...]
 
 ## Benchmarks & Performance
 
-The `bench/` directory contains a self-contained benchmarking and bit-exactness verification suite (see [bench/README.md](bench/README.md), [bench/OPTIMIZATIONS.md](bench/OPTIMIZATIONS.md), and [bench/DECODER_OPTIMIZATIONS.md](bench/DECODER_OPTIMIZATIONS.md)):
+The `bench/` directory contains a self-contained benchmarking and bit-exactness verification suite (see [bench/README.md](bench/README.md)):
 
 - **Corpus & harnesses**: `make_corpus.sh`, `make_dec_corpus.sh`, `fetch_ext_corpus.sh` (Silesia 1 MiB slices, media, executables, and 103 native UHARC 0.4 archives), plus an in-process decoder harness (`dec_harness.c`).
 - **Bit-exactness gates**: `verify.py` (encoder) and `dec_verify.py` (decoder across 400+ archives).
@@ -287,7 +287,7 @@ Measured on 4 × 1 MiB diverse inputs (`dickens.1m`, `mozilla.1m`, `audio16.wav`
 | **`-mx`** (PPM-II) | 4.57 s | 4.24 s | **1.08x** | 3.67 s | **1.24x** |
 | **Total (20 MiB)** | **14.61 s** | **13.57 s** | **1.08x** | **10.40 s** | **1.40x** |
 
-*Note: Subsequent PPM prefetching added in `v0.6b.1` accelerates `-mx` encoding by an additional ~13% (~1.4x vs. legacy on native Linux). In decompression, SSE2 literal/escape models, hashed LZ78 tries, inlined range decoding, and PPM prefetching deliver 1.4x–6x speedups over the baseline C port across all 0.6b and 0.4 codecs (see [bench/DECODER_OPTIMIZATIONS.md](bench/DECODER_OPTIMIZATIONS.md)).*
+*Note: Subsequent PPM prefetching added in `v0.6b.1` accelerates `-mx` encoding by an additional ~13% (~1.4x vs. legacy on native Linux). In decompression, SSE2 literal/escape models, hashed LZ78 tries, inlined range decoding, and PPM prefetching deliver 1.4x–6x speedups over the baseline C port across all 0.6b and 0.4 codecs.*
 
 ---
 
@@ -320,8 +320,7 @@ uharc/
 |   `-- uha04/               # Legacy UHARC 0.4 decoders (LZ78-LSB, LZP, PPM, ALZ) + C99 facade
 |-- bench/                   # Benchmarking, Callgrind, and bit-exactness verification tools
 |   |-- bench.py / dec_bench.py / dec_abpair.py  # A/B timing harnesses
-|   |-- verify.py / dec_verify.py                # Bit-exactness verification gates
-|   `-- OPTIMIZATIONS.md / DECODER_OPTIMIZATIONS.md
+|   `-- verify.py / dec_verify.py                # Bit-exactness verification gates
 |-- corpus/
 |   |-- input/               # 12 original reference input files
 |   |-- archives/            # 89 reference archives (UHARC 0.6b)

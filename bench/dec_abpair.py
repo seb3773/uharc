@@ -27,11 +27,18 @@ from dec_common import password  # noqa: E402
 
 
 def run(harness, arc, cpu):
-    cmd = ['taskset', '-c', str(cpu), harness, '-q', '-n', '1']
+    cmd = []
+    if cpu is not None and cpu >= 0:
+        cmd += ['taskset', '-c', str(cpu)]
+    cmd += [harness, '-q', '-n', '1']
     pw = password(arc)
     if pw:
         cmd += ['-p', pw]
-    out = subprocess.run(cmd + [arc], capture_output=True, text=True).stdout
+    res = subprocess.run(cmd + [arc], capture_output=True, text=True)
+    if res.returncode != 0 and cmd and cmd[0] == 'taskset':
+        res = subprocess.run([harness, '-q', '-n', '1'] + (['-p', pw] if pw else []) + [arc],
+                             capture_output=True, text=True)
+    out = res.stdout
     return float(out.strip().split('\t')[6])
 
 
@@ -41,7 +48,7 @@ def main():
     ap.add_argument('b')
     ap.add_argument('archives', nargs='+')
     ap.add_argument('--reps', type=int, default=9)
-    ap.add_argument('--cpu', type=int, default=5)
+    ap.add_argument('--cpu', type=int, default=0)
     args = ap.parse_args()
 
     per = []

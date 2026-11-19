@@ -3,8 +3,8 @@
 # Usage: bench/build_dec.sh OUT_DIR [SRC_ROOT] [extra CFLAGS...]
 #   OUT_DIR/uharc        production CLI (same flags as the Makefile)
 #   OUT_DIR/dec_harness  in-process decoder harness (bench/dec_harness.c)
-# PGO=1 builds a profile-guided variant (evaluation only; see
-# bench/DECODER_OPTIMIZATIONS.md for why it is not used).
+# PGO=1 builds a profile-guided variant (evaluation only; profile-guided build
+# gave no confirmed gain).
 # SRC_ROOT defaults to this checkout; pass another checkout (e.g. a
 # `git worktree` of the reference commit) to build the baseline.
 set -euo pipefail
@@ -17,12 +17,12 @@ CFLAGS="-std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-p
 LDFLAGS="-flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -lm"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
-SRCS=$(ls "$SRC"/src/*.c "$SRC"/src/uha04/*.c 2>/dev/null)
+SRCS=$(ls "$SRC"/src/*.c "$SRC"/src/uha04/*.c "$SRC"/src/uha02/*.c 2>/dev/null)
 LIBSRCS=$(echo "$SRCS" | tr ' ' '\n' | grep -v '/uharc\.c$')
 
 build() {   # build EXTRA_FLAGS...  (both binaries, in parallel)
-    $CC $CFLAGS "$@" -I"$SRC/src" -I"$SRC/src/uha04" -o "$OUT/uharc" $SRCS $LDFLAGS &
-    $CC $CFLAGS "$@" -I"$SRC/src" -I"$SRC/src/uha04" -o "$OUT/dec_harness" "$ROOT/bench/dec_harness.c" $LIBSRCS $LDFLAGS &
+    $CC $CFLAGS "$@" -I"$SRC/src" -I"$SRC/src/uha04" -I"$SRC/src/uha02" -o "$OUT/uharc" $SRCS $LDFLAGS &
+    $CC $CFLAGS "$@" -I"$SRC/src" -I"$SRC/src/uha04" -I"$SRC/src/uha02" -o "$OUT/dec_harness" "$ROOT/bench/dec_harness.c" $LIBSRCS $LDFLAGS &
     wait
 }
 

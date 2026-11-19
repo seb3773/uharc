@@ -6,6 +6,8 @@ Archive sets:
   corpus/archives     legacy UHARC.EXE 0.6b reference archives
   bench/ext_corpus    native UHARC 0.4 archives + a native 0.6 archive
                       (bench/fetch_ext_corpus.sh)
+  corpus/archives_04  legacy UHARC 0.4 reference archives (in the repository)
+  corpus/archives_02  legacy UHARC 0.2 reference archives (in the repository)
 
 Groups are derived from the archive header (format version + codec order),
 e.g. "v6:ppm", "v6:alz2", "v4:lzp", so every codec of both decoders gets its
@@ -20,6 +22,8 @@ SETS = {
     "dec": ROOT / "bench" / "dec_corpus",
     "legacy": ROOT / "corpus" / "archives",
     "ext": ROOT / "bench" / "ext_corpus",
+    "ref04": ROOT / "corpus" / "archives_04",
+    "ref02": ROOT / "corpus" / "archives_02",
 }
 GROUP_ORDER = ["store", "rle", "lz78", "lzp", "ppm", "alz1", "alz2", "alz3"]
 
@@ -43,17 +47,20 @@ def password(arc):
     arc = Path(arc).resolve()
     if arc.parent == SETS["ext"] and arc.name.startswith("v04_pw"):
         return "secret"
+    if arc.parent == SETS["ref04"] and arc.name.startswith("pw"):
+        return "secret"
     if "_pw" in arc.name:
         return "secret42"
     return None
 
 
-def archives(sets=("dec", "legacy", "ext")):
+def archives(sets=("dec", "legacy", "ext", "ref04", "ref02")):
     out = []
     for s in sets:
         d = SETS[s]
         if d.is_dir():
-            out += sorted(p for p in d.glob("*.uha") if not p.name.endswith(".tmp.uha"))
+            out += sorted(p for p in d.iterdir()
+                          if p.suffix.lower() == ".uha" and not p.name.endswith(".tmp.uha"))
     return out
 
 
@@ -72,7 +79,7 @@ def codec(version, order):
         c = "alz%d" % ((order - 40) // 16 + 1)
     else:
         c = "unknown"
-    return "v%d:%s" % (6 if version != 4 else 4, c)
+    return "v%d:%s" % (version if version in (2, 4) else 6, c)
 
 
 def groups_of(harness, arcs):
@@ -96,7 +103,7 @@ def groups_of(harness, arcs):
 
 def group_sort_key(g):
     v, c = g.split(":")
-    return (v != "v6", GROUP_ORDER.index(c) if c in GROUP_ORDER else 99)
+    return ({"v6": 0, "v4": 1, "v2": 2}.get(v, 3), GROUP_ORDER.index(c) if c in GROUP_ORDER else 99)
 
 
 def is_quick(arc):

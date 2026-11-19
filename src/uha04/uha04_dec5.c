@@ -659,6 +659,12 @@ static void d5v_putraw(d5v *d, const unsigned char *p, unsigned long n)
 static void d5v_put(d5v *d, unsigned b)
 {
     unsigned char c = (unsigned char)(b & 0xFFu);
+    /* fast path: room in the output buffer and not at the end */
+    if (d->out_fill + 1u < d->out_cap && d->out_tot < d->out_len) {
+        d->outb[d->out_fill++] = c;
+        d->out_tot++;
+        return;
+    }
     d5v_putraw(d, &c, 1);
     d->out_tot++;
 }
@@ -1022,32 +1028,32 @@ static void d5v_dupdate(d5v *d, unsigned ctx, unsigned sym)
 /* byte predictor for groups 5..9 (sub_414470 predict / 414820 train) */
 /* ------------------------------------------------------------------ */
 
-/* 32-bit helpers: the original is i386, so every int add/mul wraps */
-static unsigned long d5v_u32(long v)
+/* 32-bit helpers: the original is i386, so every int add/mul wraps.
+ * Two's complement narrowing (int32_t) is exact on every supported
+ * compiler and is branch-free. */
+static inline unsigned long d5v_u32(long v)
 {
-    return (unsigned long)v & D5V_M32;
+    return (unsigned long)(uint32_t)v;
 }
 
-static long d5v_s32(unsigned long u)
+static inline long d5v_s32(unsigned long u)
 {
-    u &= D5V_M32;
-    if (u & 0x80000000UL) return -(long)((D5V_M32 - u) + 1UL);
-    return (long)u;
+    return (long)(int32_t)(uint32_t)u;
 }
 
-static long d5v_add32(long a, long b)
+static inline long d5v_add32(long a, long b)
 {
-    return d5v_s32(d5v_u32(a) + d5v_u32(b));
+    return (long)(int32_t)((uint32_t)a + (uint32_t)b);
 }
 
-static long d5v_sub32(long a, long b)
+static inline long d5v_sub32(long a, long b)
 {
-    return d5v_s32(d5v_u32(a) - d5v_u32(b));
+    return (long)(int32_t)((uint32_t)a - (uint32_t)b);
 }
 
-static long d5v_mul32(long a, long b)
+static inline long d5v_mul32(long a, long b)
 {
-    return d5v_s32(d5v_u32(a) * d5v_u32(b));
+    return (long)(int32_t)((uint32_t)a * (uint32_t)b);
 }
 
 /* the original's divide-by-16 idiom truncates toward zero */
@@ -1968,10 +1974,18 @@ static unsigned d5v_step(d5v *d)
                 }
             } else {
                 d->pos += (unsigned long)len;
-                while (n--) {
-                    unsigned char b = *s++;
-                    *t++ = b;
-                    d->hist4 = ((d->hist4 << 8) + (unsigned long)b) & D5V_M32;
+                if (n >= 4u) {
+                    /* the byte history after the copy is the last 4 bytes */
+                    while (n--)
+                        *t++ = *s++;
+                    d->hist4 = ((unsigned long)t[-4] << 24) | ((unsigned long)t[-3] << 16)
+                        | ((unsigned long)t[-2] << 8) | (unsigned long)t[-1];
+                } else {
+                    while (n--) {
+                        unsigned char b = *s++;
+                        *t++ = b;
+                        d->hist4 = ((d->hist4 << 8) + (unsigned long)b) & D5V_M32;
+                    }
                 }
             }
             d5v_putraw(d, d->dict + src, (unsigned long)len);

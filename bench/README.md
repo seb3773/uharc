@@ -41,9 +41,27 @@ bench/ircount.sh /tmp/uh_base/linux/uharc /tmp/uh_cand/linux/uharc m2 dickens.1m
 
 ## Notes
 
-- Timing noise on virtual machines is large (about +/-10% per run). Use at
-  least 7 repetitions for small effects; the bootstrap CI accounts for it.
 - `corpus/input/*` must carry the mtime `2026-09-23 00:35:44 UTC` for the
   legacy parity test: the archive trailer stores DOS timestamps
   (`make_corpus.sh` sets it on the bench corpus automatically).
-- See `bench/OPTIMIZATIONS.md` for the log of accepted and rejected changes.
+
+## Decoder bench
+
+Decoder optimizations are gated by bit exactness first and paired timing
+second.
+
+```sh
+bench/build_dec.sh /tmp/ref  /path/to/reference/checkout   # baseline harness
+bench/build_dec.sh /tmp/cand                               # candidate harness
+bench/dec_verify.py /tmp/ref/dec_harness /tmp/cand/dec_harness   # 530 archives, must PASS
+bench/dec_abpair.py /tmp/ref/dec_harness /tmp/cand/dec_harness ARCHIVES.. --reps 9
+make && python3 tests/test_04.py ./uharc && python3 tests/test_all.py ./uharc
+```
+
+`dec_verify.py` decodes every archive of `bench/dec_corpus`,
+`corpus/archives`, `corpus/archives_04`, `corpus/archives_02` and
+`bench/ext_corpus` with both harnesses and requires identical payloads
+(FNV-1a 64 + CRC-32), sizes, member counts and CRC status. A change is kept
+only when `dec_abpair.py` reports the whole 95% CI above 1 (GAIN); an A/A run
+on a shared VM is about +-5% wide. `bench/dec_ircount.sh` (Callgrind
+instruction counts) is used to locate work, not to accept a change.

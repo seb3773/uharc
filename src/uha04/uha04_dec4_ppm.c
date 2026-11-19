@@ -671,11 +671,63 @@ unsigned int d4vc_ppmdec(dec4v_ctx *c)
     return 1;
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+#define D4F_PREFETCH(p) __builtin_prefetch((const void *)(p), 0, 3)
+#define D4F_PREFETCHW(p) __builtin_prefetch((const void *)(p), 1, 3)
+#else
+#define D4F_PREFETCH(p) ((void)(p))
+#define D4F_PREFETCHW(p) ((void)(p))
+#endif
+
+/* Prefetch the hashed model cells the next symbol will read first: the
+ * match-model tables of d4vc_ppmdec (blk03/blk04/blk05) and the eight
+ * blk01 hash-chain slots plus the blk02 entry of d4vc_sym. Their addresses
+ * only depend on the next rolling context, predicted here from the symbol
+ * about to be emitted (the same update d4vc_ppm_mask_select applies).
+ * Prefetches have no architectural effect: a wrong prediction only costs
+ * a useless memory request. */
+static void d4f_prefetch_next(dec4v_ctx *c, unsigned int sym)
+{
+    uint32_t r0 = (uint32_t)D4V_SHIFT_R0_32(&c->st, 0);
+    uint32_t r1 = (uint32_t)D4V_SHIFT_R1_32(&c->st, 0);
+    uint32_t r2 = (uint32_t)D4V_SHIFT_R2_32(&c->st, 0);
+    uint32_t n0, n1, n2, h1, h2, w, k;
+    const unsigned char *b01;
+    if (D4V_CTX_B_45C67F_8(&c->st, 0) == 0 && sym >= 4U && sym <= 6U) {
+        if ((r0 & 0xFFU) == 0xDFU)
+            return;
+        sym = 0xDFU;
+    }
+    n2 = (r2 << 8) + (r1 >> 24);
+    n1 = (r1 << 8) + (r0 >> 24);
+    n0 = (r0 << 8) + sym;
+    h1 = ((n0 >> 13) ^ n0) & 0x3FFFFU;
+    h2 = ((((n1 >> 15) ^ n1) << 6) ^ (((n0 >> 15) ^ n0) << 4) ^ ((n2 >> 15) ^ n2)) & 0x3FFFFU;
+    D4F_PREFETCHW(c->blk03 + ((uint32_t)D4V_BLK_PTR_03_32(&c->st, 0) - c->blk03_base) + (h1 << 3));
+    D4F_PREFETCHW(c->blk04 + ((uint32_t)D4V_BLK_PTR_04_32(&c->st, 0) - c->blk04_base) + (h2 << 3));
+    D4F_PREFETCH(c->blk05 + ((uint32_t)D4V_BLK_PTR_05_32(&c->st, 0) - c->blk05_base) + h1);
+    if (D4V_CTX_B_45C68E_8(&c->st, 0) == 2)
+        w = ((n0 >> 8) & 0xFFU) + ((n0 >> 16) & 0xFF00U) + ((n1 << 8) & 0xFF0000U) + (n1 & 0xFF000000U);
+    else
+        w = n0;
+    b01 = c->blk01 + ((uint32_t)D4V_BLK_PTR_01_32(&c->st, 0) - c->blk01_base)
+        + ((((w >> 13) ^ w) & 0x7FFFU) << 5);
+    for (k = 0; k < 8U; k++)
+        D4F_PREFETCH(b01 + k * 0x100000U);
+    {
+        const unsigned char *p2 = c->blk02 + ((uint32_t)D4V_BLK_PTR_02_32(&c->st, 0) - c->blk02_base)
+            + (w & 0xFFFFU) * 20U;
+        D4F_PREFETCH(p2);
+        D4F_PREFETCH(p2 + 19);
+    }
+}
+
 /* Emit the symbol chosen in stk[0x24] and advance the dictionary. */
 static void d4vc_sym_emit(dec4v_ctx *c, unsigned char *stk)
 {
     unsigned int sym;
     sym = stk[0x24];
+    d4f_prefetch_next(c, sym);
     d4vc_ppm_list_update_32(c, sym);
     if (D4V_CTX_B_45C68B_8(&c->st, 0) != 0)
         d4vc_ppm_list_update_20(c, sym);
@@ -1983,7 +2035,95 @@ unsigned int d4vc_ppm_prob_decode(dec4v_ctx *c, unsigned int eax_in)
  * Entry: t0, dl. Frame: 8 (var_1C dword, var_18 byte). Returns leftover
  * t0 (price remnant; callers ignore -> effectively void).
  */
+/* Reference implementation of sub_41A360 (all address forms). */
+static unsigned int d4vc_freq_divide_price_ref(dec4v_ctx *c, unsigned int eax_in, unsigned int edx_in);
+
+static D4V_AINLINE unsigned int d4f_u16(const unsigned char *p)
+{
+    uint16_t v;
+    memcpy(&v, p, 2);
+    return v;
+}
+
+/* Fast path of sub_41A360. Valid when the three model planes are at their
+ * init-time blocks and both plane indices stay inside blk15/blk14 (index
+ * <= 0x30C) and the blk17 slots read are inside blk17 (index < 0x2FF);
+ * otherwise the reference walk runs. All sums only feed 16-bit values, so
+ * modulo-2^16 SIMD sums give the same results as the 32-bit scalar loops. */
 unsigned int d4vc_freq_divide_price(dec4v_ctx *c, unsigned int eax_in, unsigned int edx_in)
+{
+    unsigned int count, index, sym, total, i, den, quot, price;
+    const unsigned char *b14, *b15, *b17;
+    const unsigned char *excl;
+    const unsigned char *plane;
+    const unsigned char *old_plane;
+
+    index = eax_in;
+    if (eax_in > 0x2FEU || D4V_TBL_45AFA4_32(&c->st, 0) > 0x30CU
+        || D4V_BLK_PTR_15_32(&c->st, 0) != c->blk15_base
+        || D4V_BLK_PTR_14_32(&c->st, 0) != c->blk14_base
+        || D4V_BLK_PTR_17_32(&c->st, 0) != c->blk17_base)
+        return d4vc_freq_divide_price_ref(c, eax_in, edx_in);
+    b14 = c->blk14;
+    b15 = c->blk15;
+    b17 = c->blk17;
+    excl = &D4V_CTX_B_45C65E_8(&c->st, 0);
+    count = D4V_CTX_B_45C68A_8(&c->st, 0);
+    sym = edx_in & 0xFFU;
+    plane = b15 + (index << 9);
+    old_plane = 0;
+    if (d4f_u16(plane + sym * 2U) == 0U) {
+        total = d4f_u16(b14 + (index << 9));
+        for (i = 0; i < count; i++)
+            total -= d4f_u16(plane + excl[i] * 2U);
+        if ((total & 0xFFFFU) != 0U) {
+            unsigned int slot;
+            slot = d4f_u16(b17 + index * 2U);
+            den = slot + (total & 0xFFFFU);
+            quot = (slot << 14) / den;
+            price = D4V_TBL_PRICE_SUM_16(&c->st, (quot & 0xFFFFU) * 2U) & 0xFFFFU;
+            D4V_TBL_45AF74_32(&c->st, 0) += price;
+            old_plane = plane;
+        }
+        index = D4V_TBL_45AFA4_32(&c->st, 0);
+        plane = b15 + (index << 9);
+    }
+    total = d4f_u16(b14 + (index << 9));
+    if (index < 0x2FFU) {
+        total = (total + d4f_u16(b17 + index * 2U)) & 0xFFFFU;
+        for (i = 0; i < count; i++)
+            total -= d4f_u16(plane + excl[i] * 2U);
+    } else if (count == 0U) {
+        if (old_plane != 0)
+            total -= uha_sum16_where_nonzero((const uint16_t *)(const void *)old_plane,
+                                             (const uint16_t *)(const void *)plane);
+    } else if (old_plane == 0) {
+        for (i = 0; i < count; i++)
+            total -= d4f_u16(plane + excl[i] * 2U);
+    } else {
+        /* symbols taken: old[i] != 0, or i in the exclusion list (once) */
+        uint64_t seen[4] = {0, 0, 0, 0};
+        total -= uha_sum16_where_nonzero((const uint16_t *)(const void *)old_plane,
+                                         (const uint16_t *)(const void *)plane);
+        for (i = 0; i < count; i++) {
+            unsigned int k = excl[i];
+            uint64_t bit = (uint64_t)1 << (k & 63U);
+            if (seen[k >> 6] & bit)
+                continue;
+            seen[k >> 6] |= bit;
+            if (d4f_u16(old_plane + k * 2U) == 0U)
+                total -= d4f_u16(plane + k * 2U);
+        }
+    }
+    den = total & 0xFFFFU;
+    quot = (d4f_u16(plane + sym * 2U) << 14) / den;
+    price = D4V_TBL_PRICE_SUM_16(&c->st, (quot & 0xFFFFU) * 2U) & 0xFFFFU;
+    D4V_TBL_45AF74_32(&c->st, 0) += price;
+    D4V_CTX_B_45C68A_8(&c->st, 0) = (unsigned char)count;
+    return price;
+}
+
+static unsigned int d4vc_freq_divide_price_ref(dec4v_ctx *c, unsigned int eax_in, unsigned int edx_in)
 {
     unsigned int count;
     unsigned int index;
