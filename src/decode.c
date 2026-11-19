@@ -9,6 +9,7 @@
 #include "rle.h"
 #include "lz78.h"
 #include "uha04/uha04_codec.h"
+#include "uha02/uha02_codec.h"
 
 int uha_decode_payload(const uint8_t *raw, size_t rawlen,
                        const uha_header *h,
@@ -55,7 +56,10 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
     }
 
     rc = -3;
-    if (h->version == 4) {
+    if (h->version == 2) {
+        rc = uha02_decode_stream(h->order, raw + h->data_ofs, h->psize,
+                                 out, h->usize);
+    } else if (h->version == 4) {
         rc = uha04_decode_stream(h->order, h->family,
                                  raw + h->data_ofs, h->psize,
                                  ends, n, out, h->usize);
@@ -74,7 +78,21 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
         rc = uha_alz_decode(raw + h->data_ofs, h->psize, h->order, h->usize,
                             ends, n, out, h->usize);
 
-    if (rc == 0 && h->family != 0) {
+    if (rc == 0 && h->version == 2) {
+        if (h->order != 0) {
+            uint64_t ofs = 0;
+            if (n > 0) {
+                for (i = 0; i < n; i++) {
+                    uint32_t sz = entries->items[i].size;
+                    if (sz >= 1024)
+                        uha02_unfilter(out + ofs, sz);
+                    ofs += sz;
+                }
+            } else if (h->usize >= 1024) {
+                uha02_unfilter(out, h->usize);
+            }
+        }
+    } else if (rc == 0 && h->family != 0) {
         uint64_t ofs = 0;
         int ppm_swap = (h->version != 4
                         && h->order >= UHA_ORDER_PPM_MIN

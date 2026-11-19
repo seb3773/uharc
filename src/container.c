@@ -7,6 +7,7 @@
 #include "lzp.h"
 #include "crc32.h"
 #include "uha04/uha04_codec.h"
+#include "uha02/uha02_codec.h"
 
 static const uint8_t uha_init_sbox[256] = {
     0xc3,0xae,0x65,0x6b,0x78,0x47,0xf2,0x91,0xd6,0x50,0xcb,0x65,0x20,0xbd,0x75,0xbf,
@@ -82,24 +83,28 @@ int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
         size_t off;
         int found = 0;
         for (off = 0; off + UHA_HDR_LEN <= rawlen; off++) {
-            if (raw[off] == 'U' && raw[off + 1] == 'H' && raw[off + 2] == 'A' &&
-                (raw[off + 3] == 6 || raw[off + 3] == 4)) {
+            if (raw[off] == 'U' && raw[off + 1] == 'H' && raw[off + 2] == 'A') {
                 uint8_t cand_ver = raw[off + 3];
-                size_t hlen = (cand_ver == 4) ? UHA_HDR_LEN_V4 : UHA_HDR_LEN;
-                int enc_len = (cand_ver == 4) ? 36 : 31;
-                size_t chk_ofs = (cand_ver == 4) ? 42 : 37;
-                if (off + hlen <= rawlen) {
-                    uint8_t test_dec[UHA_HDR_LEN_V4];
-                    uint8_t test_seed = raw[off + chk_ofs];
-                    uint16_t test_chk = le16(raw + off + chk_ofs);
-                    int k;
-                    for (k = 0; k < enc_len; k++)
-                        test_dec[4 + k] = (uint8_t)(raw[off + 4 + k] ^ ((test_seed + (uint32_t)k * (uint32_t)k) & 0xFF));
-                    if (test_chk == (uint16_t)(uha_crc32(test_dec + 4, (size_t)enc_len) & 0xFFFFu)) {
-                        sfx_ofs = off;
-                        hdr = raw + off;
-                        found = 1;
-                        break;
+                if (cand_ver == 2) {
+                    if (uha02_parse_header(raw, rawlen, off, h) == 0)
+                        return 0;
+                } else if (cand_ver == 6 || cand_ver == 4) {
+                    size_t hlen = (cand_ver == 4) ? UHA_HDR_LEN_V4 : UHA_HDR_LEN;
+                    int enc_len = (cand_ver == 4) ? 36 : 31;
+                    size_t chk_ofs = (cand_ver == 4) ? 42 : 37;
+                    if (off + hlen <= rawlen) {
+                        uint8_t test_dec[UHA_HDR_LEN_V4];
+                        uint8_t test_seed = raw[off + chk_ofs];
+                        uint16_t test_chk = le16(raw + off + chk_ofs);
+                        int k;
+                        for (k = 0; k < enc_len; k++)
+                            test_dec[4 + k] = (uint8_t)(raw[off + 4 + k] ^ ((test_seed + (uint32_t)k * (uint32_t)k) & 0xFF));
+                        if (test_chk == (uint16_t)(uha_crc32(test_dec + 4, (size_t)enc_len) & 0xFFFFu)) {
+                            sfx_ofs = off;
+                            hdr = raw + off;
+                            found = 1;
+                            break;
+                        }
                     }
                 }
             }
@@ -109,6 +114,8 @@ int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
     } else {
         if (raw[0] != 'U' || raw[1] != 'H' || raw[2] != 'A')
             return -1;
+        if (raw[3] == 2)
+            return uha02_parse_header(raw, rawlen, 0, h);
         if (raw[3] != 6 && raw[3] != 4)
             return -1;
     }
@@ -204,6 +211,13 @@ const char *uha_codec_name(const uha_header *h)
 {
     if (!h)
         return "?";
+    if (h->version == 2) {
+        if (h->order == 0) return "STORE";
+        if (h->order == 1) return "RLE";
+        if (h->order >= 2 && h->order <= 7) return "LZ78";
+        if (h->order >= 8 && h->order <= 43) return "PPM/LZ";
+        return "UNKNOWN";
+    }
     if (h->order == UHA_ORDER_STORE)
         return "STORE";
     if (h->order == UHA_ORDER_RLE)
@@ -319,6 +333,8 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
     rc = uha_parse_header(raw, rawlen, &h);
     if (rc != 0)
         return rc;
+    if (h.version == 2)
+        return uha02_read_entries(raw, rawlen, &h, out);
     if (h.version == 4) {
         if ((uint64_t)h.attrs2_ofs + h.attrs2_packed > rawlen)
             return -2;

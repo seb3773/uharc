@@ -57,9 +57,9 @@ static void uha_msg(int min_level, const char *fmt, ...)
 
 static void print_banner(void)
 {
-    uha_msg(1, "\nUHARC 0.6b  -----   high compression multimedia archiver   -----   BETA version\n");
-    uha_msg(1, "Copyright (c) 1997-2005 by Uwe Herklotz     All rights reserved     01 Oct 2005\n");
-    uha_msg(1, "****  Freeware for non-commercial use  ****  contact: uwe.herklotz@gmx.de  ****\n\n");
+    uha_msg(1, "\nUHARC 0.6b  -----   high compression multimedia archiver   -----\n");
+    uha_msg(1, "(c) 1997-2005 by Uwe Herklotz / c-reimplementation by seb3773\n");
+    uha_msg(1, "****  https://github.com/seb3773/uharc\n\n");
 }
 
 static void print_usage(void)
@@ -798,7 +798,29 @@ static int run_selftest(void)
                 return 1;
             }
         }
-        printf("  [OK] Header parser & checksum self-test passed (v0.6 & v0.4)\n");
+        {
+            uint8_t dummy2[UHA_HDR_LEN_V2];
+            uint32_t chk2;
+            memset(dummy2, 0, sizeof(dummy2));
+            memcpy(dummy2, "UHA\x02", 4);
+            chk2 = uha_crc32(dummy2 + 4, 40);
+            for (k = 0; k < 40; k++)
+                dummy2[4 + k] ^= (uint8_t)(((chk2 & 0xFFu) + (uint32_t)k * (uint32_t)k) & 0xFFu);
+            dummy2[44] = (uint8_t)(chk2 & 0xFFu);
+            dummy2[45] = (uint8_t)((chk2 >> 8) & 0xFFu);
+            dummy2[46] = (uint8_t)((chk2 >> 16) & 0xFFu);
+            dummy2[47] = (uint8_t)((chk2 >> 24) & 0xFFu);
+            if (uha_parse_header(dummy2, sizeof(dummy2), &h) != 0 || h.version != 2) {
+                fprintf(stderr, "FAIL: uha_parse_header v0.2 test failed\n");
+                return 1;
+            }
+            dummy2[44] ^= 1;
+            if (uha_parse_header(dummy2, sizeof(dummy2), &h) == 0) {
+                fprintf(stderr, "FAIL: uha_parse_header accepted corrupted v0.2 crc32\n");
+                return 1;
+            }
+        }
+        printf("  [OK] Header parser & checksum self-test passed (v0.6, v0.4 & v0.2)\n");
     }
 
     /* EXE & Multimedia pre-filter roundtrip check */

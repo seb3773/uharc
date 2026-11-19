@@ -24,6 +24,14 @@ int  uharc_dec2l_decode(void *ctx,
                         unsigned long out_len);
 void uharc_dec2l_free(void *ctx);
 
+/* Core 3 (0.2, methods 8..43) */
+int  uharc_dec3t_init(void **pctx, int method);
+int  uharc_dec3t_decode(void *ctx,
+                        uharc_dec_read_cb rcb, void *rctx,
+                        uharc_dec_write_cb wcb, void *wctx,
+                        unsigned long out_len);
+void uharc_dec3t_free(void *ctx);
+
 /* Core 3 (LZP 0.4, methods 8..23) */
 int  uharc_dec3v_init(void **pctx, int method);
 int  uharc_dec3v_decode_b(void *ctx,

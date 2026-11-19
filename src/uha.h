@@ -18,6 +18,7 @@
 #define UHA_SIG_LEN      3
 #define UHA_HDR_LEN      39
 #define UHA_HDR_LEN_V4   44
+#define UHA_HDR_LEN_V2   48
 #define UHA_ORDER_STORE  0
 #define UHA_ORDER_RLE    1
 #define UHA_ORDER_LZ78_MIN 2
@@ -39,6 +40,7 @@ typedef struct {
     uint16_t w35;             /* dec[35..36]: low16(CRC32(attrs_plain[0..11*fc]))    (v4: crc2) */
     uint16_t w40;             /* v4 only: dec[40..41] low16(CRC32(tab3)) */
     uint16_t check16;         /* raw[37..38] (v4: raw[42..43]): header CRC16 */
+    uint32_t contents_crc;    /* v2 only: contents CRC across all 4 tables */
     uint32_t usize;           /* total unpacked size of all members */
     uint32_t psize;           /* packed size of the data stream */
     uint32_t file_count;      /* number of members */

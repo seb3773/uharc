@@ -4,7 +4,7 @@ Pure C99 standalone reimplementation of the legendary **UHARC 0.6b archiver** (1
 
 > **Reverse Engineering & Legal Notice:** This work was conducted strictly for the purposes of software interoperability and digital data preservation (under European Directive 2009/24/EC) to reconstruct the proprietary compression algorithms, container format, and transformations of an obsolete 32-bit DOS/Windows archiver.
 
-This repository provides a complete, self-contained C99 implementation (standard C library + `-lm`, zero external third-party dependencies) combining both **compressor** (`uharc a` / `uharc m`) and **decompressor** (`uharc x` / `uharc e`) into a single unified binary (`uharc`), designed for **bidirectional bit-exact compatibility** with the original historical Windows x86 binary (`UHARC.EXE` 0.6b), with **transparent read/list/test/extract support for legacy UHARC 0.4 archives (`UHA\x04`)**.
+This repository provides a complete, self-contained C99 implementation (standard C library + `-lm`, zero external third-party dependencies) combining both **compressor** (`uharc a` / `uharc m`) and **decompressor** (`uharc x` / `uharc e`) into a single unified binary (`uharc`), designed for **bidirectional bit-exact compatibility** with the original historical Windows x86 binary (`UHARC.EXE` 0.6b), with **transparent read/list/test/extract support for legacy UHARC 0.2 (`UHA\x02`) and 0.4 (`UHA\x04`) archives**.
 
 ---
 
@@ -80,9 +80,11 @@ In conclusion, I will not attempt to implement support for larger dictionaries: 
   - **Decompression**: 100% bit-exact extraction verified across all **89** primary reference archives plus **4** extended solid multi-file archives (`corpus/archives/extra/`).
   - **Mono-File Encoding**: **72 / 72** bit-identical archives (`arc[39..]`, 0 byte diffs) across all 12 reference corpus files and all 6 modes (`-m0`, `-mz`, `-mx`, `-m1`, `-m2`, `-m3`), plus `-md*`, `-mm-`, `-p-`, `-pr`, and `-pw`/`-ph+`.
   - **Multi-File Solid Encoding**: `0` payload byte diffs for Store (`-m0`), LZP (`-mz`), and PPM-II (`-mx`).
-- **Transparent Legacy UHARC 0.4 Decompression (`UHA\x04`)**:
-  - Automatically detects UHARC 0.4 archives (including SFX) during `l`, `v`, `t`, `x`, and `e` operations — no extra flags required.
+- **Transparent Legacy UHARC 0.2 & 0.4 Decompression (`UHA\x02` and `UHA\x04`)**:
+  - Automatically detects UHARC 0.2 and 0.4 archives (including SFX) during `l`, `v`, `t`, `x`, and `e` operations — no extra flags required.
+  - Supports all 0.2 compression methods (Store, RLE, LZ78, PPM/LZ methods 8..43) and executable filters, verified across **48 / 48 (100%)** UHARC 0.2 test archives.
   - Supports all 0.4 compression methods (Store, RLE, LZ78, LZP, PPM, ALZ), password-protected archives (`-pw`), and EXE/multimedia/fax post-filters, verified across **103 / 103** UHARC 0.4 test archives (and ASan/UBSan clean).
+  - High degree of code reuse with the modern engine (shared CRC-32 table/engine, shared RLE codec, shared LZ78 LSB bitstream engine, shared container entry reconstruction).
 - **Complete Feature Set**:
   - **All Compression Modes**: Store (`-m0`), ALZ Fast (`-m1`), ALZ Normal (`-m2`, default), ALZ Best (`-m3`), PPM-II (`-mx`), LZP (`-mz`), RLE (`-mr`), and LZ78 (`-mw`).
   - **Multimedia & Text Modeling**: Built-in ALZ in-stream adaptive side-channel prediction (`-mm+` / `-mm-`), PPM `detr` word transform and multimedia classes, plus x86 BCJ & LZP multimedia preprocessing transforms.
@@ -108,7 +110,8 @@ The engine is verified continuously via built-in self-tests and Python complianc
 | :--- | :--- | :---: | :--- |
 | **Built-In Self-Tests** | `./uharc --selftest` (CRC-32, v0.6 & v0.4 header parser, EXE/MM filter roundtrip, zip-slip check) | **4 / 4** | **PASS** |
 | **Reference Corpus Decompression** | `tests/test_all.py` across `corpus/archives/*.uha` (+ 4 `extra/*.uha`) | **89 / 89** (+4) | **100% MD5 PASS** |
-| **Legacy UHARC 0.4 Decompression** | Transparent `l`/`t`/`x` across all 0.4 codecs (Store, RLE, LZ78, LZP, PPM, ALZ, `-pw`, EXE/MM/FAX) | **103 / 103** | **100% PASS (ASan/UBSan clean)** |
+| **Legacy UHARC 0.4 Decompression** | `tests/test_04.py` across `corpus/archives_04/` (Store, RLE, LZ78, LZP, PPM, ALZ, `-pw`, EXE/MM/FAX) | **68 / 68** (103/103 full) | **100% PASS (ASan/UBSan clean)** |
+| **Legacy UHARC 0.2 Decompression** | `tests/test_02.py` across `corpus/archives_02/` (Store, RLE, LZ78, PPM/LZ 8..43, EXE unfilter) | **32 / 32** (48/48 full) | **100% PASS (Bit-Exact)** |
 | **Roundtrip Suite** | `tests/test_roundtrip.py` (4 files $\times$ 6 modes, also ASan/UBSan clean) | **24 / 24** | **100% MD5 PASS** |
 | **Mono-File Standard Parity** | `tests/test_parity.py`: 12 files (`empty.dat`..`zeros.bin`) $\times$ `-m0,-mz,-mx,-m1,-m2,-m3` | **72 / 72** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
 | **Dictionary Scaling** | `records.bin` with `-m3` across `-md16`, `-md256`, `-md1024`, `-md4096` | **4 / 4** | **100% Bit-Identical (`arc[39..]`, 0 diffs)** |
@@ -313,6 +316,7 @@ uharc/
 |   |-- lzp.c / lzp.h        # LZP predictive engine (-mz)
 |   |-- filter.c / filter.h  # Executable x86 BCJ, multimedia delta & fax filters
 |   |-- frontier.c / selclk.c # Multi-file frontier analysis and classification models
+|   |-- uha02/               # Legacy UHARC 0.2 decoder (PPM/LZ core 3) + C99 facade
 |   `-- uha04/               # Legacy UHARC 0.4 decoders (LZ78-LSB, LZP, PPM, ALZ) + C99 facade
 |-- bench/                   # Benchmarking, Callgrind, and bit-exactness verification tools
 |   |-- bench.py / dec_bench.py / dec_abpair.py  # A/B timing harnesses
@@ -320,12 +324,16 @@ uharc/
 |   `-- OPTIMIZATIONS.md / DECODER_OPTIMIZATIONS.md
 |-- corpus/
 |   |-- input/               # 12 original reference input files
-|   `-- archives/            # 89 reference archives (+ 4 solid -mx archives in extra/)
+|   |-- archives/            # 89 reference archives (UHARC 0.6b)
+|   |-- archives_02/         # 32 reference test archives (UHARC 0.2, all modes & filters)
+|   `-- archives_04/         # 68 reference test archives (UHARC 0.4, all modes & filters)
 |-- historical_bin/          # Original 1997-2005 Windows/DOS binaries by Uwe Herklotz
 |   |-- UHARC.EXE / UHARCD.EXE / UNUHARC.EXE / UNUHARCD.EXE / UHARCSFX.EXE
 |   `-- UHARC.DOC / LICENSE.DOC
 |-- tests/                   # Automated compliance test suite
-|   |-- test_all.py          # Decompress and MD5-verify all 89 reference archives
+|   |-- test_all.py          # Decompress and MD5-verify all 89 reference archives (0.6b)
+|   |-- test_02.py           # Integrity and extraction tests for UHARC 0.2 corpus
+|   |-- test_04.py           # Integrity and extraction tests for UHARC 0.4 corpus
 |   |-- test_roundtrip.py    # Multi-mode roundtrip compression test (24 cases)
 |   |-- test_parity.py       # Mono-file bit-exact encoder parity vs corpus (72 cases)
 |   `-- gen_input.py         # Ground-truth corpus input generator
@@ -338,6 +346,6 @@ uharc/
 
 - Original UHARC algorithms and concepts Copyright (c) 1997-2005 by **Uwe Herklotz**.
 - Reverse engineering and modern pure C99 reimplementation by **[seb3773](https://github.com/seb3773)**.
-- Special thanks to **[roytam1](https://github.com/roytam1)** for the excellent reverse-engineering work on **[unuharc_recon](https://github.com/roytam1/unuharc_recon)**, which served as the foundation for integrating legacy UHARC 0.4 archive decompression support.
+- Special thanks to **[roytam1](https://github.com/roytam1)** for the excellent reverse-engineering work on **[unuharc_recon](https://github.com/roytam1/unuharc_recon)**, which served as the foundation for integrating legacy UHARC 0.2 and 0.4 archive decompression support (with the 0.2 Core 3 decompressor integrated almost directly from unuharc_recon).
 - Distributed for educational, interoperability, and digital preservation purposes under the terms of the MIT License.
 
