@@ -5,6 +5,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
 
 int uha02_parse_header(const uint8_t *raw, size_t rawlen, size_t sfx_ofs, uha_header *h)
 {
@@ -383,9 +386,8 @@ int uha02_decode_stream(uint8_t method, const uint8_t *in, size_t in_len,
     } else if (method >= 8 && method <= 43) {
         rc = uharc_dec3t_init(&ctx, (int)method);
         if (rc == 0) {
-            rc = uharc_dec3t_decode(ctx, uha02_mem_read, &mr,
-                                    uha02_mem_write, &mw,
-                                    (unsigned long)out_len);
+            rc = uharc_dec3t_decode_mem(ctx, in, in_len, out, out_len);
+            mw.pos = out_len;
             uharc_dec3t_free(ctx);
         }
     } else {
@@ -411,7 +413,24 @@ void uha02_unfilter(uint8_t *b, size_t len)
     while (i < end) {
         int64_t v7, v9;
         int adv;
-        if (b[i] != 0xE8 && b[i] != 0xE9) { i++; continue; }
+        if (b[i] != 0xE8 && b[i] != 0xE9) {
+#if defined(__SSE2__)
+            /* skip to the next E8/E9 byte, 16 bytes at a time (i + 16 <= len
+             * because i < len - 15) */
+            const __m128i fe = _mm_set1_epi8((char)0xFE), e8 = _mm_set1_epi8((char)0xE8);
+            unsigned m;
+            i++;
+            while (i < end) {
+                m = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(
+                    _mm_and_si128(_mm_loadu_si128((const __m128i *)(b + i)), fe), e8));
+                if (m) { i += (int64_t)__builtin_ctz(m); break; }
+                i += 16;
+            }
+#else
+            i++;
+#endif
+            continue;
+        }
         v7 = (int64_t)((uint32_t)b[i + 1] | ((uint32_t)b[i + 2] << 8) |
                        ((uint32_t)b[i + 3] << 16) | ((uint32_t)b[i + 4] << 24));
         if (v7 >= 0x80000000LL) v7 -= 0x100000000LL;

@@ -99,10 +99,8 @@ int uha04_decode_stream(uint8_t method, uint8_t flags_filt,
     } else if (method >= 8 && method <= 23) {
         rc = uharc_dec3v_init(&ctx, (int)method);
         if (rc == 0) {
-            rc = uharc_dec3v_decode_b(ctx, cum, ncum,
-                                      uha04_mem_read, &mr,
-                                      uha04_mem_write, &mw,
-                                      (unsigned long)out_len);
+            rc = uharc_dec3v_decode_mem(ctx, cum, ncum, in, in_len, out, out_len);
+            mw.pos = out_len;
             uharc_dec3v_free(ctx);
         }
     } else if (method >= 24 && method <= 39) {

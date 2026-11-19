@@ -97,6 +97,11 @@ void uharc_dec3v_free(void *ctx);
 #endif
 
 #define D4_M32 0xFFFFFFFFUL
+#if defined(__GNUC__)
+#define D4_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define D4_UNLIKELY(x) (x)
+#endif
 #define D4_M16 0xFFFFUL
 
 #define D4_NCTX 330u   /* allocated contexts: 0..327 + order0 328,329 */
@@ -106,46 +111,40 @@ void uharc_dec3v_free(void *ctx);
 #define D4_NORD 65536u   /* 16-bit context slots */
 
 typedef struct dec3v_s {
-    /* callbacks / I/O */
-    uharc_dec_read_cb rcb;
-    void *rctx;
-    uharc_dec_write_cb wcb;
-    void *wctx;
-    unsigned char *inb;
-    unsigned in_pos;
-    unsigned in_avail;
-    unsigned in_cap;
-    unsigned char *outb;
-    unsigned out_fill;
-    unsigned out_cap;
-    unsigned long out_total;
-    unsigned long out_len;
+    /* in-memory I/O (the stream is decoded straight from / into the
+     * caller's buffers; bytes past out_len are counted, not stored) */
+    const unsigned char *ip;
+    const unsigned char *iend;
+    unsigned char *out;
+    uint32_t out_total;
+    uint32_t out_len;
     int err;
 
-    /* range coder (dword_45D0B8 code, dword_45D0BC range) */
-    unsigned long code;
-    unsigned long range;
+    /* range coder (dword_45D0B8 code, dword_45D0BC range), 32-bit */
+    uint32_t code;
+    uint32_t range;
 
     /* model */
-    unsigned long *htab;      /* 0x200000: 262144 x {u32 pos, u32 ctx} */
+    uint32_t *htab;           /* 0x200000: 262144 x {u32 pos, u32 ctx} */
     unsigned char *hval;      /* 0x40000: previous length per hash slot */
-    unsigned long *ord;       /* 0x40000: 65536 u32 last pos per 16-bit ctx */
+    uint32_t *ord;            /* 0x40000: 65536 u32 last pos per 16-bit ctx */
     unsigned char *dict;      /* dict_sz + 256 ring + mirror */
-    unsigned short *freq;     /* 330 x 256 Fenwick words (f[0] = total) */
+    unsigned short *gsum;     /* 330 x 16 group suffix sums (gsum[0] = total),
+                               * replaces the original 330 x 256 Fenwick words */
     unsigned short *raw;      /* 330 x 256 symbol counts */
     unsigned short *escw;     /* 328 escape weights */
     unsigned short litm[D4_NLITM][4];
     unsigned char state;      /* byte_45CF50: litm history, init 0 */
 
     /* decoder state */
-    unsigned long dict_sz;
-    unsigned long dict_mask;
-    unsigned long dict_pos;   /* 45CF48 */
-    unsigned long ctx;        /* 45CF30 */
+    uint32_t dict_sz;
+    uint32_t dict_mask;
+    uint32_t dict_pos;        /* 45CF48 */
+    uint32_t ctx;             /* 45CF30 */
     long excl;                /* 45CF34: dict index or -1 */
     long match_pos;           /* 45CF2C: dict index or -1 */
     unsigned long run_len;    /* 45CF40 */
-    unsigned long last_dist;  /* 45CF38 */
+    uint32_t last_dist;       /* 45CF38 */
     unsigned long thresh;     /* 45CF24: output size that allows a reset */
     const unsigned long *cum; /* container progress table (45CF14) */
     unsigned long ncum;       /* entries in cum[] (0 = no table) */
@@ -194,32 +193,21 @@ static unsigned d4_ord0(unsigned ci)
     return (ci >= 0x13Eu) ? 329u : 328u;
 }
 
-/* ---- I/O pump (sub_4220B0 / sub_4221F0) ---- */
-static int d4_get(dec3v *d)
+/* ---- I/O (sub_4220B0 / sub_4221F0), in memory ---- */
+static inline int d4_get(dec3v *d)
 {
-    int n;
     if (d->err) return 0;
-    if (d->in_pos >= d->in_avail) {
-        n = d->rcb(d->rctx, d->inb, d->in_cap);
-        if (n <= 0) {
-            d->err = 3;
-            return 0;
-        }
-        d->in_avail = (unsigned)n;
-        d->in_pos = 0;
+    if (d->ip >= d->iend) {
+        d->err = 3;
+        return 0;
     }
-    return d->inb[d->in_pos++];
+    return *d->ip++;
 }
 
-static void d4_emit(dec3v *d, unsigned b)
+static inline void d4_emit(dec3v *d, unsigned b)
 {
-    if (d->out_total < d->out_len) {
-        d->outb[d->out_fill++] = (unsigned char)b;
-        if (d->out_fill == d->out_cap) {
-            if (d->wcb(d->wctx, d->outb, d->out_fill) != 0) d->err = 4;
-            d->out_fill = 0;
-        }
-    }
+    if (d->out_total < d->out_len)
+        d->out[d->out_total] = (unsigned char)b;
     d->out_total++;
 }
 
@@ -228,9 +216,9 @@ static void d4_rc_init(dec3v *d)
 {
     int i;
     d->code = 0;
-    d->range = D4_M32;
+    d->range = 0xFFFFFFFFu;
     for (i = 0; i < 5; i++) {
-        d->code = ((d->code << 8) | (unsigned long)d4_get(d)) & D4_M32;
+        d->code = (d->code << 8) | (uint32_t)d4_get(d);
     }
 }
 
@@ -239,23 +227,23 @@ static void d4_rc_init(dec3v *d)
  *   range = (hi-lo)*range; code -= lo*range;
  *   while (range < 0x1000000) { code = code<<8 | getbyte; range <<= 8; }
  */
-static int d4_renorm(dec3v *d, unsigned long lo, unsigned long hi)
+static inline int d4_renorm(dec3v *d, uint32_t lo, uint32_t hi)
 {
-    unsigned long rng;
-    unsigned long code;
+    uint32_t rng;
+    uint32_t code;
     if (hi <= lo) {
         d->err = 7;
         return 0;
     }
-    rng = (d->range * ((hi - lo) & D4_M32)) & D4_M32;
-    code = (d->code - ((d->range * lo) & D4_M32)) & D4_M32;
+    rng = d->range * (hi - lo);
+    code = d->code - d->range * lo;
     if (rng == 0) {
         d->err = 7;
         return 0;
     }
-    while (rng < 0x1000000UL) {
-        code = ((code << 8) | (unsigned long)d4_get(d)) & D4_M32;
-        rng = (rng << 8) & D4_M32;
+    while (rng < 0x1000000u) {
+        code = (code << 8) | (uint32_t)d4_get(d);
+        rng <<= 8;
         if (d->err) return 0;
     }
     d->code = code;
@@ -267,20 +255,19 @@ static int d4_renorm(dec3v *d, unsigned long lo, unsigned long hi)
 static void d4_reset(dec3v *d)
 {
     unsigned i;
-    unsigned short *f328, *f329;
     unsigned short *r328, *r329;
-    memset(d->freq, 0, (size_t)D4_NREAL * 512u);
+    memset(d->gsum, 0, (size_t)D4_NREAL * 32u);
     memset(d->raw, 0, (size_t)D4_NREAL * 512u);
-    f328 = d->freq + 328u * 256u;
-    f329 = d->freq + 329u * 256u;
     r328 = d->raw + 328u * 256u;
     r329 = d->raw + 329u * 256u;
     for (i = 0; i < 256; i++) {
-        unsigned short v = (unsigned short)((i == 0) ? 256u : (i & (0u - i)));
-        f328[i] = (unsigned short)(v * 8u);
-        f329[i] = (unsigned short)(v * 8u);
         r328[i] = 8;
         r329[i] = 8;
+    }
+    /* order-0 models: the lowbit Fenwick template x 8 = 256 counts of 8 */
+    for (i = 0; i < 16; i++) {
+        d->gsum[328u * 16u + i] = (unsigned short)(8u * (256u - 16u * i));
+        d->gsum[329u * 16u + i] = (unsigned short)(8u * (256u - 16u * i));
     }
     for (i = 0; i < D4_NREAL; i++) d->escw[i] = 1;
     for (i = 0; i < D4_NLITM; i++) {
@@ -317,107 +304,180 @@ static void d4_progress(dec3v *d)
     }
 }
 
-/* ---- rescale one context (sub_423B70) ---- */
+/* ---- rescale one context (sub_423B70) ----
+ * raw[i] = (raw[i] + 1) >> 1 (the original dword trick), total = sum mod
+ * 2^16, then the cumulative structure is rebuilt (group suffix sums here,
+ * a Fenwick tree in the original: both give the same bounds). */
 static void d4_rescale(dec3v *d, unsigned ci)
 {
     unsigned short *raw = d->raw + ci * 256u;
-    unsigned short *fr = d->freq + ci * 256u;
-    unsigned long total = 0;
-    unsigned i;
-    unsigned k;
-    unsigned j;
+    unsigned short *gs = d->gsum + ci * 16u;
+    unsigned g, i;
+    uint32_t acc = 0;
+#if defined(__SSE2__)
+    const __m128i z = _mm_setzero_si128();
     for (i = 0; i < 256; i += 8) {
-        unsigned long d0 = (unsigned long)raw[i] | ((unsigned long)raw[i + 1] << 16);
-        unsigned long d1 = (unsigned long)raw[i + 2] | ((unsigned long)raw[i + 3] << 16);
-        unsigned long d2 = (unsigned long)raw[i + 4] | ((unsigned long)raw[i + 5] << 16);
-        unsigned long d3 = (unsigned long)raw[i + 6] | ((unsigned long)raw[i + 7] << 16);
-        unsigned long h0 = ((d0 + 0x10001UL) & 0xFFFEFFFEUL) >> 1;
-        unsigned long h1 = ((d1 + 0x10001UL) & 0xFFFEFFFEUL) >> 1;
-        unsigned long h2 = ((d2 + 0x10001UL) & 0xFFFEFFFEUL) >> 1;
-        unsigned long h3 = ((d3 + 0x10001UL) & 0xFFFEFFFEUL) >> 1;
-        raw[i]     = (unsigned short)(h0 & D4_M16);
-        raw[i + 1] = (unsigned short)((h0 >> 16) & D4_M16);
-        raw[i + 2] = (unsigned short)(h1 & D4_M16);
-        raw[i + 3] = (unsigned short)((h1 >> 16) & D4_M16);
-        raw[i + 4] = (unsigned short)(h2 & D4_M16);
-        raw[i + 5] = (unsigned short)((h2 >> 16) & D4_M16);
-        raw[i + 6] = (unsigned short)(h3 & D4_M16);
-        raw[i + 7] = (unsigned short)((h3 >> 16) & D4_M16);
-        total = (total + h0 + h1) & D4_M32;
-        total = (total + h2 + h3) & D4_M32;
+        __m128i x = _mm_loadu_si128((const __m128i *)(raw + i));
+        _mm_storeu_si128((__m128i *)(raw + i), _mm_avg_epu16(x, z));
     }
-    /* 1-based Fenwick fill: freq[i] = raw[i-1] for i=1..255 */
-    for (i = 1; i < 256; i++) fr[i] = raw[i - 1];
-    fr[0] = (unsigned short)(((total & D4_M16) + ((total >> 16) & D4_M16)) & D4_M16);
-    for (k = 1; k <= 64; k *= 2) {
-        j = 256 - 2 * k;
-        for (;;) {
-            fr[j] = (unsigned short)(fr[j] + fr[j - k]);
-            if (j == 2 * k) break;
-            j -= 2 * k;
-        }
+#else
+    for (i = 0; i < 256; i++) raw[i] = (unsigned short)((raw[i] + 1u) >> 1);
+#endif
+    for (g = 16; g-- > 0;) {
+        for (i = 0; i < 16; i++) acc += raw[16 * g + i];
+        gs[g] = (unsigned short)acc;
     }
     if (ci < D4_NREAL) d->escw[ci] = (unsigned short)((d->escw[ci] >> 2) + 1);
+}
+
+/* Add inc to raw[sym] and to the group sums covering it. */
+static inline void d4_add(unsigned short *r, unsigned short *gs, unsigned sym, unsigned inc)
+{
+#if defined(__SSE2__)
+    const __m128i idx0 = _mm_setr_epi16(0, 1, 2, 3, 4, 5, 6, 7);
+    const __m128i idx1 = _mm_setr_epi16(8, 9, 10, 11, 12, 13, 14, 15);
+    __m128i gg = _mm_set1_epi16((short)((sym >> 4) + 1));
+    __m128i iv = _mm_set1_epi16((short)inc);
+    __m128i g0 = _mm_loadu_si128((const __m128i *)gs);
+    __m128i g1 = _mm_loadu_si128((const __m128i *)(gs + 8));
+    g0 = _mm_add_epi16(g0, _mm_and_si128(_mm_cmplt_epi16(idx0, gg), iv));
+    g1 = _mm_add_epi16(g1, _mm_and_si128(_mm_cmplt_epi16(idx1, gg), iv));
+    _mm_storeu_si128((__m128i *)gs, g0);
+    _mm_storeu_si128((__m128i *)(gs + 8), g1);
+#else
+    unsigned g;
+    for (g = 0; g <= (sym >> 4); g++) gs[g] = (unsigned short)(gs[g] + inc);
+#endif
+    r[sym] = (unsigned short)(r[sym] + inc);
+}
+
+/*
+ * Symbol search of sub_423F50. The original walks the context's Fenwick
+ * tree top-down; symbol s owns [R(s+1), R(s)) of the (excluded) total,
+ * R(s) = sum of raw[t] for t >= s, t != eb. All values are exact (below
+ * 0x4000), R is non-increasing, so the decoded symbol is
+ *   max { p : scaled < R(p) } = #{ p in [1, 255] : scaled < R(p) }
+ * (the plateaus of absent symbols are skipped automatically) and the
+ * upper bound is R(sym). Requires scaled < R(0) (checked by the caller).
+ */
+static inline unsigned d4_search(const unsigned short *r, const unsigned short *gs,
+                                 uint32_t scaled, int eb, uint32_t *hi_out)
+{
+    unsigned g, j, sym;
+    uint32_t gv, t;
+    uint32_t re = eb >= 0 ? r[eb] : 0u;
+#if defined(__SSE2__)
+    const __m128i idx0 = _mm_setr_epi16(0, 1, 2, 3, 4, 5, 6, 7);
+    const __m128i idx1 = _mm_setr_epi16(8, 9, 10, 11, 12, 13, 14, 15);
+    __m128i vv = _mm_set1_epi16((short)(scaled < 0x7FFFu ? scaled : 0x7FFFu));
+    __m128i g0 = _mm_loadu_si128((const __m128i *)gs);
+    __m128i g1 = _mm_loadu_si128((const __m128i *)(gs + 8));
+    __m128i a, b, tt;
+    unsigned msk;
+    uint16_t pre[17];
+    if (eb >= 0) {
+        /* groups starting at or below eb contain it */
+        __m128i ge = _mm_set1_epi16((short)((eb >> 4) + 1));
+        __m128i rv = _mm_set1_epi16((short)re);
+        g0 = _mm_sub_epi16(g0, _mm_and_si128(_mm_cmplt_epi16(idx0, ge), rv));
+        g1 = _mm_sub_epi16(g1, _mm_and_si128(_mm_cmplt_epi16(idx1, ge), rv));
+    }
+    msk = (unsigned)_mm_movemask_epi8(
+        _mm_packs_epi16(_mm_cmpgt_epi16(g0, vv), _mm_cmpgt_epi16(g1, vv)));
+    g = (unsigned)__builtin_ctz(~msk);
+    g = g ? g - 1 : 0;
+    gv = gs[g] - ((eb >= 0 && (unsigned)eb >= 16u * g) ? re : 0u);
+    t = (gv > scaled) ? gv - scaled : 0;
+    a = _mm_loadu_si128((const __m128i *)(r + 16 * g));
+    b = _mm_loadu_si128((const __m128i *)(r + 16 * g + 8));
+    if (eb >= 0 && (unsigned)eb >> 4 == g) {
+        __m128i el = _mm_set1_epi16((short)(eb & 15));
+        a = _mm_andnot_si128(_mm_cmpeq_epi16(idx0, el), a);
+        b = _mm_andnot_si128(_mm_cmpeq_epi16(idx1, el), b);
+    }
+    a = _mm_add_epi16(a, _mm_slli_si128(a, 2));
+    b = _mm_add_epi16(b, _mm_slli_si128(b, 2));
+    a = _mm_add_epi16(a, _mm_slli_si128(a, 4));
+    b = _mm_add_epi16(b, _mm_slli_si128(b, 4));
+    a = _mm_add_epi16(a, _mm_slli_si128(a, 8));
+    b = _mm_add_epi16(b, _mm_slli_si128(b, 8));
+    b = _mm_add_epi16(b, _mm_unpackhi_epi64(_mm_shufflehi_epi16(a, 0xFF),
+                                            _mm_shufflehi_epi16(a, 0xFF)));
+    tt = _mm_set1_epi16((short)t);
+    msk = (unsigned)_mm_movemask_epi8(
+        _mm_packs_epi16(_mm_cmplt_epi16(a, tt), _mm_cmplt_epi16(b, tt)));
+    j = (unsigned)__builtin_ctz(~msk);
+    pre[0] = 0;
+    _mm_storeu_si128((__m128i *)(pre + 1), a);
+    _mm_storeu_si128((__m128i *)(pre + 9), b);
+    sym = 16 * g + j;
+    *hi_out = gv - pre[j];
+#else
+    uint32_t p;
+    for (g = 15; g > 0; g--) {
+        uint32_t x = gs[g] - ((eb >= 0 && (unsigned)eb >= 16u * g) ? re : 0u);
+        if (scaled < x) break;
+    }
+    gv = gs[g] - ((eb >= 0 && (unsigned)eb >= 16u * g) ? re : 0u);
+    t = (gv > scaled) ? gv - scaled : 0;
+    p = 0;
+    for (j = 0; j < 15; j++) {
+        unsigned sidx = 16 * g + j;
+        uint32_t np = p + ((int)sidx == eb ? 0u : r[sidx]);
+        if (!(np < t)) break;
+        p = np;
+    }
+    sym = 16 * g + j;
+    *hi_out = gv - p;
+#endif
+    return sym;
 }
 
 /* ---- update one symbol (sub_423CC0) ---- */
 static void d4_update(dec3v *d, unsigned ci, unsigned sym)
 {
     unsigned short *r = d->raw + ci * 256u;
-    unsigned short *f = d->freq + ci * 256u;
+    unsigned short *gs = d->gsum + ci * 16u;
     unsigned fb = d4_ord0(ci);
-    unsigned idx;
     unsigned t;
     if (r[sym] == 0) {
         unsigned short *r0 = d->raw + fb * 256u;
-        unsigned short *f0 = d->freq + fb * 256u;
+        unsigned short *g0 = d->gsum + fb * 16u;
         d->escw[ci] = (unsigned short)(d->escw[ci] + 32);
-        r0[sym] = (unsigned short)(r0[sym] + 16);
-        idx = (sym + 1) & 0xFFu;
-        while (idx) {
-            f0[idx] = (unsigned short)(f0[idx] + 16);
-            idx = (idx + (idx & (0u - idx))) & 0xFFu;
-        }
-        f0[0] = (unsigned short)(f0[0] + 16);
-        if (f0[0] >= 0x4000u) d4_rescale(d, fb);
+        d4_add(r0, g0, sym, 16);
+        if (g0[0] >= 0x4000u) d4_rescale(d, fb);
     }
-    r[sym] = (unsigned short)(r[sym] + 32);
-    idx = (sym + 1) & 0xFFu;
-    while (idx) {
-        f[idx] = (unsigned short)(f[idx] + 32);
-        idx = (idx + (idx & (0u - idx))) & 0xFFu;
-    }
-    f[0] = (unsigned short)(f[0] + 32);
-    t = (unsigned)d->escw[ci] + (unsigned)f[0];
+    d4_add(r, gs, sym, 32);
+    t = (unsigned)d->escw[ci] + (unsigned)gs[0];
     if (t >= 0x4000u) d4_rescale(d, ci);
 }
 
 /* ---- symbol decode with escape (sub_423F50) ---- */
 static unsigned d4_sym(dec3v *d, unsigned ci)
 {
-    unsigned short *f;
+    unsigned short *gs;
     unsigned short *r;
     unsigned short *f0;
     unsigned short *r0;
-    unsigned long scaled;
-    unsigned di, esc, total, rem, p, step, q, sym;
+    uint32_t scaled;
+    unsigned di, esc, total, sym;
     unsigned eb;
     int have_eb;
     unsigned fb;
 
-    f = d->freq + ci * 256u;
+    gs = d->gsum + ci * 16u;
     r = d->raw + ci * 256u;
     have_eb = (d->excl >= 0);
     eb = have_eb ? (unsigned)d->dict[d->excl] : 0u;
-    di = f[0];
+    di = gs[0];
     if (have_eb) di = (di - r[eb]) & D4_M16;
     fb = d4_ord0(ci);
     if (di == 0) {
         /* empty context: decode in the order-0 model, no escape weight */
         ci = fb;
-        f = d->freq + ci * 256u;
+        gs = d->gsum + ci * 16u;
         r = d->raw + ci * 256u;
-        di = f[0];
+        di = gs[0];
         if (have_eb) di = (di - r[eb]) & D4_M16;
         if (di == 0) {
             d->err = 7;
@@ -446,43 +506,17 @@ static unsigned d4_sym(dec3v *d, unsigned ci)
     if ((scaled & D4_M16) >= di) goto escape;
 
 search:
-    rem = (di - scaled) & D4_M16;
-    p = 0;
-    if (have_eb) {
-        unsigned re = r[eb];
-        int ebon = 1;
-        for (step = 0x80; step; step >>= 1) {
-            q = p + step;
-            if (ebon && q > eb) {
-                if ((unsigned long)f[q] < (unsigned long)re + (unsigned long)rem) {
-                    p = q;
-                    ebon = 0;
-                    rem = (rem - f[q] + re) & D4_M16;
-                }
-            } else {
-                if (rem > (unsigned)f[q]) {
-                    p = q;
-                    rem = (rem - f[q]) & D4_M16;
-                }
-            }
-        }
-    } else {
-        for (step = 0x80; step; step >>= 1) {
-            q = p + step;
-            if (rem > (unsigned)f[q]) {
-                p = q;
-                rem = (rem - f[q]) & D4_M16;
-            }
-        }
-    }
-    if (p > 255) {
-        d->err = 7;
-        return 0;
-    }
-    sym = p;
     {
-        unsigned hi = (unsigned)((scaled + rem) & D4_M16);
-        unsigned lo = (unsigned)((hi - r[sym]) & D4_M16);
+        uint32_t hi, lo;
+        scaled &= D4_M16;
+        if (D4_UNLIKELY(scaled > di)) {
+            /* corrupt stream (empty-context path only): the original
+             * walk runs to the last symbol with a wrapped remainder */
+            sym = 255;
+            hi = (have_eb && eb == 255u) ? 0u : r[255];
+        } else
+            sym = d4_search(r, gs, scaled, have_eb ? (int)eb : -1, &hi);
+        lo = (hi - r[sym]) & D4_M16;
         if (!d4_renorm(d, lo, hi)) return 0;
     }
     return sym;
@@ -494,7 +528,7 @@ escape:
         unsigned lo = di;
         if (!d4_renorm(d, lo, hi)) return 0;
     }
-    f0 = d->freq + fb * 256u;
+    f0 = d->gsum + fb * 16u;
     r0 = d->raw + fb * 256u;
     /* total0 = order-0 total minus every symbol already in this context */
     {
@@ -590,6 +624,22 @@ static unsigned d4_bit(dec3v *d, unsigned ai)
     return bit;
 }
 
+#if defined(__GNUC__)
+#define D4_PREFETCH(p) __builtin_prefetch((const void *)(p), 0, 3)
+#else
+#define D4_PREFETCH(p) ((void)(p))
+#endif
+
+/* Prefetch the match-model cells d4_match reads first for context nctx
+ * (hash slot, previous length, order slot). No architectural effect. */
+static inline void d4_prefetch_ctx(const dec3v *d, uint32_t nctx)
+{
+    uint32_t h = (nctx ^ (nctx >> 13)) & 0x3FFFFu;
+    D4_PREFETCH(d->htab + h * 2u);
+    D4_PREFETCH(d->hval + h);
+    D4_PREFETCH(d->ord + (nctx & 0xFFFFu));
+}
+
 /* ---- literal (sub_424400) ---- */
 static void d4_literal(dec3v *d)
 {
@@ -606,6 +656,7 @@ static void d4_literal(dec3v *d)
     else midx = lo8;
     b = d4_sym(d, midx);
     if (d->err) return;
+    d4_prefetch_ctx(d, (d->ctx << 8) + (uint32_t)b);
 #if U4_DEBUG
     fprintf(stderr, "T%lu LIT idx=%u b=%02X ctx=%08lX mpos=%ld\n",
                 d->out_total, midx, b, d->ctx, d->match_pos);
@@ -617,11 +668,11 @@ static void d4_literal(dec3v *d)
         d->excl = (long)(((unsigned long)d->match_pos + 1UL) & d->dict_mask);
     }
     d4_emit(d, b ^ 0xFFu);
-    d->ctx = ((d->ctx << 8) + (unsigned long)b) & D4_M32;
+    d->ctx = (d->ctx << 8) + (uint32_t)b;
     d->dict[d->dict_pos] = (unsigned char)b;
-    if (d->dict_pos < 0x100UL)
+    if (d->dict_pos < 0x100u)
         d->dict[d->dict_sz + d->dict_pos] = (unsigned char)b;
-    d->dict_pos = (d->dict_pos + 1UL) & d->dict_mask;
+    d->dict_pos = (d->dict_pos + 1u) & d->dict_mask;
 }
 
 /* ---- match/literal decision and match copy (sub_424530) ----
@@ -629,24 +680,24 @@ static void d4_literal(dec3v *d)
  */
 static int d4_match(dec3v *d)
 {
-    unsigned long h;
-    unsigned long *he;
-    unsigned long mpos;
-    unsigned long pos;
-    unsigned long dist;
+    uint32_t h;
+    uint32_t *he;
+    uint32_t mpos;
+    uint32_t pos;
+    uint32_t dist;
     unsigned al;
     unsigned idx;
     unsigned bit;
     unsigned ln;
     unsigned n;
     unsigned lctx;
-    unsigned long mcx, mdp, mmp;
+    uint32_t mcx, mdp, mmp;
 
     if (d->err) return 0;
     pos = d->dict_pos;
     h = (d->ctx ^ (d->ctx >> 13)) & 0x3FFFFUL;
-    he = d->htab + h * 2UL;
-    mpos = he[0] & D4_M32;
+    he = d->htab + h * 2u;
+    mpos = he[0];
     d->match_pos = -1;
     al = 0;
     if (d->run_len) {
@@ -655,23 +706,23 @@ static int d4_match(dec3v *d)
     }
     if (!al) {
         if (mpos == D4_M32 || d->ctx != he[1]) {
-            unsigned long mp = (pos - d->last_dist) & d->dict_mask;
+            uint32_t mp = (pos - d->last_dist) & d->dict_mask;
             mpos = mp;
             dist = (mp - pos) & d->dict_mask;
             if (dist >= 0x104UL) {
-                unsigned long mp4 = (mp - 4UL) & d->dict_mask;
-                unsigned long a0 = ((unsigned long)d->dict[mp4] << 24)
-                    | ((unsigned long)d->dict[mp4 + 1] << 16)
-                    | ((unsigned long)d->dict[mp4 + 2] << 8)
-                    | (unsigned long)d->dict[mp4 + 3];
-                unsigned long c = d->ctx;
+                uint32_t mp4 = (mp - 4u) & d->dict_mask;
+                uint32_t a0 = ((uint32_t)d->dict[mp4] << 24)
+                    | ((uint32_t)d->dict[mp4 + 1] << 16)
+                    | ((uint32_t)d->dict[mp4 + 2] << 8)
+                    | (uint32_t)d->dict[mp4 + 3];
+                uint32_t c = d->ctx;
                 if ((a0 & 0xFFFFUL) == (c & 0xFFFFUL)
                     || (a0 & 0xFFFF00FFUL) == (c & 0xFFFF00FFUL)
                     || (a0 & 0xFFFFFF00UL) == (c & 0xFFFFFF00UL))
                     al = 9;
             }
             if (!al) {
-                unsigned long o = d->ord[d->ctx & 0xFFFFUL] & D4_M32;
+                uint32_t o = d->ord[d->ctx & 0xFFFFu];
                 if (o != D4_M32) {
                     mpos = o;
                     al = 0x11u;
@@ -742,17 +793,33 @@ static int d4_match(dec3v *d)
         d->run_len++;
     }
     n = (ln == 0) ? 256u : ln;
+    {
+        /* context after the copy: the last (up to) 4 copied bytes */
+        uint32_t k, nc = d->ctx, m0 = mpos & d->dict_mask;
+        uint32_t st = n > 4u ? n - 4u : 0u;
+        for (k = st; k < n; k++)
+            nc = (nc << 8) + d->dict[(m0 + k) & d->dict_mask];
+        d4_prefetch_ctx(d, nc);
+    }
     mcx = d->ctx;
     mdp = d->dict_pos;
     mmp = mpos & d->dict_mask;
-    while (n--) {
-        unsigned b = (unsigned)d->dict[mmp];
-        d4_emit(d, b ^ 0xFFu);
-        mcx = ((mcx << 8) + (unsigned long)b) & D4_M32;
-        d->dict[mdp] = (unsigned char)b;
-        if (mdp < 0x100UL) d->dict[d->dict_sz + mdp] = (unsigned char)b;
-        mdp = (mdp + 1UL) & d->dict_mask;
-        mmp = (mmp + 1UL) & d->dict_mask;
+    {
+        unsigned char *dict = d->dict;
+        uint32_t dmask = d->dict_mask, dsz = d->dict_sz;
+        uint32_t ot = d->out_total, ol = d->out_len;
+        unsigned char *out = d->out;
+        while (n--) {
+            unsigned b = (unsigned)dict[mmp];
+            if (ot < ol) out[ot] = (unsigned char)(b ^ 0xFFu);
+            ot++;
+            mcx = (mcx << 8) + (uint32_t)b;
+            dict[mdp] = (unsigned char)b;
+            if (mdp < 0x100u) dict[dsz + mdp] = (unsigned char)b;
+            mdp = (mdp + 1u) & dmask;
+            mmp = (mmp + 1u) & dmask;
+        }
+        d->out_total = ot;
     }
     d->ctx = mcx;
     d->dict_pos = mdp;
@@ -772,23 +839,23 @@ int uharc_dec3v_init(void **pctx, int method)
     d = (dec3v *)malloc(sizeof(*d));
     if (!d) return 2;
     memset(d, 0, sizeof(*d));
-    d->htab = (unsigned long *)malloc((size_t)D4_NHASH * 2u * sizeof(unsigned long));
+    d->htab = (uint32_t *)malloc((size_t)D4_NHASH * 2u * sizeof(uint32_t));
     d->hval = (unsigned char *)malloc(0x40000UL);
-    d->ord = (unsigned long *)malloc((size_t)D4_NORD * sizeof(unsigned long));
+    d->ord = (uint32_t *)malloc((size_t)D4_NORD * sizeof(uint32_t));
     d->dict = (unsigned char *)calloc((size_t)(dictsz + 256UL), 1);
-    d->freq = (unsigned short *)malloc((size_t)D4_NCTX * 256u * sizeof(unsigned short));
+    d->gsum = (unsigned short *)malloc((size_t)D4_NCTX * 16u * sizeof(unsigned short));
     d->raw = (unsigned short *)malloc((size_t)D4_NCTX * 256u * sizeof(unsigned short));
     d->escw = (unsigned short *)malloc((size_t)D4_NREAL * sizeof(unsigned short));
     if (!d->htab || !d->hval || !d->ord || !d->dict ||
-        !d->freq || !d->raw || !d->escw) {
+        !d->gsum || !d->raw || !d->escw) {
         uharc_dec3v_free(d);
         return 2;
     }
-    memset(d->htab, 0xFF, (size_t)D4_NHASH * 2u * sizeof(unsigned long));
+    memset(d->htab, 0xFF, (size_t)D4_NHASH * 2u * sizeof(uint32_t));
     memset(d->hval, 0, 0x40000UL);
-    memset(d->ord, 0xFF, (size_t)D4_NORD * sizeof(unsigned long));
-    d->dict_sz = dictsz;
-    d->dict_mask = dictsz - 1UL;
+    memset(d->ord, 0xFF, (size_t)D4_NORD * sizeof(uint32_t));
+    d->dict_sz = (uint32_t)dictsz;
+    d->dict_mask = (uint32_t)(dictsz - 1UL);
     d->dict_pos = 0;
     d->ctx = 0;
     d->excl = -1;
@@ -809,42 +876,27 @@ void uharc_dec3v_free(void *ctx)
     free(d->hval);
     free(d->ord);
     free(d->dict);
-    free(d->freq);
+    free(d->gsum);
     free(d->raw);
     free(d->escw);
     free(d);
 }
 
-int uharc_dec3v_decode_b(void *ctx,
-                         const unsigned long *cum, unsigned long ncum,
-                         uharc_dec_read_cb rcb, void *rctx,
-                         uharc_dec_write_cb wcb, void *wctx,
-                         unsigned long out_len)
+/* In-memory decoder. On an error the output keeps only what the original
+ * callback writer had flushed (whole 64 KiB blocks), the rest is cleared. */
+int uharc_dec3v_decode_mem(void *ctx, const unsigned long *cum, unsigned long ncum,
+                           const unsigned char *in, size_t in_len,
+                           unsigned char *out, size_t out_len)
 {
     dec3v *d = (dec3v *)ctx;
     int err;
-    if (!d || !rcb || !wcb) return 1;
+    if (!d || (!in && in_len) || (!out && out_len)) return 1;
     if (out_len == 0) return 0;
-    d->inb = (unsigned char *)malloc(65536UL);
-    d->outb = (unsigned char *)malloc(65536UL);
-    if (!d->inb || !d->outb) {
-        free(d->inb);
-        free(d->outb);
-        d->inb = 0;
-        d->outb = 0;
-        return 2;
-    }
-    d->rcb = rcb;
-    d->rctx = rctx;
-    d->wcb = wcb;
-    d->wctx = wctx;
-    d->in_cap = 65536;
-    d->out_cap = 65536;
-    d->in_pos = 0;
-    d->in_avail = 0;
-    d->out_fill = 0;
+    d->ip = in;
+    d->iend = in + in_len;
+    d->out = out;
     d->out_total = 0;
-    d->out_len = out_len;
+    d->out_len = (uint32_t)out_len;
     d->err = 0;
     d4_reset(d);
     d->prog_idx = 0;
@@ -864,14 +916,55 @@ int uharc_dec3v_decode_b(void *ctx,
         if (!d->err) d4_progress(d);
     }
     err = d->err;
-    if (!err && d->out_fill) {
-        if (wcb(wctx, d->outb, d->out_fill) != 0) err = 4;
+    if (err) {
+        size_t done = d->out_total < d->out_len ? d->out_total : d->out_len;
+        size_t kept = done & ~(size_t)0xFFFF;
+        memset(out + kept, 0, done - kept);
     }
-    free(d->inb);
-    free(d->outb);
-    d->inb = 0;
-    d->outb = 0;
     return err;
+}
+
+/* Callback interface (kept for API compatibility). */
+int uharc_dec3v_decode_b(void *ctx,
+                         const unsigned long *cum, unsigned long ncum,
+                         uharc_dec_read_cb rcb, void *rctx,
+                         uharc_dec_write_cb wcb, void *wctx,
+                         unsigned long out_len)
+{
+    unsigned char *in = NULL, *out;
+    size_t in_len = 0, cap = 0, ofs = 0;
+    int rc;
+    if (!ctx || !rcb || !wcb) return 1;
+    if (out_len == 0) return 0;
+    for (;;) {
+        int n;
+        if (cap - in_len < 65536) {
+            size_t ncap = cap ? cap * 2 : (size_t)1 << 20;
+            unsigned char *p = (unsigned char *)realloc(in, ncap);
+            if (!p) { free(in); return 2; }
+            in = p;
+            cap = ncap;
+        }
+        n = rcb(rctx, in + in_len, 65536u);
+        if (n <= 0) break;
+        in_len += (size_t)n;
+    }
+    out = (unsigned char *)calloc(out_len, 1);
+    if (!out) { free(in); return 2; }
+    rc = uharc_dec3v_decode_mem(ctx, cum, ncum, in, in_len, out, out_len);
+    {
+        size_t done = ((dec3v *)ctx)->out_total;
+        if (done > out_len) done = out_len;
+        if (rc) done &= ~(size_t)0xFFFF;
+        while (ofs < done) {
+            unsigned n = (unsigned)((done - ofs) > 65536u ? 65536u : (done - ofs));
+            if (wcb(wctx, out + ofs, n) != 0) { if (!rc) rc = 4; break; }
+            ofs += n;
+        }
+    }
+    free(out);
+    free(in);
+    return rc;
 }
 
 int uharc_dec3v_decode(void *ctx,

@@ -8,6 +8,9 @@ Archive sets:
                       (bench/fetch_ext_corpus.sh)
   corpus/archives_04  legacy UHARC 0.4 reference archives (in the repository)
   corpus/archives_02  legacy UHARC 0.2 reference archives (in the repository)
+  bench/ext02_corpus  all 48 native UHARC 0.2 archives (UHARC02.EXE output,
+                      incl. the large EXE/MED multi-file sets), fetched by
+                      bench/fetch_ext_corpus.sh
 
 Groups are derived from the archive header (format version + codec order),
 e.g. "v6:ppm", "v6:alz2", "v4:lzp", so every codec of both decoders gets its
@@ -24,6 +27,7 @@ SETS = {
     "ext": ROOT / "bench" / "ext_corpus",
     "ref04": ROOT / "corpus" / "archives_04",
     "ref02": ROOT / "corpus" / "archives_02",
+    "ext02": ROOT / "bench" / "ext02_corpus",
 }
 GROUP_ORDER = ["store", "rle", "lz78", "lzp", "ppm", "alz1", "alz2", "alz3"]
 
@@ -54,7 +58,7 @@ def password(arc):
     return None
 
 
-def archives(sets=("dec", "legacy", "ext", "ref04", "ref02")):
+def archives(sets=("dec", "legacy", "ext", "ref04", "ref02", "ext02")):
     out = []
     for s in sets:
         d = SETS[s]

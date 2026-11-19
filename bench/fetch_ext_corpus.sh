@@ -4,6 +4,7 @@
 #     multimedia, dictionary sizes, passwords "secret") from
 #     https://github.com/roytam1/unuharc_recon (uharc-rs-04/arc)
 #   * D3X.UHA: a native UHARC 0.6 multi-file archive (method 34)
+#   * the 48 native UHARC 0.2 archives (uharc-rs-02/arc) -> bench/ext02_corpus
 # They are copied to bench/ext_corpus/ (ignored by Git). Every member carries
 # its CRC-32, so correctness is checked against the archive itself.
 #
@@ -21,4 +22,9 @@ for f in "$REPO"/uharc-rs-04/arc/*.uha; do
     cp "$f" "$OUT/v04_$(basename "$f")"
 done
 cp "$REPO/D3X.UHA" "$OUT/v06_D3X.uha"
+# Full native UHARC 0.2 set (UHARC02.EXE output, 48 archives, superset of
+# corpus/archives_02 with the large multi-file EXE/MED archives).
+OUT02="$(dirname "$OUT")/ext02_corpus"
+mkdir -p "$OUT02"
+cp "$REPO"/uharc-rs-02/arc/*.UHA "$OUT02/"
 echo "External corpus ready in $OUT ($(ls "$OUT" | grep -c '\.uha$') archives)"

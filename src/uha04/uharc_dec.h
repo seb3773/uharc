@@ -1,6 +1,8 @@
 #ifndef UHARC_DEC_H
 #define UHARC_DEC_H
 
+#include <stddef.h>
+
 #ifdef _MSC_VER
 #define UHI64 __int64
 #define U64LL(x) x##UI64
@@ -30,6 +32,9 @@ int  uharc_dec3t_decode(void *ctx,
                         uharc_dec_read_cb rcb, void *rctx,
                         uharc_dec_write_cb wcb, void *wctx,
                         unsigned long out_len);
+/* In-memory variant (no callbacks, output written in place). */
+int  uharc_dec3t_decode_mem(void *ctx, const unsigned char *in, size_t in_len,
+                            unsigned char *out, size_t out_len);
 void uharc_dec3t_free(void *ctx);
 
 /* Core 3 (LZP 0.4, methods 8..23) */
@@ -39,6 +44,9 @@ int  uharc_dec3v_decode_b(void *ctx,
                           uharc_dec_read_cb rcb, void *rctx,
                           uharc_dec_write_cb wcb, void *wctx,
                           unsigned long out_len);
+int  uharc_dec3v_decode_mem(void *ctx, const unsigned long *cum, unsigned long ncum,
+                            const unsigned char *in, size_t in_len,
+                            unsigned char *out, size_t out_len);
 void uharc_dec3v_free(void *ctx);
 
 /* Core 4 (PPM 0.4, methods 24..39) */
