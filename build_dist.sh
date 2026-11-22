@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-VERSION="0.6b.2"
-DEB_VERSION="0.6b.2"
+VERSION="0.6b.3"
+DEB_VERSION="0.6b.3"
 DIST_DIR="${SCRIPT_DIR}/dist"
 STAGE_DIR="${SCRIPT_DIR}/build/dist_stage"
 
