@@ -59,6 +59,29 @@ int  uharc_dec4vc_decode_b(void *ctx,
                            unsigned long out_len);
 void uharc_dec4vc_free(void *ctx);
 
+/* Core 3 (0.3 ALZ, methods 8..21) */
+int  uharc_dec3u_init(void **pctx, int method);
+int  uharc_dec3u_decode(void *ctx,
+                        uharc_dec_read_cb rcb, void *rctx,
+                        uharc_dec_write_cb wcb, void *wctx,
+                        unsigned long out_len);
+int  uharc_dec3u_decode_b(void *ctx,
+                          const unsigned long *cum, unsigned long ncum,
+                          uharc_dec_read_cb rcb, void *rctx,
+                          uharc_dec_write_cb wcb, void *wctx,
+                          unsigned long out_len);
+void uharc_dec3u_free(void *ctx);
+
+/* Core 4 (0.3 LZP/PPM, methods 22..35) */
+int  uharc_dec4uc_init(void **pctx, int method);
+void uharc_dec4uc_set_flags2(void *ctx, unsigned char flags2);
+int  uharc_dec4uc_decode_b(void *ctx,
+                           const unsigned long *cum, unsigned long ncum,
+                           uharc_dec_read_cb rcb, void *rctx,
+                           uharc_dec_write_cb wcb, void *wctx,
+                           unsigned long out_len);
+void uharc_dec4uc_free(void *ctx);
+
 /* Core 5 (ALZ 0.4, methods 40..87) */
 int  uharc_dec5v_init(void **pctx, int method);
 int  uharc_dec5v_decode_b(void *ctx,
@@ -67,6 +90,14 @@ int  uharc_dec5v_decode_b(void *ctx,
                           uharc_dec_write_cb wcb, void *wctx,
                           unsigned long out_len);
 void uharc_dec5v_free(void *ctx);
+
+/* Core 5 (0.3 PPM/RLE, methods 36..79) */
+int  uharc_dec5u_init(void **pctx, int method);
+int  uharc_dec5u_decode(void *ctx,
+                        uharc_dec_read_cb rcb, void *rctx,
+                        uharc_dec_write_cb wcb, void *wctx,
+                        unsigned long out_len);
+void uharc_dec5u_free(void *ctx);
 
 #endif /* UHARC_DEC_H */
 

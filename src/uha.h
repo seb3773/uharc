@@ -18,6 +18,7 @@
 #define UHA_SIG_LEN      3
 #define UHA_HDR_LEN      39
 #define UHA_HDR_LEN_V4   44
+#define UHA_HDR_LEN_V3   44
 #define UHA_HDR_LEN_V2   48
 #define UHA_ORDER_STORE  0
 #define UHA_ORDER_RLE    1
@@ -84,6 +85,9 @@ const char *uha_codec_name(const uha_header *h);
 
 /* CRC-32 helpers. */
 uint32_t uha_crc32(const uint8_t *buf, size_t len);
+
+/* Default S-box descramble for container tables (UHA 0.3/0.4/0.6). */
+void uha_descramble(uint8_t *buf, size_t n);
 
 /*
  * Decode the solid payload into `out` (must hold at least h->usize bytes).

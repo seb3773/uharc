@@ -21,6 +21,8 @@ bin/
 !corpus/archives/*.uha
 !corpus/archives_02/*.uha
 !corpus/archives_02/*.UHA
+!corpus/archives_03/*.uha
+!corpus/archives_03/*.UHA
 !corpus/archives_04/*.uha
 !corpus/archives_04/*.UHA
 

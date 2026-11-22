@@ -7,6 +7,7 @@
 #include "lzp.h"
 #include "crc32.h"
 #include "uha04/uha04_codec.h"
+#include "uha03/uha03_codec.h"
 #include "uha02/uha02_codec.h"
 
 static const uint8_t uha_init_sbox[256] = {
@@ -44,7 +45,7 @@ static uint32_t le32(const uint8_t *p)
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-static void descramble(uint8_t *buf, size_t n)
+void uha_descramble(uint8_t *buf, size_t n)
 {
     uint8_t S[256];
     int i, j;
@@ -64,6 +65,8 @@ static void descramble(uint8_t *buf, size_t n)
         S[j] = (uint8_t)(S[j] - b);
     }
 }
+
+#define descramble uha_descramble
 
 int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
 {
@@ -87,6 +90,9 @@ int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
                 uint8_t cand_ver = raw[off + 3];
                 if (cand_ver == 2) {
                     if (uha02_parse_header(raw, rawlen, off, h) == 0)
+                        return 0;
+                } else if (cand_ver == 3) {
+                    if (uha03_parse_header(raw, rawlen, off, h) == 0)
                         return 0;
                 } else if (cand_ver == 6 || cand_ver == 4) {
                     size_t hlen = (cand_ver == 4) ? UHA_HDR_LEN_V4 : UHA_HDR_LEN;
@@ -116,6 +122,8 @@ int uha_parse_header(const uint8_t *raw, size_t rawlen, uha_header *h)
             return -1;
         if (raw[3] == 2)
             return uha02_parse_header(raw, rawlen, 0, h);
+        if (raw[3] == 3)
+            return uha03_parse_header(raw, rawlen, 0, h);
         if (raw[3] != 6 && raw[3] != 4)
             return -1;
     }
@@ -216,6 +224,15 @@ const char *uha_codec_name(const uha_header *h)
         if (h->order == 1) return "RLE";
         if (h->order >= 2 && h->order <= 7) return "LZ78";
         if (h->order >= 8 && h->order <= 43) return "PPM/LZ";
+        return "UNKNOWN";
+    }
+    if (h->version == 3) {
+        if (h->order == 0 || h->order == 80) return "STORE";
+        if (h->order == 1) return "RLE";
+        if (h->order >= 2 && h->order <= 7) return "LZ78";
+        if (h->order >= 8 && h->order <= 21) return "ALZ";
+        if (h->order >= 22 && h->order <= 35) return "LZP/PPM";
+        if (h->order >= 36 && h->order <= 79) return "PPM/RLE";
         return "UNKNOWN";
     }
     if (h->order == UHA_ORDER_STORE)
@@ -335,6 +352,8 @@ int uha_read_entries(const uint8_t *raw, size_t rawlen, uha_entrylist *out)
         return rc;
     if (h.version == 2)
         return uha02_read_entries(raw, rawlen, &h, out);
+    if (h.version == 3)
+        return uha03_read_entries(raw, rawlen, &h, out);
     if (h.version == 4) {
         if ((uint64_t)h.attrs2_ofs + h.attrs2_packed > rawlen)
             return -2;

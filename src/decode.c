@@ -9,6 +9,7 @@
 #include "rle.h"
 #include "lz78.h"
 #include "uha04/uha04_codec.h"
+#include "uha03/uha03_codec.h"
 #include "uha02/uha02_codec.h"
 
 int uha_decode_payload(const uint8_t *raw, size_t rawlen,
@@ -59,6 +60,10 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
     if (h->version == 2) {
         rc = uha02_decode_stream(h->order, raw + h->data_ofs, h->psize,
                                  out, h->usize);
+    } else if (h->version == 3) {
+        rc = uha03_decode_stream(h->order, h->family,
+                                 raw + h->data_ofs, h->psize,
+                                 ends, n, out, h->usize);
     } else if (h->version == 4) {
         rc = uha04_decode_stream(h->order, h->family,
                                  raw + h->data_ofs, h->psize,
@@ -94,7 +99,7 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
         }
     } else if (rc == 0 && h->family != 0) {
         uint64_t ofs = 0;
-        int ppm_swap = (h->version != 4
+        int ppm_swap = (h->version != 4 && h->version != 3
                         && h->order >= UHA_ORDER_PPM_MIN
                         && h->order <= UHA_ORDER_PPM_MAX);
         if (n > 0) {
@@ -106,7 +111,7 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
                     int exe_matched = 0;
                     if (h->family & 0x01u)
                         exe_matched = uha_restore_filter(out + ofs, sz, ppm_swap);
-                    if ((h->family & 0x02u) && (h->version == 4 || !exe_matched))
+                    if ((h->family & 0x02u) && (h->version == 4 || h->version == 3 || !exe_matched))
                         uha_restore_multimedia(out + ofs, sz);
                 }
                 ofs += sz;
@@ -118,7 +123,7 @@ int uha_decode_payload(const uint8_t *raw, size_t rawlen,
                 int exe_matched = 0;
                 if (h->family & 0x01u)
                     exe_matched = uha_restore_filter(out, h->usize, ppm_swap);
-                if ((h->family & 0x02u) && (h->version == 4 || !exe_matched))
+                if ((h->family & 0x02u) && (h->version == 4 || h->version == 3 || !exe_matched))
                     uha_restore_multimedia(out, h->usize);
             }
         }

@@ -1,6 +1,6 @@
 CC ?= gcc
-CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fno-semantic-interposition -fmerge-all-constants -fvisibility=hidden -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections -fno-strict-aliasing -DNDEBUG -Isrc -Isrc/uha04 -Isrc/uha02
-WIN64_CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fmerge-all-constants -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fno-strict-aliasing -DNDEBUG -Isrc -Isrc/uha04 -Isrc/uha02
+CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fno-semantic-interposition -fmerge-all-constants -fvisibility=hidden -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections -fno-strict-aliasing -DNDEBUG -Isrc -Isrc/uha04 -Isrc/uha03 -Isrc/uha02
+WIN64_CFLAGS ?= -std=c99 -Wall -Wextra -O3 -flto=auto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -fno-trapping-math -fmerge-all-constants -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident -ffunction-sections -fno-strict-aliasing -DNDEBUG -Isrc -Isrc/uha04 -Isrc/uha03 -Isrc/uha02
 LDFLAGS ?= -flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -Wl,--as-needed -Wl,--exclude-libs,ALL -s -lm
 WIN64_LDFLAGS ?= -static -flto=auto -fuse-linker-plugin -Wl,--gc-sections -Wl,-O1 -Wl,--exclude-all-symbols -s -lm
 STRIP_LINUX ?= strip --strip-all
@@ -17,12 +17,13 @@ CROSS_WIN64_CC ?= x86_64-w64-mingw32-gcc
 PREFIX ?= /usr/local
 DESTDIR ?=
 
-SRC_FILES = $(wildcard src/*.c src/uha04/*.c src/uha02/*.c)
-SRC_HEADERS = $(wildcard src/*.h src/*.inc src/uha04/*.h src/uha02/*.h)
+SRC_FILES = $(wildcard src/*.c src/uha04/*.c src/uha03/*.c src/uha02/*.c)
+SRC_HEADERS = $(wildcard src/*.h src/*.inc src/uha04/*.h src/uha03/*.h src/uha02/*.h)
 
 # Cold CLI/container/helper translation units compiled with -Os (codecs stay at -O3)
 COLD_SRCS = src/uharc.c src/container.c src/wildcard.c src/crypto.c \
-            src/filter.c src/rle.c src/selclk.c src/frontier.c src/uha02/uha02_codec.c
+            src/filter.c src/rle.c src/selclk.c src/frontier.c \
+            src/uha03/uha03_codec.c src/uha02/uha02_codec.c
 HOT_SRCS  = $(filter-out $(COLD_SRCS),$(SRC_FILES))
 
 COLD_CFLAGS       = $(subst -O3,-Os,$(CFLAGS))
@@ -48,7 +49,7 @@ all: linux
 linux: $(TARGET_LINUX)
 	@ln -sf build/linux/uharc uharc
 
-asan: CFLAGS = -std=c99 -Wall -Wextra -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-strict-aliasing -Isrc -Isrc/uha04 -Isrc/uha02
+asan: CFLAGS = -std=c99 -Wall -Wextra -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-strict-aliasing -Isrc -Isrc/uha04 -Isrc/uha03 -Isrc/uha02
 asan: LDFLAGS = -fsanitize=address,undefined -lm
 asan: STRIP_LINUX = true
 asan: clean $(TARGET_LINUX)
@@ -112,6 +113,8 @@ test: $(TARGET_LINUX)
 	python3 tests/test_all.py ./$(TARGET_LINUX)
 	@echo "=== Running decompression test on UHARC 0.2 corpus ==="
 	python3 tests/test_02.py ./$(TARGET_LINUX)
+	@echo "=== Running decompression test on UHARC 0.3 corpus ==="
+	python3 tests/test_03.py ./$(TARGET_LINUX)
 	@echo "=== Running decompression test on UHARC 0.4 corpus ==="
 	python3 tests/test_04.py ./$(TARGET_LINUX)
 	@echo "=== Running round-trip compression test suite ==="
